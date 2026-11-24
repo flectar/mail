@@ -4339,19 +4339,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/i-slint-core/i-slint-core-1.19.0.crate",
-        "sha256": "9590458a3ba4ad8e66a6b572dbe758cc5d4f84f57e682a097358e4fe0f02b006",
-        "dest": "cargo/vendor/i-slint-core-1.19.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"9590458a3ba4ad8e66a6b572dbe758cc5d4f84f57e682a097358e4fe0f02b006\", \"files\": {}}",
-        "dest": "cargo/vendor/i-slint-core-1.19.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/i-slint-core-macros/i-slint-core-macros-1.19.0.crate",
         "sha256": "aeb9b5ef5c97fa81a39f276e6c15c6826b12ada401891501cc5b9ecf36f6f500",
         "dest": "cargo/vendor/i-slint-core-macros-1.19.0"

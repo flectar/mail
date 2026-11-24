@@ -1,0 +1,2068 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore coterminal
+use super::*;
+use crate::{
+    animations::simulations::{
+        Simulation,
+        spring::{SpringDurationBounceParameters, SpringParameters, SpringRegime},
+    },
+    items::{AngleInterpolation, AnimationDirection, PropertyAnimation},
+    lengths::LogicalLength,
+};
+use alloc::rc::Weak;
+use euclid::Length;
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
+
+enum AnimationState {
+    /// The animation will start after the delay is finished
+    Delaying,
+    /// Actual animation
+    Animating {
+        current_iteration: u64,
+    },
+    Done {
+        iteration_count: u64,
+    },
+}
+
+pub(super) struct PropertyPhysicsAnimationData<S> {
+    simulation: Weak<RefCell<S>>,
+    state: AnimationState,
+}
+
+impl<S> PropertyPhysicsAnimationData<S>
+where
+    S: Simulation,
+{
+    pub fn new(simulation: Weak<RefCell<S>>) -> PropertyPhysicsAnimationData<S> {
+        PropertyPhysicsAnimationData { simulation, state: AnimationState::Delaying }
+    }
+
+    /// Single iteration of the animation
+    pub fn update_value(&mut self, target: &mut crate::Coord) -> bool {
+        match self.state {
+            AnimationState::Delaying => {
+                // Decide on next state:
+                self.state = AnimationState::Animating { current_iteration: 0 };
+                self.update_value(target)
+            }
+            AnimationState::Animating { current_iteration: _ } => {
+                if let Some(simulation) = self.simulation.upgrade() {
+                    let mut value: f32 = *target as f32;
+                    let finished =
+                        simulation.borrow_mut().step(&mut value, crate::animations::current_tick());
+                    *target = value as crate::Coord;
+                    if finished {
+                        self.state = AnimationState::Done { iteration_count: 0 };
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    self.state = AnimationState::Done { iteration_count: 0 };
+                    true
+                }
+            }
+            AnimationState::Done { iteration_count: _ } => true,
+        }
+    }
+}
+
+pub(super) struct PropertyValueAnimationData<T> {
+    from_value: T,
+    to_value: Option<T>,
+    details: PropertyAnimation,
+    start_time: crate::animations::Instant,
+    state: AnimationState,
+    /// Applied to every interpolated value before it is stored. Lets a
+    /// type-erased property (the interpreter's `Property<Value>`) reproduce
+    /// the interpolation of the erased type, e.g. rounding for `int`.
+    map: Option<fn(T) -> T>,
+    spring: Option<SpringRegime>,
+    /// Whether the final iteration's spring has already been re-damped
+    spring_settle_clamped: bool,
+}
+
+impl<T: InterpolatedPropertyValue + Clone> PropertyValueAnimationData<T> {
+    pub fn new(from_value: T, to_value: Option<T>, details: PropertyAnimation) -> Self {
+        Self::new_with_velocity(from_value, to_value, details, 0.0)
+    }
+
+    /// Used to carry velocity over across a retarget.
+    pub fn new_with_velocity(
+        from_value: T,
+        to_value: Option<T>,
+        details: PropertyAnimation,
+        initial_velocity: f32,
+    ) -> Self {
+        let start_time = crate::animations::current_tick();
+        let spring = Self::compute_spring(&details, &from_value, &to_value, initial_velocity);
+        Self {
+            from_value,
+            to_value,
+            details,
+            start_time,
+            state: AnimationState::Delaying,
+            map: None,
+            spring,
+            spring_settle_clamped: false,
+        }
+    }
+
+    /// A spring with duration <= 0 (and no mass/stiffness/damping override) can't be simulated
+    fn compute_spring(
+        details: &PropertyAnimation,
+        from_value: &T,
+        to_value: &Option<T>,
+        initial_velocity: f32,
+    ) -> Option<SpringRegime> {
+        matches!(details.easing, crate::animations::EasingCurve::Spring(_))
+            .then(|| {
+                let crate::animations::EasingCurve::Spring(bounce) = details.easing else {
+                    return None;
+                };
+                let (w_n, zeta) = if details.duration > 0 {
+                    Some(
+                        SpringDurationBounceParameters::new(
+                            details.duration as f32 / 1000.0,
+                            bounce,
+                        )
+                        .to_natural_frequency_and_damping_ratio(),
+                    )
+                } else {
+                    None
+                }?;
+
+                // -1 so that the spring knows to go to 0; re-express the carried-over velocity
+                // (in property units/sec) in the spring's -1..=0-relative units.
+                let delta = to_value.as_ref().map_or(0.0, |tv| from_value.scalar_delta(tv));
+                let v0 = if delta != 0.0 { initial_velocity / delta } else { 0.0 };
+                Some(SpringRegime::new(-1.0, v0, w_n, zeta))
+            })
+            .flatten()
+    }
+
+    pub fn with_map(mut self, map: fn(T) -> T) -> Self {
+        self.map = Some(map);
+        self
+    }
+
+    fn apply_map(&self, value: T) -> T {
+        match self.map {
+            Some(map) => map(value),
+            None => value,
+        }
+    }
+
+    /// The current velocity (in property units per second) of a live spring animation
+    fn current_velocity(&self) -> Option<f32> {
+        if !matches!(self.state, AnimationState::Animating { .. }) {
+            return None;
+        }
+        let spring = self.spring.as_ref()?;
+        let elapsed_secs =
+            crate::animations::current_tick().duration_since(self.start_time).as_millis() as f32
+                / 1000.0;
+        let (_, rel_vel) = spring.evaluate(elapsed_secs);
+        let to_value = self.to_value.as_ref().expect("The animation should have a to_value");
+        Some(rel_vel * self.from_value.scalar_delta(to_value))
+    }
+
+    /// Single iteration of the animation
+    pub fn compute_interpolated_value(&mut self) -> (T, bool) {
+        // If animation is disabled, immediately return the target value
+        let to_value = self.to_value.clone().expect("The animation should have a to_value");
+        if !self.details.enabled {
+            return (self.apply_map(to_value), true);
+        }
+
+        let new_tick = crate::animations::current_tick();
+        let mut time_progress = new_tick.duration_since(self.start_time).as_millis() as u64;
+        let reversed = |iteration: u64| -> bool {
+            #[allow(clippy::manual_is_multiple_of)] // keep symmetry
+            match self.details.direction {
+                AnimationDirection::Normal => false,
+                AnimationDirection::Reverse => true,
+                AnimationDirection::Alternate => iteration % 2 == 1,
+                AnimationDirection::AlternateReverse => iteration % 2 == 0,
+            }
+        };
+
+        match self.state {
+            AnimationState::Delaying => {
+                if self.details.delay <= 0 {
+                    self.state = AnimationState::Animating { current_iteration: 0 };
+                    return self.compute_interpolated_value();
+                }
+
+                let delay = self.details.delay as u64;
+
+                if time_progress < delay {
+                    if reversed(0) {
+                        (self.apply_map(to_value), false)
+                    } else {
+                        (self.apply_map(self.from_value.clone()), false)
+                    }
+                } else {
+                    self.start_time =
+                        new_tick - core::time::Duration::from_millis(time_progress - delay);
+
+                    // Decide on next state:
+                    self.state = AnimationState::Animating { current_iteration: 0 };
+                    self.compute_interpolated_value()
+                }
+            }
+            AnimationState::Animating { current_iteration } => {
+                // A spring runs in real time and ends only once it settles.
+                if matches!(self.details.easing, crate::animations::EasingCurve::Spring(_)) {
+                    if self.details.iteration_count == 0. {
+                        self.state = AnimationState::Done { iteration_count: 0 };
+                        return self.compute_interpolated_value();
+                    }
+                    return if let Some(spring) = self.spring.as_ref() {
+                        let next_iteration = current_iteration + 1;
+                        let has_more_iterations = self.details.iteration_count < 0.
+                            || (next_iteration as f64) < self.details.iteration_count as f64;
+                        let duration_ms = self.details.duration as u64;
+
+                        if has_more_iterations && time_progress >= duration_ms {
+                            // Bounce into the next iteration at `duration` rather than waiting to
+                            // settle. Velocity always carries over; position only carries over on
+                            // a direction flip (e.g. `alternate`), to stay continuous instead of
+                            // snapping. Otherwise it resets to the start, like a repeating easing
+                            // curve.
+                            let duration_secs = duration_ms as f32 / 1000.0;
+                            let (rel_pos, rel_vel) = spring.evaluate(duration_secs);
+                            let crate::animations::EasingCurve::Spring(bounce) =
+                                self.details.easing
+                            else {
+                                unreachable!()
+                            };
+                            let (w_n, zeta) =
+                                SpringDurationBounceParameters::new(duration_secs, bounce)
+                                    .to_natural_frequency_and_damping_ratio();
+                            let x0 = if reversed(current_iteration) != reversed(next_iteration) {
+                                -(1.0 + rel_pos)
+                            } else {
+                                -1.0
+                            };
+                            self.spring = Some(SpringRegime::new(x0, rel_vel, w_n, zeta));
+                            self.start_time += core::time::Duration::from_millis(duration_ms);
+                            self.state =
+                                AnimationState::Animating { current_iteration: next_iteration };
+                            self.compute_interpolated_value()
+                        } else {
+                            let elapsed_secs = time_progress as f32 / 1000.0;
+                            let (t, settled) =
+                                crate::animations::spring_settle_progress(spring, elapsed_secs);
+                            if !settled
+                                && !self.spring_settle_clamped
+                                && time_progress >= duration_ms
+                            {
+                                // Hasn't settled by the end of `duration`: re-damp the tail (see
+                                // `spring_settle_within`) so it's guaranteed to settle within a
+                                // further 9 multiples of `duration`, carrying over position/velocity.
+                                self.spring_settle_clamped = true;
+                                let duration_secs = duration_ms as f32 / 1000.0;
+                                let w_n = 2.0 * core::f32::consts::PI / duration_secs;
+                                let settled_regime = crate::animations::spring_settle_within(
+                                    spring,
+                                    duration_secs,
+                                    w_n,
+                                );
+                                self.spring = Some(settled_regime);
+                                self.start_time += core::time::Duration::from_millis(duration_ms);
+                                return self.compute_interpolated_value();
+                            }
+                            if settled {
+                                self.state = if has_more_iterations {
+                                    self.start_time = new_tick;
+                                    AnimationState::Animating { current_iteration: next_iteration }
+                                } else {
+                                    AnimationState::Done { iteration_count: current_iteration }
+                                };
+                                self.compute_interpolated_value()
+                            } else {
+                                let progress = if reversed(current_iteration) { 1. - t } else { t };
+                                let val = self.from_value.interpolate_with_mode(
+                                    &to_value,
+                                    progress,
+                                    self.details.angle_interpolation,
+                                );
+                                (self.apply_map(val), false)
+                            }
+                        }
+                    } else {
+                        self.state = AnimationState::Done { iteration_count: 0 };
+                        self.compute_interpolated_value()
+                    };
+                }
+                let mut current_iteration = current_iteration;
+
+                if self.details.duration <= 0 || self.details.iteration_count == 0. {
+                    self.state = AnimationState::Done { iteration_count: 0 };
+                    return self.compute_interpolated_value();
+                }
+
+                let duration = self.details.duration as u64;
+                if time_progress >= duration {
+                    // wrap around
+                    current_iteration += time_progress / duration;
+                    time_progress %= duration;
+                    self.start_time = new_tick - core::time::Duration::from_millis(time_progress);
+                }
+
+                if (self.details.iteration_count < 0.)
+                    || (((current_iteration * duration) + time_progress) as f64)
+                        < ((self.details.iteration_count as f64) * (duration as f64))
+                {
+                    self.state = AnimationState::Animating { current_iteration };
+
+                    let progress = {
+                        let progress =
+                            (time_progress as f32 / self.details.duration as f32).clamp(0., 1.);
+                        if reversed(current_iteration) { 1. - progress } else { progress }
+                    };
+                    let t = crate::animations::easing_curve(&self.details.easing, progress);
+                    let val = self.from_value.interpolate_with_mode(
+                        &to_value,
+                        t,
+                        self.details.angle_interpolation,
+                    );
+
+                    (self.apply_map(val), false)
+                } else {
+                    self.state =
+                        AnimationState::Done { iteration_count: current_iteration.max(1) - 1 };
+                    self.compute_interpolated_value()
+                }
+            }
+            AnimationState::Done { iteration_count } => {
+                if reversed(iteration_count) {
+                    (self.apply_map(self.from_value.clone()), true)
+                } else {
+                    (self.apply_map(to_value), true)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub(super) enum AnimatedBindingState {
+    Animating,
+    NotAnimating,
+    ShouldStart,
+}
+
+#[pin_project::pin_project]
+pub(super) struct AnimatedBindingCallable<T, A> {
+    #[pin]
+    pub(super) original_binding: PropertyHandle,
+    pub(super) state: Cell<AnimatedBindingState>,
+    pub(super) animation_data: RefCell<PropertyValueAnimationData<T>>,
+    pub(super) compute_animation_details: A,
+    /// Tick captured by `mark_dirty`
+    pub(super) dirty_time: Cell<crate::animations::Instant>,
+    pub(crate) carried_velocity: Cell<f32>,
+}
+
+pub(super) type AnimationDetail = (PropertyAnimation, Option<crate::animations::Instant>);
+
+impl<T: InterpolatedPropertyValue + Clone, A: Fn() -> AnimationDetail> BindingCallable<T>
+    for AnimatedBindingCallable<T, A>
+{
+    fn evaluate(self: Pin<&Self>, value: &mut T) -> BindingResult {
+        let original_binding = self.project_ref().original_binding;
+        original_binding.register_as_dependency_to_current_binding(
+            #[cfg(slint_debug_property)]
+            "<AnimatedBindingCallable>",
+        );
+        match self.state.get() {
+            AnimatedBindingState::Animating => {
+                let (val, finished) = self.animation_data.borrow_mut().compute_interpolated_value();
+                *value = val;
+                if finished {
+                    self.state.set(AnimatedBindingState::NotAnimating)
+                } else {
+                    crate::animations::CURRENT_ANIMATION_DRIVER
+                        .with(|driver| driver.set_has_active_animations());
+                }
+            }
+            AnimatedBindingState::NotAnimating => {
+                // Safety: `value` is a valid mutable reference
+                unsafe { self.original_binding.update(value as *mut T) };
+            }
+            AnimatedBindingState::ShouldStart => {
+                let mut animation_data = self.animation_data.borrow_mut();
+
+                // Since `mark_dirty` fires when dependencies of `original_binding` changes
+                // if the change doesn't actually affect the computed value, it shouldn't restart
+                // the animation
+                let previous_to_value = animation_data.to_value.clone();
+                let mut new_to_value = T::default();
+                // Safety: `new_to_value` is a valid mutable reference matching the
+                // original binding's value type
+                unsafe { self.original_binding.update(&mut new_to_value as *mut T) };
+                animation_data.to_value = Some(new_to_value);
+
+                if animation_data.to_value != previous_to_value {
+                    animation_data.state = AnimationState::Delaying;
+                    // Anchor timing to when the change was first signalled
+                    animation_data.start_time = self.dirty_time.get();
+                    // animation_data.details.iteration_count = 1.;
+                    animation_data.from_value = value.clone();
+                    let (details, start_time) = (self.compute_animation_details)();
+                    if let Some(start_time) = start_time {
+                        animation_data.start_time = start_time;
+                    }
+                    animation_data.details = details;
+                    animation_data.spring = PropertyValueAnimationData::<T>::compute_spring(
+                        &animation_data.details,
+                        &animation_data.from_value,
+                        &animation_data.to_value,
+                        self.carried_velocity.get(),
+                    );
+                    animation_data.spring_settle_clamped = false;
+                }
+
+                self.state.set(AnimatedBindingState::Animating);
+                let (val, finished) = animation_data.compute_interpolated_value();
+                *value = val;
+                if finished {
+                    self.state.set(AnimatedBindingState::NotAnimating)
+                } else {
+                    crate::animations::CURRENT_ANIMATION_DRIVER
+                        .with(|driver| driver.set_has_active_animations());
+                }
+            }
+        };
+        BindingResult::KeepBinding
+    }
+    fn mark_dirty(self: Pin<&Self>) {
+        if self.state.get() == AnimatedBindingState::ShouldStart {
+            return;
+        }
+        let original_dirty = self.original_binding.access(|b| b.unwrap().dirty.get());
+        if original_dirty {
+            self.carried_velocity
+                .set(self.animation_data.borrow().current_velocity().unwrap_or(0.0));
+            self.state.set(AnimatedBindingState::ShouldStart);
+            self.dirty_time.set(crate::animations::current_tick());
+        }
+    }
+
+    fn velocity(self: Pin<&Self>) -> Option<f32> {
+        self.animation_data.borrow().current_velocity()
+    }
+}
+
+/// InterpolatedPropertyValue is a trait used to enable properties to be used with
+/// animations that interpolate values. The basic requirement is the ability to apply
+/// a progress that's typically between 0 and 1 to a range.
+pub trait InterpolatedPropertyValue: PartialEq + Default + 'static {
+    /// Returns the interpolated value between self and target_value according to the
+    /// progress parameter t that's usually between 0 and 1. With certain animation
+    /// easing curves it may over- or undershoot though.
+    #[must_use]
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self;
+
+    /// Returns `target_value - self` as a scalar.
+    /// Types with no natural single-scalar notion of velocity keep the default `0.0`
+    fn scalar_delta(&self, _target_value: &Self) -> f32 {
+        0.0
+    }
+
+    /// Returns the interpolated value with a specific interpolation mode.
+    /// This is particularly useful for angle values where the interpolation path matters.
+    /// The default implementation ignores the mode and uses linear interpolation.
+    #[must_use]
+    fn interpolate_with_mode(
+        &self,
+        target_value: &Self,
+        t: f32,
+        _mode: AngleInterpolation,
+    ) -> Self {
+        self.interpolate(target_value, t)
+    }
+}
+
+impl InterpolatedPropertyValue for f32 {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        self + t * (target_value - self)
+    }
+
+    fn scalar_delta(&self, target_value: &Self) -> f32 {
+        target_value - self
+    }
+
+    fn interpolate_with_mode(&self, target_value: &Self, t: f32, mode: AngleInterpolation) -> Self {
+        // f32::rem_euclid is not always available in no_std builds, and when it is it has a
+        // different signature than num_traits::Euclid::rem_euclid (issue #11333).
+        const FULL_ROTATION: f32 = 360.0;
+        const HALF_ROTATION: f32 = 180.0;
+
+        // Difference normalized to (-180, 180]; for an exact 180° opposite, the sign of the
+        // original delta is preserved so the traversal direction follows the user's input.
+        let shorter = || {
+            let raw = target_value - self;
+            let d = num_traits::Euclid::rem_euclid(&raw, &FULL_ROTATION);
+            if d > HALF_ROTATION || (d == HALF_ROTATION && raw < 0.0) {
+                d - FULL_ROTATION
+            } else {
+                d
+            }
+        };
+
+        let diff = match mode {
+            AngleInterpolation::Linear => return self.interpolate(target_value, t),
+            AngleInterpolation::Shorter => shorter(),
+            AngleInterpolation::Longer => {
+                let s = shorter();
+                if s > 0.0 {
+                    s - FULL_ROTATION
+                } else if s < 0.0 {
+                    s + FULL_ROTATION
+                } else {
+                    // shorter() returned 0: either target == self (no motion) or
+                    // the endpoints are coterminal (raw is a non-zero multiple of 360°).
+                    // For the coterminal case, take a full rotation in the direction
+                    // of the user-supplied delta.
+                    let raw = target_value - self;
+                    if raw > 0.0 {
+                        FULL_ROTATION
+                    } else if raw < 0.0 {
+                        -FULL_ROTATION
+                    } else {
+                        0.0
+                    }
+                }
+            }
+            AngleInterpolation::Increasing => {
+                let d = num_traits::Euclid::rem_euclid(&(target_value - self), &FULL_ROTATION);
+                if d == 0.0 && target_value != self { FULL_ROTATION } else { d }
+            }
+            AngleInterpolation::Decreasing => {
+                let d = num_traits::Euclid::rem_euclid(&(target_value - self), &FULL_ROTATION);
+                if d == 0.0 {
+                    // target == self: no motion; otherwise a full negative rotation
+                    if target_value == self { 0.0 } else { -FULL_ROTATION }
+                } else {
+                    d - FULL_ROTATION
+                }
+            }
+        };
+        // Keep the value inside a single turn so that the animation ends on a normalized
+        // angle (e.g. 350° → 10° with `Increasing` ends at 10°, not 370°).
+        num_traits::Euclid::rem_euclid(&(self + t * diff), &FULL_ROTATION)
+    }
+}
+
+impl InterpolatedPropertyValue for i32 {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        self + (t * (target_value - self) as f32).round() as i32
+    }
+
+    fn scalar_delta(&self, target_value: &Self) -> f32 {
+        (target_value - self) as f32
+    }
+}
+
+impl InterpolatedPropertyValue for i64 {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        self + (t * (target_value - self) as f32).round() as Self
+    }
+
+    fn scalar_delta(&self, target_value: &Self) -> f32 {
+        (target_value - self) as f32
+    }
+}
+
+impl InterpolatedPropertyValue for u8 {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        ((*self as f32) + (t * ((*target_value as f32) - (*self as f32)))).round().clamp(0., 255.)
+            as u8
+    }
+
+    fn scalar_delta(&self, target_value: &Self) -> f32 {
+        (*target_value as f32) - (*self as f32)
+    }
+}
+
+impl InterpolatedPropertyValue for LogicalLength {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        LogicalLength::new(self.get().interpolate(&target_value.get(), t))
+    }
+
+    fn scalar_delta(&self, target_value: &Self) -> f32 {
+        (target_value.get() - self.get()) as f32
+    }
+}
+
+/// Binding installed by `Property::set_animated_value`.
+/// A type so a retarget can report the current velocity
+struct AnimatedValueBinding<T> {
+    animation_data: RefCell<PropertyValueAnimationData<T>>,
+}
+
+impl<T: InterpolatedPropertyValue + Clone + 'static> BindingCallable<T>
+    for AnimatedValueBinding<T>
+{
+    fn evaluate(self: Pin<&Self>, value: &mut T) -> BindingResult {
+        let (val, finished) = self.animation_data.borrow_mut().compute_interpolated_value();
+        *value = val;
+        if finished {
+            BindingResult::RemoveBinding
+        } else {
+            crate::animations::CURRENT_ANIMATION_DRIVER
+                .with(|driver| driver.set_has_active_animations());
+            BindingResult::KeepBinding
+        }
+    }
+
+    fn velocity(self: Pin<&Self>) -> Option<f32> {
+        self.animation_data.borrow().current_velocity()
+    }
+}
+
+impl<T: Clone + InterpolatedPropertyValue + 'static> Property<T> {
+    /// Evaluate the property and remove the (animation) binding of this property.
+    ///
+    /// Note that a binding can intercept this via intercept_set_binding and still remain on the property.
+    /// (e.g. two-way-bindings will not be removed with this call!)
+    pub fn remove_binding(self: Pin<&Self>) {
+        // FIXME: This is a bit of a hack, set_animated_value will call set_binding on the internal handle,
+        // which will call intercept_set_binding, which will check if the binding should be removed or not.
+        // In the case of two-way bindings, we want to keep the binding, but reset the value to the current one,
+        // so that any animation binding is removed, but the two-way-binding is kept.
+        self.set_animated_value(self.get(), PropertyAnimation::default());
+    }
+
+    /// Change the value of this property, by animating (interpolating) from the current property's value
+    /// to the specified parameter value. The animation is done according to the parameters described by
+    /// the PropertyAnimation object.
+    ///
+    /// If other properties have binding depending of this property, these properties will
+    /// be marked as dirty.
+    pub fn set_animated_value(self: Pin<&Self>, value: T, animation_data: PropertyAnimation) {
+        self.set_animated_value_impl(value, animation_data, None)
+    }
+
+    /// Like [`Self::set_animated_value`], but passes every interpolated value through `map`
+    /// before storing it, so a type-erased property can reproduce the interpolation
+    /// of the erased type (e.g. rounding for `int` properties).
+    pub fn set_animated_value_with_map(
+        self: Pin<&Self>,
+        value: T,
+        animation_data: PropertyAnimation,
+        map: fn(T) -> T,
+    ) {
+        self.set_animated_value_impl(value, animation_data, Some(map))
+    }
+
+    fn set_animated_value_impl(
+        self: Pin<&Self>,
+        value: T,
+        animation_data: PropertyAnimation,
+        map: Option<fn(T) -> T>,
+    ) {
+        // Carry over the outgoing binding's velocity
+        let carried_velocity = self.handle.current_velocity().unwrap_or(0.0);
+        let mut d = properties_animations::PropertyValueAnimationData::new_with_velocity(
+            self.get(),
+            Some(value),
+            animation_data,
+            carried_velocity,
+        );
+        if let Some(map) = map {
+            d = d.with_map(map);
+        }
+        let binding =
+            properties_animations::AnimatedValueBinding { animation_data: RefCell::new(d) };
+        // Safety: the BindingCallable will cast its argument to T
+        unsafe {
+            self.handle.set_binding(
+                binding,
+                #[cfg(slint_debug_property)]
+                self.debug_name.borrow().as_str(),
+            );
+        }
+        self.handle.mark_dirty(
+            #[cfg(slint_debug_property)]
+            self.debug_name.borrow().as_str(),
+        );
+    }
+
+    /// Set a binding to this property, providing a callback for the animation and an optional
+    /// start_time (relevant for state transitions).
+    pub fn set_animated_binding(
+        &self,
+        binding: impl Binding<T> + 'static,
+        compute_animation_details: impl Fn() -> (PropertyAnimation, Option<crate::animations::Instant>)
+        + 'static,
+    ) {
+        self.set_animated_binding_impl(binding, compute_animation_details, None)
+    }
+
+    /// Like [`Self::set_animated_binding`], but passes every interpolated value through `map`
+    /// before storing it, so a type-erased property can reproduce the interpolation
+    /// of the erased type (e.g. rounding for `int` properties).
+    pub fn set_animated_binding_with_map(
+        &self,
+        binding: impl Binding<T> + 'static,
+        compute_animation_details: impl Fn() -> (PropertyAnimation, Option<crate::animations::Instant>)
+        + 'static,
+        map: fn(T) -> T,
+    ) {
+        self.set_animated_binding_impl(binding, compute_animation_details, Some(map))
+    }
+
+    fn set_animated_binding_impl(
+        &self,
+        binding: impl Binding<T> + 'static,
+        compute_animation_details: impl Fn() -> (PropertyAnimation, Option<crate::animations::Instant>)
+        + 'static,
+        map: Option<fn(T) -> T>,
+    ) {
+        let mut animation_data = properties_animations::PropertyValueAnimationData::new(
+            T::default(),
+            None,
+            PropertyAnimation::default(),
+        );
+        if let Some(map) = map {
+            animation_data = animation_data.with_map(map);
+        }
+        let binding_callable = properties_animations::AnimatedBindingCallable::<T, _> {
+            original_binding: PropertyHandle {
+                handle: Cell::new(
+                    (alloc_binding_holder(move |val: &mut T| {
+                        *val = binding.evaluate(val);
+                        BindingResult::KeepBinding
+                    }) as *mut ())
+                        .map_addr(|a| a | 0b10),
+                ),
+            },
+            state: Cell::new(properties_animations::AnimatedBindingState::NotAnimating),
+            animation_data: RefCell::new(animation_data),
+            compute_animation_details,
+            dirty_time: Cell::new(crate::animations::current_tick()),
+            carried_velocity: Cell::new(0.0),
+        };
+
+        // Safety: the `AnimatedBindingCallable`'s type match the property type
+        unsafe {
+            self.handle.set_binding(
+                binding_callable,
+                #[cfg(slint_debug_property)]
+                self.debug_name.borrow().as_str(),
+            )
+        };
+        self.handle.mark_dirty(
+            #[cfg(slint_debug_property)]
+            self.debug_name.borrow().as_str(),
+        );
+    }
+}
+
+impl<Unit, S: Simulation> BindingCallable<Length<crate::Coord, Unit>>
+    for RefCell<PropertyPhysicsAnimationData<S>>
+{
+    fn evaluate(self: Pin<&Self>, value: &mut Length<crate::Coord, Unit>) -> BindingResult {
+        let finished = self.borrow_mut().update_value(&mut value.0);
+        if finished {
+            BindingResult::RemoveBinding
+        } else {
+            crate::animations::CURRENT_ANIMATION_DRIVER
+                .with(|driver| driver.set_has_active_animations());
+            BindingResult::KeepBinding
+        }
+    }
+
+    // This binding should not be removed if the value is updated externally.
+    fn intercept_set(self: Pin<&Self>, _value: &Length<crate::Coord, Unit>) -> bool {
+        true
+    }
+}
+
+impl<Unit> Property<Length<crate::Coord, Unit>> {
+    /// Change the value by using a physics animation
+    pub fn set_physic_animation_value<S: Simulation + 'static>(
+        &self,
+        simulation: Weak<RefCell<S>>,
+    ) {
+        // Safety: the BindingCallable will cast its argument to T
+        unsafe {
+            self.handle.set_binding::<Length<crate::Coord, Unit>, core::cell::RefCell<PropertyPhysicsAnimationData<S>>>(RefCell::new(PropertyPhysicsAnimationData::new(
+                    simulation,
+                )),
+                #[cfg(slint_debug_property)]
+                self.debug_name.borrow().as_str()
+            );
+        }
+        self.handle.mark_dirty(
+            #[cfg(slint_debug_property)]
+            self.debug_name.borrow().as_str(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+    use pin_weak::rc::PinWeak;
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct Component {
+        width: Property<i32>,
+        width_times_two: Property<i32>,
+        feed_property: Property<i32>, // used by binding to feed values into width
+    }
+
+    impl Component {
+        fn new_test_component() -> Pin<Rc<Self>> {
+            let compo = Rc::pin(Component::default());
+            let w = PinWeak::downgrade(compo.clone());
+            compo.width_times_two.set_binding(move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.width) * 2
+            });
+
+            compo
+        }
+    }
+
+    const DURATION: std::time::Duration = std::time::Duration::from_millis(10000);
+    const DELAY: std::time::Duration = std::time::Duration::from_millis(800);
+
+    // Helper just for testing
+    fn get_prop_value<T: Clone>(prop: &Property<T>) -> T {
+        unsafe { Pin::new_unchecked(prop).get() }
+    }
+
+    // Helper just for testing: the property lives in a pinned `Rc<Component>`.
+    fn set_animated_value<T: Clone + InterpolatedPropertyValue + 'static>(
+        prop: &Property<T>,
+        value: T,
+        animation_data: PropertyAnimation,
+    ) {
+        unsafe { Pin::new_unchecked(prop) }.set_animated_value(value, animation_data);
+    }
+
+    #[test]
+    fn properties_test_animation_negative_delay_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: -25,
+            duration: DURATION.as_millis() as _,
+            iteration_count: 1.,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_animation_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            duration: DURATION.as_millis() as _,
+            iteration_count: 1.,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: 1.,
+            duration: DURATION.as_millis() as _,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_fractal_iteration_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: 1.5,
+            duration: DURATION.as_millis() as _,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // (fractal) end of animation
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 4));
+        assert_eq!(get_prop_value(&compo.width), 125);
+        assert_eq!(get_prop_value(&compo.width_times_two), 250);
+
+        // End of animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+    #[test]
+    fn properties_test_delayed_animation_null_duration_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: 1.0,
+            duration: 0,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // No animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_negative_duration_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: 1.0,
+            duration: -25,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // No animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_no_iteration_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: 0.0,
+            duration: DURATION.as_millis() as _,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // No animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_negative_iteration_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            iteration_count: -42., // loop forever!
+            duration: DURATION.as_millis() as _,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In animation (again):
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + 500 * DURATION));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + DELAY + 50000 * DURATION + DURATION / 2)
+        });
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        // the binding should not be removed as it is still animating!
+        compo.width.handle.access(|binding| assert!(binding.is_some()));
+    }
+
+    #[test]
+    fn properties_test_animation_direction_triggered_by_set() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            delay: -25,
+            duration: DURATION.as_millis() as _,
+            direction: AnimationDirection::AlternateReverse,
+            iteration_count: 1.,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // Overshoot: Always from_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn properties_test_animation_triggered_by_binding() {
+        let compo = Component::new_test_component();
+
+        let start_time = crate::animations::current_tick();
+
+        let animation_details = PropertyAnimation {
+            duration: DURATION.as_millis() as _,
+            iteration_count: 1.,
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.feed_property)
+            },
+            move || (animation_details.clone(), None),
+        );
+
+        compo.feed_property.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        compo.feed_property.set(200);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+    }
+
+    #[test]
+    fn properties_test_delayed_animation_triggered_by_binding() {
+        let compo = Component::new_test_component();
+
+        let start_time = crate::animations::current_tick();
+
+        let animation_details = PropertyAnimation {
+            delay: DELAY.as_millis() as _,
+            duration: DURATION.as_millis() as _,
+            iteration_count: 1.0,
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.feed_property)
+            },
+            move || (animation_details.clone(), None),
+        );
+
+        compo.feed_property.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        compo.feed_property.set(200);
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In delay:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY / 2));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        // In animation:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY));
+        assert_eq!(get_prop_value(&compo.width), 100);
+        assert_eq!(get_prop_value(&compo.width_times_two), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+        assert_eq!(get_prop_value(&compo.width_times_two), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+
+        // Overshoot: Always to_value.
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DELAY + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+        assert_eq!(get_prop_value(&compo.width_times_two), 400);
+    }
+
+    #[test]
+    fn properties_test_animation_triggered_by_binding_with_unrelated_dirty() {
+        // Reproduces the dependency not changing target bug: the binding driving the
+        // animated property (`row.1`) never changes, but an *unrelated* field of the
+        // same source value (`row.0`) is rewritten every frame, like a repeated item's
+        // model row being touched by `VecModel::set_row_data` every tick.
+        #[derive(Default)]
+        struct Component {
+            width: Property<i32>,
+            row: Property<(i32, bool)>,
+        }
+
+        let compo = Rc::pin(Component::default());
+
+        let animation_details = PropertyAnimation {
+            duration: DURATION.as_millis() as _,
+            iteration_count: 1.,
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                if get_prop_value(&compo.row).1 { 200 } else { 40 }
+            },
+            move || (animation_details.clone(), None),
+        );
+
+        compo.row.set((0, false));
+        assert_eq!(get_prop_value(&compo.width), 40);
+
+        let start_time = crate::animations::current_tick();
+
+        // Flip the field the animation depends on: this should kick off a 40 -> 200
+        // animation over DURATION.
+        compo.row.set((0, true));
+        assert_eq!(get_prop_value(&compo.width), 40);
+
+        // Simulate ~700 real frames (16ms each -- more than DURATION worth of real time
+        // in total)
+        let tick = core::time::Duration::from_millis(16);
+        for i in 1..=700u32 {
+            compo.row.set((i as i32, true));
+            crate::animations::CURRENT_ANIMATION_DRIVER
+                .with(|driver| driver.update_animations(start_time + tick * i));
+            // Poll every frame like a real renderer repainting
+            let _ = get_prop_value(&compo.width);
+        }
+
+        // After more than DURATION worth of real time has elapsed, the animation should
+        // have completed regardless of the unrelated per-frame writes to `row.0`.
+        assert_eq!(get_prop_value(&compo.width), 200);
+    }
+
+    #[test]
+    fn test_loop() {
+        let compo = Component::new_test_component();
+
+        let animation_details = PropertyAnimation {
+            duration: DURATION.as_millis() as _,
+            iteration_count: 2.,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(100);
+
+        let start_time = crate::animations::current_tick();
+
+        set_animated_value(&compo.width, 200, animation_details);
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+        assert_eq!(get_prop_value(&compo.width), 150);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION * 2));
+        assert_eq!(get_prop_value(&compo.width), 200);
+
+        // the binding should be removed
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn test_loop_via_binding() {
+        // Loop twice, restart the animation and still loop twice.
+
+        let compo = Component::new_test_component();
+
+        let start_time = crate::animations::current_tick();
+
+        let animation_details = PropertyAnimation {
+            duration: DURATION.as_millis() as _,
+            iteration_count: 2.,
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.feed_property)
+            },
+            move || (animation_details.clone(), None),
+        );
+
+        compo.feed_property.set(100);
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        compo.feed_property.set(200);
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 150);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 150);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + 2 * DURATION));
+
+        assert_eq!(get_prop_value(&compo.width), 200);
+
+        // Overshoot a bit:
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + 2 * DURATION + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 200);
+
+        // Restart the animation by setting a new value.
+
+        let start_time = crate::animations::current_tick();
+
+        compo.feed_property.set(300);
+        assert_eq!(get_prop_value(&compo.width), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 250);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION));
+
+        assert_eq!(get_prop_value(&compo.width), 200);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + DURATION + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 250);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + 2 * DURATION));
+
+        assert_eq!(get_prop_value(&compo.width), 300);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER
+            .with(|driver| driver.update_animations(start_time + 2 * DURATION + DURATION / 2));
+
+        assert_eq!(get_prop_value(&compo.width), 300);
+    }
+
+    #[test]
+    fn spring_retarget_carries_velocity() {
+        // A retarget mid-flight must carry the outgoing spring's velocity into the new one,
+        // instead of restarting it at rest (which would produce a visible "pop").
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 1000,
+            easing: crate::animations::EasingCurve::Spring(0.0),
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(0);
+        let start_time = crate::animations::current_tick();
+        set_animated_value(&compo.width, 1000, spring_details.clone());
+
+        // Let the spring run for a while so it picks up meaningful velocity.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(300))
+        });
+        let before_a = get_prop_value(&compo.width) as f32;
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(310))
+        });
+        let before_b = get_prop_value(&compo.width) as f32;
+        let slope_before = before_b - before_a; // units per 10ms, just prior to the retarget
+
+        // Retarget to a new value while the spring is still moving.
+        set_animated_value(&compo.width, 2000, spring_details);
+        assert_eq!(
+            get_prop_value(&compo.width) as f32,
+            before_b,
+            "retarget must not snap the value"
+        );
+
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(320))
+        });
+        let after = get_prop_value(&compo.width) as f32;
+        let slope_after = after - before_b; // units per 10ms, just after the retarget
+
+        // With velocity carried over, the slope right after the retarget should be close to the
+        // slope right before it (same order of magnitude, same direction). Without the fix, the
+        // new spring starts at rest (v0 == 0), so `slope_after` would be near zero here.
+        assert!(slope_before > 0.5, "sanity check: spring should be moving before retarget");
+        assert!(
+            slope_after > slope_before * 0.5,
+            "velocity was not carried over: slope_before={slope_before}, slope_after={slope_after}"
+        );
+    }
+
+    #[test]
+    fn spring_retarget_via_binding_carries_velocity() {
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 1000,
+            easing: crate::animations::EasingCurve::Spring(0.0),
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        let details = spring_details.clone();
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.feed_property)
+            },
+            move || (details.clone(), None),
+        );
+
+        // Establish the dependency and a baseline value (the very first read never animates).
+        compo.feed_property.set(0);
+        assert_eq!(get_prop_value(&compo.width), 0);
+
+        let start_time = crate::animations::current_tick();
+        compo.feed_property.set(1000);
+        assert_eq!(get_prop_value(&compo.width), 0);
+
+        // Let the spring run for a while so it picks up meaningful velocity.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(300))
+        });
+        let before_a = get_prop_value(&compo.width) as f32;
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(310))
+        });
+        let before_b = get_prop_value(&compo.width) as f32;
+        let slope_before = before_b - before_a; // units per 10ms, just prior to the retarget
+
+        // Retarget mid-flight by changing the value the animated binding reads.
+        compo.feed_property.set(2000);
+        assert_eq!(
+            get_prop_value(&compo.width) as f32,
+            before_b,
+            "retarget must not snap the value"
+        );
+
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(320))
+        });
+        let after = get_prop_value(&compo.width) as f32;
+        let slope_after = after - before_b; // units per 10ms, just after the retarget
+
+        assert!(slope_before > 0.5, "sanity check: spring should be moving before retarget");
+        assert!(
+            slope_after > slope_before * 0.5,
+            "velocity was not carried over through the binding-triggered retarget path: slope_before={slope_before}, slope_after={slope_after}"
+        );
+    }
+
+    #[test]
+    fn spring_continuous_retarget_keeps_advancing() {
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 1000,
+            easing: crate::animations::EasingCurve::Spring(0.7),
+            ..PropertyAnimation::default()
+        };
+
+        let w = PinWeak::downgrade(compo.clone());
+        let details = spring_details.clone();
+        compo.width.set_animated_binding(
+            move || {
+                let compo = w.upgrade().unwrap();
+                get_prop_value(&compo.feed_property)
+            },
+            move || (details.clone(), None),
+        );
+
+        compo.feed_property.set(0);
+        assert_eq!(get_prop_value(&compo.width), 0);
+
+        let start_time = crate::animations::current_tick();
+        let mut mouse_x = 0i32;
+        let mut final_width = 0f32;
+        for frame in 1..=200 {
+            mouse_x += 5; // simulate a steady mouse drag, 5px per frame
+            compo.feed_property.set(mouse_x);
+            let t = start_time + core::time::Duration::from_millis(frame * 16);
+            crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| driver.update_animations(t));
+            // Read the property every frame, like a renderer would when painting each frame --
+            // this is what actually drives `evaluate()` (property evaluation is lazy).
+            final_width = get_prop_value(&compo.width) as f32;
+        }
+
+        assert!(
+            final_width > 500.0,
+            "spring should have tracked the continuously-moving target by now, got {final_width}"
+        );
+    }
+
+    #[test]
+    fn spring_respects_reverse_direction() {
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 200,
+            easing: crate::animations::EasingCurve::Spring(0.0),
+            direction: AnimationDirection::Reverse,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(0);
+        let start_time = crate::animations::current_tick();
+        set_animated_value(&compo.width, 100, spring_details);
+
+        // Reverse: the animation starts at the target and settles back at the origin.
+        assert_eq!(get_prop_value(&compo.width), 100);
+
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(2000))
+        });
+        assert_eq!(get_prop_value(&compo.width), 0);
+
+        // the binding should be removed once settled
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn spring_respects_iteration_count_bounce() {
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 200,
+            easing: crate::animations::EasingCurve::Spring(0.0),
+            direction: AnimationDirection::Alternate,
+            iteration_count: 2.,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(0);
+        let start_time = crate::animations::current_tick();
+        set_animated_value(&compo.width, 100, spring_details);
+        assert_eq!(get_prop_value(&compo.width), 0);
+
+        // The first leg (forward) switches into the second (reversed) leg at exactly
+        // `duration`, carrying the spring's velocity into the bounce-back.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(200))
+        });
+        let mid = get_prop_value(&compo.width);
+        assert!(mid > 90, "expected the first leg to have reached the target, got {mid}");
+        compo.width.handle.access(|binding| assert!(binding.is_some()));
+
+        // Second leg settles back at the origin, and the binding is then removed.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(600))
+        });
+        assert_eq!(get_prop_value(&compo.width), 0);
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn spring_never_settling_on_its_own_settles_within_budget() {
+        // bounce: 1.0 is undamped -- on its own it oscillates forever. With a finite
+        // iteration-count (the default, here), it must still settle within
+        // 10 multiples of `duration` (see `spring_settle_within`).
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 200,
+            easing: crate::animations::EasingCurve::Spring(1.0),
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(0);
+        let start_time = crate::animations::current_tick();
+        set_animated_value(&compo.width, 100, spring_details);
+
+        // An undamped spring's period equals `duration`, so right at `duration` it's back near
+        // its start -- nowhere near settled, and still running at full, unclamped bounce.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(200))
+        });
+        assert!(get_prop_value(&compo.width) < 20, "should still be near the start at duration");
+        compo.width.handle.access(|binding| assert!(binding.is_some()));
+
+        // Comfortably within the settle budget (10x duration), it must have settled.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(2000))
+        });
+        assert_eq!(get_prop_value(&compo.width), 100);
+        compo.width.handle.access(|binding| assert!(binding.is_none()));
+    }
+
+    #[test]
+    fn spring_never_settling_stays_infinite_with_iteration_count_minus_one() {
+        // The same never-settling bounce, but with `iteration-count: -1`: it must keep
+        // oscillating indefinitely instead of ever being re-damped.
+        let compo = Component::new_test_component();
+
+        let spring_details = PropertyAnimation {
+            duration: 200,
+            easing: crate::animations::EasingCurve::Spring(1.0),
+            iteration_count: -1.,
+            direction: AnimationDirection::Alternate,
+            ..PropertyAnimation::default()
+        };
+
+        compo.width.set(0);
+        let start_time = crate::animations::current_tick();
+        set_animated_value(&compo.width, 100, spring_details);
+
+        // Well past what would be the settle budget for a finite iteration-count: still running.
+        crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
+            driver.update_animations(start_time + core::time::Duration::from_millis(3000))
+        });
+        compo.width.handle.access(|binding| assert!(binding.is_some()));
+    }
+
+    // Tests for AngleInterpolation modes (angle interpolation)
+    // Note: Slint stores angles in DEGREES (not radians)
+    mod interpolation_tests {
+        use super::*;
+
+        const EPSILON: f32 = 0.1; // 0.1 degree tolerance
+
+        fn approx_eq(a: f32, b: f32) -> bool {
+            (a - b).abs() < EPSILON
+        }
+
+        #[test]
+        fn test_linear_interpolation() {
+            // Linear interpolation: 10° to 350° should go through 180° (340° rotation)
+            let from = 10.0_f32;
+            let to = 350.0_f32;
+
+            let mid = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Linear);
+            let expected = 180.0_f32;
+            assert!(approx_eq(mid, expected), "Linear: expected {}°, got {}°", expected, mid);
+        }
+
+        #[test]
+        fn test_shorter_interpolation() {
+            // Shorter arc: 10° to 350° goes via the angle decreasing (20° total)
+            let from = 10.0_f32;
+            let to = 350.0_f32;
+
+            let mid = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Shorter);
+            assert!(approx_eq(mid, 0.0), "Shorter mid: expected 0°, got {}°", mid);
+
+            let end = from.interpolate_with_mode(&to, 1.0, AngleInterpolation::Shorter);
+            assert!(approx_eq(end, 350.0), "Shorter end: expected 350°, got {}°", end);
+        }
+
+        #[test]
+        fn test_longer_interpolation() {
+            // Longer arc: 10° to 100° normally takes 90° (shorter)
+            // Longer takes 270° in the decreasing direction
+            let from = 10.0_f32;
+            let to = 100.0_f32;
+
+            let mid = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Longer);
+            assert!(approx_eq(mid, 235.0), "Longer mid: expected 235°, got {}°", mid);
+        }
+
+        #[test]
+        fn test_increasing_interpolation() {
+            // Increasing: angle value always increases
+            // From 350° to 10°, goes 350° -> 0° -> 10° (20° total, wrapping at 360°)
+            let from = 350.0_f32;
+            let to = 10.0_f32;
+
+            let mid = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Increasing);
+            assert!(approx_eq(mid, 0.0), "Increasing mid: expected 0°, got {}°", mid);
+
+            let end = from.interpolate_with_mode(&to, 1.0, AngleInterpolation::Increasing);
+            assert!(approx_eq(end, 10.0), "Increasing end: expected 10°, got {}°", end);
+        }
+
+        #[test]
+        fn test_decreasing_interpolation() {
+            // Decreasing: angle value always decreases
+            // From 10° to 350°, goes 10° -> 0° -> 350° (20° total, wrapping at 0°)
+            let from = 10.0_f32;
+            let to = 350.0_f32;
+
+            let mid = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Decreasing);
+            assert!(approx_eq(mid, 0.0), "Decreasing mid: expected 0°, got {}°", mid);
+
+            let end = from.interpolate_with_mode(&to, 1.0, AngleInterpolation::Decreasing);
+            assert!(approx_eq(end, 350.0), "Decreasing end: expected 350°, got {}°", end);
+        }
+
+        #[test]
+        fn test_shorter_already_shortest() {
+            // When the linear path is already shortest, Shorter matches Linear
+            let from = 10.0_f32;
+            let to = 100.0_f32;
+
+            let mid_linear = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Linear);
+            let mid_shorter = from.interpolate_with_mode(&to, 0.5, AngleInterpolation::Shorter);
+
+            assert!(
+                approx_eq(mid_linear, mid_shorter),
+                "Shorter should equal Linear when path is already shortest: {}° vs {}°",
+                mid_linear,
+                mid_shorter
+            );
+        }
+
+        #[test]
+        fn test_shorter_180_tie_preserves_sign() {
+            // For an exact 180° opposite, the traversal direction follows the sign of
+            // the user-supplied delta: positive raw delta increases, negative decreases.
+
+            // 90° -> 270° (raw +180): value increases through 180° to 270°.
+            let mid = 90.0_f32.interpolate_with_mode(&270.0, 0.5, AngleInterpolation::Shorter);
+            assert!(approx_eq(mid, 180.0), "Shorter +180 tie mid: expected 180°, got {}°", mid);
+            let end = 90.0_f32.interpolate_with_mode(&270.0, 1.0, AngleInterpolation::Shorter);
+            assert!(approx_eq(end, 270.0), "Shorter +180 tie end: expected 270°, got {}°", end);
+
+            // 270° -> 90° (raw -180): value decreases through 180° to 90°.
+            // Mid lands on 180° but the underlying delta is -180, not +180.
+            let mid = 270.0_f32.interpolate_with_mode(&90.0, 0.5, AngleInterpolation::Shorter);
+            assert!(approx_eq(mid, 180.0), "Shorter -180 tie mid: expected 180°, got {}°", mid);
+            let end = 270.0_f32.interpolate_with_mode(&90.0, 1.0, AngleInterpolation::Shorter);
+            assert!(approx_eq(end, 90.0), "Shorter -180 tie end: expected 90°, got {}°", end);
+
+            // Longer takes the opposite arc, so for raw +180 it goes negative
+            // (90 + 0.5 * -180 = 0).
+            let mid = 90.0_f32.interpolate_with_mode(&270.0, 0.5, AngleInterpolation::Longer);
+            assert!(approx_eq(mid, 0.0), "Longer +180 tie mid: expected 0°, got {}°", mid);
+
+            // For raw -180 Longer goes positive (270 + 0.5 * 180 = 360, normalized to 0).
+            let mid = 270.0_f32.interpolate_with_mode(&90.0, 0.5, AngleInterpolation::Longer);
+            assert!(approx_eq(mid, 0.0), "Longer -180 tie mid: expected 0°, got {}°", mid);
+        }
+
+        #[test]
+        fn test_no_motion_when_target_equals_self() {
+            // When the target value equals the current value, every mode must stay put
+            // for the whole duration of the animation (no spurious full rotation).
+            // The angle-aware modes report the value normalized to a single turn.
+            for mode in [
+                AngleInterpolation::Linear,
+                AngleInterpolation::Shorter,
+                AngleInterpolation::Longer,
+                AngleInterpolation::Increasing,
+                AngleInterpolation::Decreasing,
+            ] {
+                for &v in &[0.0_f32, 100.0, -45.0] {
+                    let expected = if matches!(mode, AngleInterpolation::Linear) {
+                        v
+                    } else {
+                        num_traits::Euclid::rem_euclid(&v, &360.0)
+                    };
+                    let mid = v.interpolate_with_mode(&v, 0.5, mode);
+                    assert!(
+                        approx_eq(mid, expected),
+                        "{:?} from {}° to {}° at t=0.5: expected {}°, got {}°",
+                        mode,
+                        v,
+                        v,
+                        expected,
+                        mid
+                    );
+                    let end = v.interpolate_with_mode(&v, 1.0, mode);
+                    assert!(
+                        approx_eq(end, expected),
+                        "{:?} from {}° to {}° at t=1.0: expected {}°, got {}°",
+                        mode,
+                        v,
+                        v,
+                        expected,
+                        end
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_increasing_decreasing_full_rotation() {
+            // When `to - from` is a non-zero multiple of 360 (visually the same angle),
+            // Increasing/Decreasing should still rotate a full turn.
+            let mid_inc =
+                10.0_f32.interpolate_with_mode(&370.0, 0.5, AngleInterpolation::Increasing);
+            assert!(
+                approx_eq(mid_inc, 190.0),
+                "Increasing 10→370 mid: expected 190°, got {}°",
+                mid_inc
+            );
+
+            let mid_dec =
+                10.0_f32.interpolate_with_mode(&370.0, 0.5, AngleInterpolation::Decreasing);
+            assert!(
+                approx_eq(mid_dec, 190.0),
+                "Decreasing 10→370 mid: expected 190°, got {}°",
+                mid_dec
+            );
+        }
+
+        #[test]
+        fn test_longer_coterminal_full_rotation() {
+            // For coterminal endpoints (raw delta is a non-zero multiple of 360°), Longer
+            // takes a full rotation in the direction of the user-supplied delta. Shorter
+            // intentionally stays put because the endpoints are visually identical.
+            let mid_long = 10.0_f32.interpolate_with_mode(&370.0, 0.5, AngleInterpolation::Longer);
+            assert!(
+                approx_eq(mid_long, 190.0),
+                "Longer 10→370 mid: expected 190°, got {}°",
+                mid_long
+            );
+
+            let mid_long_neg =
+                10.0_f32.interpolate_with_mode(&-350.0, 0.5, AngleInterpolation::Longer);
+            assert!(
+                approx_eq(mid_long_neg, 190.0),
+                "Longer 10→-350 mid: expected 190°, got {}°",
+                mid_long_neg
+            );
+        }
+
+        #[test]
+        fn test_angle_modes_normalize_to_single_turn() {
+            // Every angle-aware mode keeps the interpolated value in [0°, 360°), so an
+            // animation never ends on a value like 370° or -10°. A negative start value
+            // is reported normalized from the first frame on (visually identical).
+            let start = (-45.0_f32).interpolate_with_mode(&45.0, 0.0, AngleInterpolation::Shorter);
+            assert!(approx_eq(start, 315.0), "Shorter -45→45 start: expected 315°, got {}°", start);
+            let mid = (-45.0_f32).interpolate_with_mode(&45.0, 0.5, AngleInterpolation::Shorter);
+            assert!(approx_eq(mid, 0.0), "Shorter -45→45 mid: expected 0°, got {}°", mid);
+            let end = (-45.0_f32).interpolate_with_mode(&45.0, 1.0, AngleInterpolation::Shorter);
+            assert!(approx_eq(end, 45.0), "Shorter -45→45 end: expected 45°, got {}°", end);
+
+            for mode in [
+                AngleInterpolation::Shorter,
+                AngleInterpolation::Longer,
+                AngleInterpolation::Increasing,
+                AngleInterpolation::Decreasing,
+            ] {
+                for (from, to) in
+                    [(350.0_f32, 10.0_f32), (10.0, 350.0), (10.0, 370.0), (-90.0, 90.0)]
+                {
+                    for step in 0..=10 {
+                        let v = from.interpolate_with_mode(&to, step as f32 / 10.0, mode);
+                        assert!(
+                            (0.0..360.0).contains(&v),
+                            "{:?} {}→{} at step {}: {}° is outside [0°, 360°)",
+                            mode,
+                            from,
+                            to,
+                            step,
+                            v
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

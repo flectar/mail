@@ -1,0 +1,3593 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore xffff unclipped subchildren subsubtree
+
+//! This module contains the ItemTree and code that helps navigating it
+
+use crate::SharedString;
+use crate::SlintContext;
+use crate::accessibility::{
+    AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
+};
+use crate::items::{AccessibleRole, ItemRef, ItemVTable, ScrollBehavior};
+use crate::layout::{LayoutInfo, Orientation};
+use crate::lengths::{ItemTransform, LogicalPoint, LogicalRect, LogicalVector};
+use crate::slice::Slice;
+use crate::window::WindowAdapterRc;
+use alloc::vec::Vec;
+use core::ops::ControlFlow;
+use core::pin::Pin;
+use vtable::*;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+/// A range of indices
+pub struct IndexRange {
+    /// Start index
+    pub start: usize,
+    /// Index one past the last index
+    pub end: usize,
+}
+
+impl From<core::ops::Range<usize>> for IndexRange {
+    fn from(r: core::ops::Range<usize>) -> Self {
+        Self { start: r.start, end: r.end }
+    }
+}
+impl From<IndexRange> for core::ops::Range<usize> {
+    fn from(r: IndexRange) -> Self {
+        Self { start: r.start, end: r.end }
+    }
+}
+
+/// A ItemTree is representing an unit that is allocated together
+#[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
+#[vtable]
+#[repr(C)]
+pub struct ItemTreeVTable {
+    /// Visit the children of the item at index `index`.
+    /// Note that the root item is at index 0, so passing 0 would visit the item under root (the children of root).
+    /// If you want to visit the root item, you need to pass -1 as an index.
+    pub visit_children_item: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        index: isize,
+        order: TraversalOrder,
+        visitor: VRefMut<ItemVisitorVTable>,
+    ) -> VisitChildrenResult,
+
+    /// Return a reference to an item using the given index
+    pub get_item_ref: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        index: u32,
+    ) -> ::core::pin::Pin<VRef<ItemVTable>>,
+
+    /// Return the range of indices below the dynamic `ItemTreeNode` at `index`
+    pub get_subtree_range:
+        extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, index: u32) -> IndexRange,
+
+    /// Return the `ItemTreeRc` at `subindex` below the dynamic `ItemTreeNode` at `index`
+    pub get_subtree: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        index: u32,
+        subindex: usize,
+        result: &mut vtable::VWeak<ItemTreeVTable, Dyn>,
+    ),
+
+    /// Return the item tree that is defined by this `ItemTree`.
+    pub get_item_tree: extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>) -> Slice<ItemTreeNode>,
+
+    /// Return the node this ItemTree is a part of in the parent ItemTree.
+    ///
+    /// The return value is an item weak because it can be null if there is no parent.
+    /// And the return value is passed by &mut because ItemWeak has a destructor
+    /// Note that the returned value will typically point to a repeater node, which is
+    /// strictly speaking not an Item at all!
+    ///
+    pub parent_node: extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, result: &mut ItemWeak),
+
+    /// This embeds this ItemTree into the item tree of another ItemTree
+    ///
+    /// Returns `true` if this ItemTree was embedded into the `parent`
+    /// at `parent_item_tree_index`.
+    pub embed_component: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        parent: &VWeak<ItemTreeVTable>,
+        parent_item_tree_index: u32,
+    ) -> bool,
+
+    /// Return the index of the current subtree or usize::MAX if this is not a subtree
+    pub subtree_index: extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>) -> usize,
+
+    /// Returns the layout info for the root of the ItemTree
+    pub layout_info:
+        extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, Orientation) -> LayoutInfo,
+
+    /// Recursively materialize every Repeater, Conditional, and
+    /// ComponentContainer reachable from this ItemTree. Called at event-loop
+    /// boundaries so init code runs outside any in-flight property evaluation.
+    /// This is the "repeater instantiation pass".
+    /// Returns `true` if any instance was created or removed.
+    pub ensure_instantiated: extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>) -> bool,
+
+    /// Returns the item's geometry (relative to its parent item)
+    pub item_geometry:
+        extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, item_index: u32) -> LogicalRect,
+
+    /// Returns the accessible role for a given item
+    pub accessible_role:
+        extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, item_index: u32) -> AccessibleRole,
+
+    /// Returns the accessible property via the `result`. Returns true if such a property exists.
+    pub accessible_string_property: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+        what: AccessibleStringProperty,
+        result: &mut SharedString,
+    ) -> bool,
+
+    /// Executes an accessibility action.
+    pub accessibility_action: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+        action: &AccessibilityAction,
+    ),
+
+    /// Returns the supported accessibility actions.
+    pub supported_accessibility_actions: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+    ) -> SupportedAccessibilityAction,
+
+    /// Add the `ElementName::id` entries of the given item
+    pub item_element_infos: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+        result: &mut SharedString,
+    ) -> bool,
+
+    /// Writes the names and types of the given item's testable properties into `result`,
+    /// one `name:type` pair per line.
+    /// Returns false when the item tree carries no testable-property debug info
+    /// (built without `SLINT_EMIT_DEBUG_INFO`).
+    /// An empty `result` with a true return means the item declares no `@testable` property.
+    pub element_testable_properties: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+        result: &mut SharedString,
+    ) -> bool,
+
+    /// Writes the current value of the given item's testable property `property_name`
+    /// (UTF-8 encoded) into `result`, in the encoding of [`crate::debug_info`].
+    /// Returns false when the property does not exist,
+    /// its value has no debug encoding,
+    /// or the item tree carries no testable-property debug info.
+    pub element_testable_property_value: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        item_index: u32,
+        property_name: Slice<u8>,
+        result: &mut SharedString,
+    ) -> bool,
+
+    /// Returns a Window, creating a fresh one if `do_create` is true.
+    pub window_adapter: extern "C" fn(
+        ::core::pin::Pin<VRef<ItemTreeVTable>>,
+        do_create: bool,
+        result: &mut Option<WindowAdapterRc>,
+    ),
+
+    /// Returns the context the item tree was created with, or leaves `result` empty when it
+    /// doesn't know it.
+    pub slint_context:
+        extern "C" fn(::core::pin::Pin<VRef<ItemTreeVTable>>, result: &mut Option<SlintContext>),
+
+    /// in-place destructor (for VRc)
+    pub drop_in_place: unsafe extern "C" fn(VRefMut<ItemTreeVTable>) -> vtable::Layout,
+
+    /// dealloc function (for VRc)
+    pub dealloc: unsafe extern "C" fn(&ItemTreeVTable, ptr: *mut u8, layout: vtable::Layout),
+}
+
+#[cfg(test)]
+pub(crate) use ItemTreeVTable_static;
+
+/// Alias for `vtable::VRef<ItemTreeVTable>` which represent a pointer to a `dyn ItemTree` with
+/// the associated vtable
+pub type ItemTreeRef<'a> = vtable::VRef<'a, ItemTreeVTable>;
+
+/// Type alias to the commonly used `Pin<VRef<ItemTreeVTable>>>`
+pub type ItemTreeRefPin<'a> = core::pin::Pin<ItemTreeRef<'a>>;
+
+/// Type alias to the commonly used VRc<ItemTreeVTable, Dyn>>
+pub type ItemTreeRc = vtable::VRc<ItemTreeVTable, Dyn>;
+/// Type alias to the commonly used VWeak<ItemTreeVTable, Dyn>>
+pub type ItemTreeWeak = vtable::VWeak<ItemTreeVTable, Dyn>;
+
+/// Ensure all repeaters and conditionals within the given item tree are
+/// instantiated. Call this before non-rendering tree walks that use
+/// `first_child` / `next_sibling`.
+/// Returns `true` if any instance was created or removed.
+pub fn ensure_item_tree_instantiated(item_tree: &vtable::VRc<ItemTreeVTable>) -> bool {
+    vtable::VRc::borrow_pin(item_tree).as_ref().ensure_instantiated()
+}
+
+/// Call init() on the ItemVTable for each item of the ItemTree.
+pub fn register_item_tree(item_tree_rc: &ItemTreeRc, window_adapter: Option<WindowAdapterRc>) {
+    let c = vtable::VRc::borrow_pin(item_tree_rc);
+    let item_tree = c.as_ref().get_item_tree();
+    item_tree.iter().enumerate().for_each(|(tree_index, node)| {
+        let tree_index = tree_index as u32;
+        if let ItemTreeNode::Item { .. } = &node {
+            let item = ItemRc::new(item_tree_rc.clone(), tree_index);
+            c.as_ref().get_item_ref(tree_index).as_ref().init(&item);
+        }
+    });
+    if let Some(adapter) = window_adapter.as_ref().and_then(|a| a.internal(crate::InternalToken)) {
+        adapter.register_item_tree(ItemTreeRc::borrow_pin(item_tree_rc));
+    }
+}
+
+/// Free the backend graphics resources allocated by the ItemTree's items.
+/// This will be called  if an sub-tree gets destroyed or a popup gets closed, ...
+/// It will be called only once not for every sub item
+///
+/// * `item_tree` - the item tree to unregister
+pub fn unregister_item_tree<Base>(
+    base: core::pin::Pin<&Base>,
+    item_tree: ItemTreeRef,
+    item_array: &[vtable::VOffset<Base, ItemVTable, vtable::AllowPin>],
+    window_adapter: &WindowAdapterRc,
+) {
+    // Only resolving the items via `apply_pin` needs `Base`; keep the rest in a non-generic
+    // helper so it isn't duplicated per component. Each consumer walks the items once.
+    fn unregister_item_tree_impl(
+        item_tree: ItemTreeRef,
+        items_to_deinit: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
+        items_to_free: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
+        items_to_unregister: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
+        window_adapter: &WindowAdapterRc,
+    ) {
+        items_to_deinit.for_each(|item| item.as_ref().deinit(window_adapter));
+        window_adapter.renderer().free_graphics_resources(item_tree, items_to_free).expect(
+            "Fatal error encountered when freeing graphics resources while destroying Slint component",
+        );
+
+        if let Some(w) = window_adapter.internal(crate::InternalToken) {
+            w.unregister_item_tree(item_tree, items_to_unregister);
+        }
+
+        // Close popups that were part of a component that just got deleted
+        let window_inner = crate::window::WindowInner::from_pub(window_adapter.window());
+        let to_close_popups = window_inner
+            .active_popups()
+            .iter()
+            .filter_map(|p| p.parent_item.upgrade().is_none().then_some(p.popup_id))
+            .collect::<Vec<_>>();
+        for popup_id in to_close_popups {
+            window_inner.close_popup(popup_id);
+        }
+    }
+
+    let items = || item_array.iter().map(|item| item.apply_pin(base));
+    unregister_item_tree_impl(item_tree, &mut items(), &mut items(), &mut items(), window_adapter)
+}
+
+fn find_sibling_outside_repeater(
+    component: &ItemTreeRc,
+    comp_ref_pin: Pin<VRef<ItemTreeVTable>>,
+    index: u32,
+    sibling_step: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+    subtree_child: &dyn Fn(usize, usize) -> usize,
+) -> Option<ItemRc> {
+    assert_ne!(index, 0);
+
+    let item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+    let mut current_sibling = index;
+    loop {
+        current_sibling = sibling_step(&item_tree, current_sibling)?;
+
+        if let Some(node) = step_into_node(
+            component,
+            &comp_ref_pin,
+            current_sibling,
+            &item_tree,
+            subtree_child,
+            &core::convert::identity,
+        ) {
+            return Some(node);
+        }
+    }
+}
+
+fn step_into_node(
+    component: &ItemTreeRc,
+    comp_ref_pin: &Pin<VRef<ItemTreeVTable>>,
+    node_index: u32,
+    item_tree: &crate::item_tree::ItemTreeNodeArray,
+    subtree_child: &dyn Fn(usize, usize) -> usize,
+    wrap_around: &dyn Fn(ItemRc) -> ItemRc,
+) -> Option<ItemRc> {
+    match item_tree.get(node_index).expect("Invalid index passed to item tree") {
+        crate::item_tree::ItemTreeNode::Item { .. } => {
+            Some(ItemRc::new(component.clone(), node_index))
+        }
+        crate::item_tree::ItemTreeNode::DynamicTree { index, .. } => {
+            let range = comp_ref_pin.as_ref().get_subtree_range(*index);
+            let component_index = subtree_child(range.start, range.end);
+            let mut child_instance = Default::default();
+            comp_ref_pin.as_ref().get_subtree(*index, component_index, &mut child_instance);
+            child_instance
+                .upgrade()
+                .map(|child_instance| wrap_around(ItemRc::new_root(child_instance)))
+        }
+    }
+}
+
+pub enum ParentItemTraversalMode {
+    FindAllParents,
+    StopAtPopups,
+}
+
+/// A ItemRc is holding a reference to a ItemTree containing the item, and the index of this item
+#[repr(C)]
+#[derive(Clone)]
+pub struct ItemRc {
+    item_tree: vtable::VRc<ItemTreeVTable>,
+    index: u32,
+}
+
+impl core::fmt::Debug for ItemRc {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut debug = SharedString::new();
+        comp_ref_pin.as_ref().item_element_infos(self.index, &mut debug);
+
+        write!(f, "ItemRc{{ {:p}, {:?} {debug}}}", comp_ref_pin.as_ptr(), self.index)
+    }
+}
+
+/// Returns true if a `clip` rectangle leaves some of `geometry` visible.
+/// An empty clip hides everything, and a rectangle that only touches its edge counts as visible.
+fn clip_overlaps(clip: LogicalRect, geometry: LogicalRect) -> bool {
+    let clip = clip.to_box2d();
+    let geometry = geometry.to_box2d();
+    !clip.is_empty()
+        && clip.max.x >= geometry.min.x
+        && clip.max.y >= geometry.min.y
+        && clip.min.x <= geometry.max.x
+        && clip.min.y <= geometry.max.y
+}
+
+impl ItemRc {
+    /// Create an ItemRc from a ItemTree and an index
+    pub fn new(item_tree: vtable::VRc<ItemTreeVTable>, index: u32) -> Self {
+        Self { item_tree, index }
+    }
+
+    pub fn new_root(item_tree: vtable::VRc<ItemTreeVTable>) -> Self {
+        Self { item_tree, index: Self::root_index() }
+    }
+
+    #[inline(always)]
+    pub const fn root_index() -> u32 {
+        0
+    }
+
+    #[inline(always)]
+    pub fn is_root(&self) -> bool {
+        self.index == Self::root_index()
+    }
+
+    /// Root within the self item tree and not considering dynamic items
+    pub fn is_root_item_of(&self, item_tree: &VRc<ItemTreeVTable>) -> bool {
+        self.is_root() && VRc::ptr_eq(&self.item_tree, item_tree)
+    }
+
+    /// Return a `Pin<ItemRef<'a>>`
+    pub fn borrow<'a>(&'a self) -> Pin<ItemRef<'a>> {
+        #![allow(unsafe_code)]
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let result = comp_ref_pin.as_ref().get_item_ref(self.index);
+        // Safety: we can expand the lifetime of the ItemRef because we know it lives for at least the
+        // lifetime of the ItemTree, which is 'a.  Pin::as_ref removes the lifetime, but we can just put it back.
+        unsafe { core::mem::transmute::<Pin<ItemRef<'_>>, Pin<ItemRef<'a>>>(result) }
+    }
+
+    /// Returns a `VRcMapped` of this item, to conveniently access specialized item API.
+    pub fn downcast<T: HasStaticVTable<ItemVTable>>(&self) -> Option<VRcMapped<ItemTreeVTable, T>> {
+        #![allow(unsafe_code)]
+        let item = self.borrow();
+        ItemRef::downcast_pin::<T>(item)?;
+
+        Some(vtable::VRc::map_dyn(self.item_tree.clone(), |comp_ref_pin| {
+            let result = comp_ref_pin.as_ref().get_item_ref(self.index);
+            // Safety: we can expand the lifetime of the ItemRef because we know it lives for at least the
+            // lifetime of the ItemTree, which is 'a.  Pin::as_ref removes the lifetime, but we can just put it back.
+            let item =
+                unsafe { core::mem::transmute::<Pin<ItemRef<'_>>, Pin<ItemRef<'_>>>(result) };
+            ItemRef::downcast_pin::<T>(item).unwrap()
+        }))
+    }
+
+    /// Identifies compiler-added wrappers that take over a source element's geometry.
+    /// Skip these wrappers when recovering the source element's parent coordinate system.
+    /// Ordinary clips sit inside their source rectangle and don't take over its geometry.
+    pub fn is_geometry_wrapper(&self) -> bool {
+        let item = self.borrow();
+        ItemRef::downcast_pin::<crate::items::Transform>(item).is_some()
+            || ItemRef::downcast_pin::<crate::items::Opacity>(item).is_some()
+            || ItemRef::downcast_pin::<crate::items::Layer>(item).is_some()
+            || ItemRef::downcast_pin::<crate::items::Clip>(item)
+                .is_some_and(|clip| clip.is_visibility_clip())
+    }
+
+    pub fn downgrade(&self) -> ItemWeak {
+        ItemWeak { item_tree: VRc::downgrade(&self.item_tree), index: self.index }
+    }
+
+    /// Return the parent Item in the item tree.
+    ///
+    /// If the item is the root on its Window or PopupWindow, then the parent is None.
+    pub fn parent_item(&self, find_mode: ParentItemTraversalMode) -> Option<ItemRc> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+        if let Some(parent_index) = item_tree.parent(self.index) {
+            return Some(ItemRc::new(self.item_tree.clone(), parent_index));
+        }
+
+        // It is a root item so check if it is a dynamic tree object like a repeater or if a window/popup
+        let mut r = ItemWeak::default();
+        comp_ref_pin.as_ref().parent_node(&mut r);
+        let parent = r.upgrade()?;
+        let comp_ref_pin = vtable::VRc::borrow_pin(&parent.item_tree);
+        let item_tree_array = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+        if let Some(ItemTreeNode::DynamicTree { parent_index, .. }) =
+            item_tree_array.get(parent.index())
+        {
+            // parent_node returns the repeater node, go up one more level!
+            Some(ItemRc::new(parent.item_tree.clone(), *parent_index))
+        } else {
+            // the Item was most likely a PopupWindow and we don't want to return the item for the purpose of this call
+            // (eg, focus/geometry/...)
+            match find_mode {
+                ParentItemTraversalMode::FindAllParents => Some(parent),
+                ParentItemTraversalMode::StopAtPopups => None,
+            }
+        }
+    }
+
+    /// Returns true if this item is visible from the root of the item tree. Note that this will return
+    /// false for `Clip` elements with the `clip` property evaluating to true.
+    pub fn is_visible(&self) -> bool {
+        let (clip, geometry) = self.absolute_clip_rect_and_geometry();
+        clip_overlaps(clip, geometry)
+    }
+
+    pub(crate) fn visibility_clips(&self) -> Vec<VWeakMapped<ItemTreeVTable, crate::items::Clip>> {
+        let mut visibility_clips = Vec::new();
+        let mut current = Some(self.clone());
+        while let Some(item) = current {
+            if let Some(clip) = item.downcast::<crate::items::Clip>()
+                && clip.as_pin_ref().is_visibility_clip()
+            {
+                visibility_clips.push(VRcMapped::downgrade(&clip));
+            }
+            current = item.parent_item(ParentItemTraversalMode::StopAtPopups);
+        }
+        visibility_clips
+    }
+
+    /// Returns true if this item is visible or only clipped away by a `Flickable`.
+    pub(crate) fn is_visible_or_clipped_by_flickable(&self) -> bool {
+        if self.is_visible() {
+            return true;
+        }
+
+        // Walk toward the root to the clipping ancestor that hides the item, and ask whether
+        // it's a Flickable, which scrolling can undo. An ancestor hides the item with its own
+        // rectangle, or with that rectangle intersected with the clips above it. The first
+        // reading is needed for a LineEdit: once the Flickable scrolled it away, its own clip
+        // intersected with the Flickable's is empty, and the walk would stop there. The
+        // second is needed for a Flickable taller than a clip around it. Every ancestor that
+        // hides the item by its own rectangle also hides it by the intersection, so the
+        // intersection only has to be asked until it first hides the item.
+        let geometry = self.absolute_clip_rect_and_geometry().1;
+        let mut hidden_by_intersection = false;
+        let mut parent = self.parent_item(ParentItemTraversalMode::StopAtPopups);
+        while let Some(ancestor) = parent {
+            if ancestor.borrow().as_ref().clips_children() {
+                let (clip, ancestor_geo) = ancestor.absolute_clip_rect_and_geometry();
+                let hidden_by_own_rect = !clip_overlaps(ancestor_geo, geometry);
+                if hidden_by_own_rect
+                    || (!hidden_by_intersection
+                        && !clip_overlaps(
+                            ancestor_geo.intersection(&clip).unwrap_or_default(),
+                            geometry,
+                        ))
+                {
+                    if ancestor.downcast::<crate::items::Flickable>().is_some()
+                        && ancestor.is_visible_or_clipped_by_flickable()
+                    {
+                        return true;
+                    }
+                    if hidden_by_own_rect {
+                        return false;
+                    }
+                    hidden_by_intersection = true;
+                }
+            }
+            parent = ancestor.parent_item(ParentItemTraversalMode::StopAtPopups);
+        }
+
+        false
+    }
+
+    /// Returns the accumulated transform from this item's local coordinate space to window
+    /// coordinates, walking up the ancestor chain until `stop_condition` returns true.
+    ///
+    /// At each ancestor the ancestor's `children_transform` (scale/rotate) is composed first,
+    /// then its translation. This matches the traversal order used by
+    /// [`map_to_item_tree_impl`](Self::map_to_item_tree_impl) and the partial renderer's
+    /// `current_transform()`.
+    fn local_to_window_transform(&self, stop_condition: impl Fn(&Self) -> bool) -> ItemTransform {
+        let supports_transformations = self
+            .window_adapter()
+            .is_none_or(|adapter| adapter.renderer().supports_transformations());
+        let mut transform = ItemTransform::identity();
+        let mut current = self.clone();
+        while let Some(parent) = current.parent_item(ParentItemTraversalMode::StopAtPopups) {
+            if stop_condition(&parent) {
+                break;
+            }
+            transform = transform.then(&parent.step_transform(supports_transformations));
+            current = parent;
+        }
+        transform
+    }
+
+    /// The transform from this item's children's coordinate space to its parent's:
+    /// the children transform (scale/rotate), then the translation to the item's origin.
+    fn step_transform(&self, supports_transformations: bool) -> ItemTransform {
+        let origin = self.geometry().origin.to_vector().cast();
+        let mut step = ItemTransform::translation(origin.x, origin.y);
+        if supports_transformations && let Some(children_transform) = self.children_transform() {
+            step = children_transform.then(&step);
+        }
+        step
+    }
+
+    /// Returns the clip rect that applies to this item (in window coordinates) as well as the
+    /// item's (unclipped) geometry (also in window coordinates).
+    fn absolute_clip_rect_and_geometry(&self) -> (LogicalRect, LogicalRect) {
+        let supports_transformations = self
+            .window_adapter()
+            .is_none_or(|adapter| adapter.renderer().supports_transformations());
+
+        let mut ancestors = Vec::new();
+        let mut cur = self.parent_item(ParentItemTraversalMode::StopAtPopups);
+        while let Some(ancestor) = cur {
+            cur = ancestor.parent_item(ParentItemTraversalMode::StopAtPopups);
+            ancestors.push(ancestor);
+        }
+
+        // `transform` maps the ancestor's parent's space to window coordinates; each step
+        // composes before the accumulated chain, like in `local_to_window_transform`.
+        let mut clip = LogicalRect::from_size((crate::Coord::MAX, crate::Coord::MAX).into());
+        let mut transform = ItemTransform::identity();
+        for ancestor in ancestors.iter().rev() {
+            if ancestor.borrow().as_ref().clips_children() {
+                let ancestor_geom =
+                    transform.outer_transformed_rect(&ancestor.geometry().cast()).cast();
+                clip = ancestor_geom.intersection(&clip).unwrap_or_default();
+            }
+            transform = ancestor.step_transform(supports_transformations).then(&transform);
+        }
+
+        let geometry = transform.outer_transformed_rect(&self.geometry().cast()).cast();
+
+        (clip, geometry)
+    }
+
+    pub fn is_accessible(&self) -> bool {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+        if let Some(n) = &item_tree.get(self.index) {
+            match n {
+                ItemTreeNode::Item { is_accessible, .. } => *is_accessible,
+                ItemTreeNode::DynamicTree { .. } => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn accessible_role(&self) -> crate::items::AccessibleRole {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        comp_ref_pin.as_ref().accessible_role(self.index)
+    }
+
+    pub fn accessible_string_property(
+        &self,
+        what: crate::accessibility::AccessibleStringProperty,
+    ) -> Option<SharedString> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut result = Default::default();
+        let ok = comp_ref_pin.as_ref().accessible_string_property(self.index, what, &mut result);
+        ok.then_some(result)
+    }
+
+    pub fn accessible_action(&self, action: &crate::accessibility::AccessibilityAction) {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        comp_ref_pin.as_ref().accessibility_action(self.index, action);
+    }
+
+    pub fn supported_accessibility_actions(&self) -> SupportedAccessibilityAction {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        comp_ref_pin.as_ref().supported_accessibility_actions(self.index)
+    }
+
+    /// Returns the raw element-info string for this item, if debug info is available.
+    fn raw_element_infos(&self) -> Option<SharedString> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut result = SharedString::new();
+        comp_ref_pin.as_ref().item_element_infos(self.index, &mut result).then_some(result)
+    }
+
+    pub fn element_count(&self) -> Option<usize> {
+        self.raw_element_infos().map(|s| s.as_str().split("/").count())
+    }
+
+    pub fn element_type_names_and_ids(
+        &self,
+        element_index: usize,
+    ) -> Option<Vec<(SharedString, SharedString)>> {
+        self.raw_element_infos().map(|infos| {
+            infos
+                .as_str()
+                .split("/")
+                .nth(element_index)
+                .unwrap()
+                .split(";")
+                .map(|encoded_elem_info| {
+                    let mut decoder = encoded_elem_info.split(',');
+                    let type_name = decoder.next().unwrap().into();
+                    let id = decoder.next().map(Into::into).unwrap_or_default();
+                    (type_name, id)
+                })
+                .collect()
+        })
+    }
+
+    /// The `@testable` properties declared on this item's element and its base components,
+    /// as `(name, type)` pairs.
+    /// `None` when the item tree carries no testable-property debug info.
+    pub fn element_testable_properties(&self) -> Option<Vec<(SharedString, SharedString)>> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut result = SharedString::new();
+        comp_ref_pin.as_ref().element_testable_properties(self.index, &mut result).then(|| {
+            result
+                .as_str()
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| {
+                    let (name, ty) = line.split_once(':').unwrap_or((line, ""));
+                    (name.into(), ty.into())
+                })
+                .collect()
+        })
+    }
+
+    /// The current value of the testable property `name` on this item's element,
+    /// in the string encoding of [`crate::debug_info`].
+    /// `None` when the property does not exist,
+    /// its value has no debug encoding,
+    /// or the item tree carries no testable-property debug info.
+    pub fn element_testable_property_value(&self, name: &str) -> Option<SharedString> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut result = SharedString::new();
+        comp_ref_pin
+            .as_ref()
+            .element_testable_property_value(
+                self.index,
+                Slice::from_slice(name.as_bytes()),
+                &mut result,
+            )
+            .then_some(result)
+    }
+
+    pub fn element_layout_kind(&self, element_index: usize) -> Option<SharedString> {
+        self.raw_element_infos().and_then(|infos| {
+            let first_debug_entry =
+                infos.as_str().split("/").nth(element_index)?.split(';').next()?;
+            let mut decoder = first_debug_entry.split(',');
+            let _type_name = decoder.next();
+            let _id = decoder.next();
+            decoder.next().filter(|s| !s.is_empty()).map(SharedString::from)
+        })
+    }
+
+    pub fn geometry(&self) -> LogicalRect {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        comp_ref_pin.as_ref().item_geometry(self.index)
+    }
+
+    /// Returns the rendering bounding rect for that particular item in the parent's item coordinate
+    /// (same coordinate system as the geometry)
+    pub fn bounding_rect(
+        &self,
+        geometry: &LogicalRect,
+        window_adapter: &WindowAdapterRc,
+    ) -> LogicalRect {
+        self.borrow().as_ref().bounding_rect(window_adapter, self, *geometry)
+    }
+
+    /// Similar to `map_to_window` but considers also the popup location if the popup
+    /// is not a dedicated window but of type ChildWindow
+    /// Use this function if you wanna have the real absolute position
+    pub fn map_to_native_window(&self, p: LogicalPoint) -> LogicalPoint {
+        let mut pos = self.map_to_item_tree_impl(p, |_| false);
+        // If the component is in a popup of type ChildWindow we have to consider the location of that as well
+        if let Some(window_adapter) = self.window_adapter() {
+            let window_inner = crate::window::WindowInner::from_pub(window_adapter.window());
+            let active_popups = window_inner.active_popups();
+            for popup in active_popups.iter() {
+                if let crate::window::PopupWindowLocation::ChildWindow(location) = &popup.location {
+                    let popup_item = ItemRc::new_root(popup.component.clone());
+
+                    // Check if component is in a popup
+                    // We have to search through all trees recursively up and not only the current item tree
+                    if popup_item.is_root_item_of(self.item_tree()) {
+                        pos += location.to_vector();
+                    } else {
+                        let mut current = ItemRc::new_root(self.item_tree.clone());
+                        // is_root_item_of does not check the complete tree
+                        while let Some(parent) =
+                            current.parent_item(ParentItemTraversalMode::StopAtPopups)
+                        {
+                            if popup_item.is_root_item_of(parent.item_tree()) {
+                                pos += location.to_vector();
+                                break;
+                            }
+
+                            // We go to the root of the parent again to skip iterating over the complete item tree
+                            current = ItemRc::new_root(parent.item_tree);
+                        }
+                    }
+                }
+            }
+        }
+        pos
+    }
+
+    /// Returns an absolute position of `p` in the parent item coordinate system
+    /// (does not add this item's x and y)
+    pub fn map_to_window(&self, p: LogicalPoint) -> LogicalPoint {
+        self.map_to_item_tree_impl(p, |_| false)
+    }
+
+    /// Returns an absolute position of `p` in the `ItemTree`'s coordinate system
+    /// (does not add this item's x and y)
+    pub fn map_to_item_tree(
+        &self,
+        p: LogicalPoint,
+        item_tree: &vtable::VRc<ItemTreeVTable>,
+    ) -> LogicalPoint {
+        self.transform_to_item_tree(item_tree).transform_point(p.cast()).cast()
+    }
+
+    /// Returns the transform mapping this item's coordinate system to the `ItemTree`'s
+    /// (does not add this item's x and y).
+    ///
+    /// Use this over repeated [`Self::map_to_item_tree`] calls when mapping more than one point:
+    /// each of those walks the ancestor chain to build this transform and then drops it.
+    pub fn transform_to_item_tree(&self, item_tree: &vtable::VRc<ItemTreeVTable>) -> ItemTransform {
+        self.transform_to_ancestor_impl(|current| current.is_root_item_of(item_tree))
+    }
+
+    /// Returns an absolute position of `p` in the `ancestor`'s coordinate system
+    /// (does not add this item's x and y)
+    /// Don't rely on any specific behavior if `self` isn't a descendant of `ancestor`.
+    #[cfg(test)]
+    fn map_to_ancestor(&self, p: LogicalPoint, ancestor: &Self) -> LogicalPoint {
+        self.map_to_item_tree_impl(p, |parent| parent == ancestor)
+    }
+
+    fn map_to_item_tree_impl(
+        &self,
+        p: LogicalPoint,
+        stop_condition: impl Fn(&Self) -> bool,
+    ) -> LogicalPoint {
+        self.transform_to_ancestor_impl(stop_condition).transform_point(p.cast()).cast()
+    }
+
+    fn transform_to_ancestor_impl(&self, stop_condition: impl Fn(&Self) -> bool) -> ItemTransform {
+        if stop_condition(self) {
+            return ItemTransform::identity();
+        }
+        self.local_to_window_transform(stop_condition)
+    }
+
+    /// Return the index of the item within the ItemTree
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+    /// Returns a reference to the ItemTree holding this item
+    pub fn item_tree(&self) -> &vtable::VRc<ItemTreeVTable> {
+        &self.item_tree
+    }
+
+    /// Returns a child based on the logic of `child_access`, `child_step` and `subtree_child`
+    fn find_child(
+        &self,
+        child_access: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+        child_step: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+        subtree_child: &dyn Fn(usize, usize) -> usize,
+    ) -> Option<Self> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+        let mut current_child_index = child_access(&item_tree, self.index())?;
+        loop {
+            if let Some(item) = step_into_node(
+                self.item_tree(),
+                &comp_ref_pin,
+                current_child_index,
+                &item_tree,
+                subtree_child,
+                &core::convert::identity,
+            ) {
+                return Some(item);
+            }
+            current_child_index = child_step(&item_tree, current_child_index)?;
+        }
+    }
+
+    /// The first child Item of this Item in this item tree
+    pub fn first_child(&self) -> Option<Self> {
+        self.find_child(
+            &|item_tree, index| item_tree.first_child(index),
+            &|item_tree, index| item_tree.next_sibling(index),
+            &|start, _| start,
+        )
+    }
+
+    /// The last child Item of this Item
+    pub fn last_child(&self) -> Option<Self> {
+        self.find_child(
+            &|item_tree, index| item_tree.last_child(index),
+            &|item_tree, index| item_tree.previous_sibling(index),
+            &|_, end| end.wrapping_sub(1),
+        )
+    }
+
+    fn find_sibling(
+        &self,
+        sibling_step: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+        subtree_step: &dyn Fn(usize) -> usize,
+        subtree_child: &dyn Fn(usize, usize) -> usize,
+    ) -> Option<Self> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        if self.is_root() {
+            let mut parent_item = Default::default();
+            comp_ref_pin.as_ref().parent_node(&mut parent_item);
+            let current_component_subtree_index = comp_ref_pin.as_ref().subtree_index();
+            if let Some(parent_item) = parent_item.upgrade() {
+                let parent = parent_item.item_tree();
+                let parent_ref_pin = vtable::VRc::borrow_pin(parent);
+                let parent_item_index = parent_item.index();
+                let parent_item_tree = crate::item_tree::ItemTreeNodeArray::new(&parent_ref_pin);
+
+                let subtree_index = match parent_item_tree.get(parent_item_index)? {
+                    crate::item_tree::ItemTreeNode::Item { .. } => {
+                        // Popups can trigger this case!
+                        return None;
+                    }
+                    crate::item_tree::ItemTreeNode::DynamicTree { index, .. } => *index,
+                };
+
+                let next_subtree_index = subtree_step(current_component_subtree_index);
+
+                // Get next subtree from repeater!
+                let mut next_subtree_instance = Default::default();
+                parent_ref_pin.as_ref().get_subtree(
+                    subtree_index,
+                    next_subtree_index,
+                    &mut next_subtree_instance,
+                );
+                if let Some(next_subtree_instance) = next_subtree_instance.upgrade() {
+                    return Some(ItemRc::new_root(next_subtree_instance));
+                }
+
+                // We need to leave the repeater:
+                find_sibling_outside_repeater(
+                    parent,
+                    parent_ref_pin,
+                    parent_item_index,
+                    sibling_step,
+                    subtree_child,
+                )
+            } else {
+                None // At root if the item tree
+            }
+        } else {
+            find_sibling_outside_repeater(
+                self.item_tree(),
+                comp_ref_pin,
+                self.index(),
+                sibling_step,
+                subtree_child,
+            )
+        }
+    }
+
+    /// The previous sibling of this Item
+    pub fn previous_sibling(&self) -> Option<Self> {
+        self.find_sibling(
+            &|item_tree, index| item_tree.previous_sibling(index),
+            &|index| index.wrapping_sub(1),
+            &|_, end| end.wrapping_sub(1),
+        )
+    }
+
+    /// The next sibling of this Item
+    pub fn next_sibling(&self) -> Option<Self> {
+        self.find_sibling(
+            &|item_tree, index| item_tree.next_sibling(index),
+            &|index| index.saturating_add(1),
+            &|start, _| start,
+        )
+    }
+
+    fn move_focus(
+        &self,
+        focus_step: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+        subtree_step: &dyn Fn(ItemRc) -> Option<ItemRc>,
+        subtree_child: &dyn Fn(usize, usize) -> usize,
+        step_in: &dyn Fn(ItemRc) -> ItemRc,
+        step_out: &dyn Fn(&crate::item_tree::ItemTreeNodeArray, u32) -> Option<u32>,
+    ) -> Self {
+        let mut component = self.item_tree().clone();
+        let mut comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+        let mut to_focus = self.index();
+
+        'in_tree: loop {
+            if let Some(next) = focus_step(&item_tree, to_focus) {
+                if let Some(item) = step_into_node(
+                    &component,
+                    &comp_ref_pin,
+                    next,
+                    &item_tree,
+                    subtree_child,
+                    step_in,
+                ) {
+                    return item;
+                }
+                to_focus = next;
+                // Loop: We stepped into an empty repeater!
+            } else {
+                // Step out of this component:
+                let mut root = ItemRc::new_root(component);
+                if let Some(item) = subtree_step(root.clone()) {
+                    // Next component inside same repeater
+                    return step_in(item);
+                }
+
+                // Step out of the repeater
+                let root_component = root.item_tree();
+                let root_comp_ref = vtable::VRc::borrow_pin(root_component);
+                let mut parent_node = Default::default();
+                root_comp_ref.as_ref().parent_node(&mut parent_node);
+
+                while let Some(parent) = parent_node.upgrade() {
+                    // .. not at the root of the item tree:
+                    component = parent.item_tree().clone();
+                    comp_ref_pin = vtable::VRc::borrow_pin(&component);
+                    item_tree = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+
+                    let index = parent.index();
+
+                    if !matches!(item_tree.get(index), Some(ItemTreeNode::DynamicTree { .. })) {
+                        // That was not a repeater (eg, a popup window)
+                        break;
+                    }
+
+                    if let Some(next) = step_out(&item_tree, index) {
+                        if let Some(item) = step_into_node(
+                            parent.item_tree(),
+                            &comp_ref_pin,
+                            next,
+                            &item_tree,
+                            subtree_child,
+                            step_in,
+                        ) {
+                            // Step into a dynamic node
+                            return item;
+                        } else {
+                            // The dynamic node was empty, proceed in normal tree
+                            to_focus = parent.index();
+                            continue 'in_tree; // Find a node in the current (parent!) tree
+                        }
+                    }
+
+                    root = ItemRc::new_root(component.clone());
+                    if let Some(item) = subtree_step(root.clone()) {
+                        return step_in(item);
+                    }
+
+                    // Go up one more level:
+                    let root_component = root.item_tree();
+                    let root_comp_ref = vtable::VRc::borrow_pin(root_component);
+                    parent_node = Default::default();
+                    root_comp_ref.as_ref().parent_node(&mut parent_node);
+                }
+
+                // Loop around after hitting the root node:
+                return step_in(root);
+            }
+        }
+    }
+
+    /// Move tab focus to the previous item:
+    pub fn previous_focus_item(&self) -> Self {
+        self.move_focus(
+            &|item_tree, index| {
+                crate::item_focus::default_previous_in_local_focus_chain(index, item_tree)
+            },
+            &|root| root.previous_sibling(),
+            &|_, end| end.wrapping_sub(1),
+            &|root| {
+                let mut current = root;
+                loop {
+                    if let Some(next) = current.last_child() {
+                        current = next;
+                    } else {
+                        return current;
+                    }
+                }
+            },
+            &|item_tree, index| item_tree.parent(index),
+        )
+    }
+
+    /// Move tab focus to the next item:
+    pub fn next_focus_item(&self) -> Self {
+        self.move_focus(
+            &|item_tree, index| {
+                crate::item_focus::default_next_in_local_focus_chain(index, item_tree)
+            },
+            &|root| root.next_sibling(),
+            &|start, _| start,
+            &core::convert::identity,
+            &|item_tree, index| crate::item_focus::step_out_of_node(index, item_tree),
+        )
+    }
+
+    pub fn window_adapter(&self) -> Option<WindowAdapterRc> {
+        let comp_ref_pin = vtable::VRc::borrow_pin(&self.item_tree);
+        let mut result = None;
+        comp_ref_pin.as_ref().window_adapter(false, &mut result);
+        result
+    }
+
+    /// The context of the item tree this item belongs to (see [`crate::window::context_for_root`]).
+    pub fn slint_context(&self) -> crate::SlintContext {
+        crate::window::context_for_root(&self.item_tree)
+    }
+
+    /// Visit the children of this element and call the visitor to each of them, until the visitor returns [`ControlFlow::Break`].
+    /// When the visitor breaks, the function returns the value. If it doesn't break, the function returns None.
+    fn visit_descendants_impl<R>(
+        &self,
+        visitor: &mut impl FnMut(&ItemRc) -> ControlFlow<R>,
+    ) -> Option<R> {
+        let mut result = None;
+
+        let mut actual_visitor = |item_tree: &ItemTreeRc,
+                                  index: u32,
+                                  _item_pin: core::pin::Pin<ItemRef>|
+         -> VisitChildrenResult {
+            let item_rc = ItemRc::new(item_tree.clone(), index);
+
+            match visitor(&item_rc) {
+                ControlFlow::Continue(_) => {
+                    if let Some(x) = item_rc.visit_descendants_impl(visitor) {
+                        result = Some(x);
+                        return VisitChildrenResult::abort(index, 0);
+                    }
+                }
+                ControlFlow::Break(x) => {
+                    result = Some(x);
+                    return VisitChildrenResult::abort(index, 0);
+                }
+            }
+
+            VisitChildrenResult::CONTINUE
+        };
+        vtable::new_vref!(let mut actual_visitor : VRefMut<ItemVisitorVTable> for ItemVisitor = &mut actual_visitor);
+
+        VRc::borrow_pin(self.item_tree()).as_ref().visit_children_item(
+            self.index() as isize,
+            TraversalOrder::BackToFront,
+            actual_visitor,
+        );
+
+        result
+    }
+
+    /// Visit the children of this element and call the visitor to each of them,
+    /// until the visitor returns [`ControlFlow::Break`].
+    /// When the visitor breaks, the function returns the value.
+    /// If it doesn't break, the function returns None.
+    ///
+    /// Runs [`ensure_item_tree_instantiated`] once before the walk so all
+    /// repeaters, conditionals, and component containers are materialized.
+    /// The recursive descent uses the private `visit_descendants_impl`,
+    /// which doesn't call it again.
+    pub fn visit_descendants<R>(
+        &self,
+        mut visitor: impl FnMut(&ItemRc) -> ControlFlow<R>,
+    ) -> Option<R> {
+        ensure_item_tree_instantiated(self.item_tree());
+        self.visit_descendants_impl(&mut visitor)
+    }
+
+    /// Returns the transform to apply to children to map them into the local coordinate space of this item.
+    /// Typically this is None, but rotation for example may return Some.
+    pub fn children_transform(&self) -> Option<ItemTransform> {
+        self.downcast::<crate::items::Transform>().map(|transform_item| {
+            let item = transform_item.as_pin_ref();
+            let origin = item.transform_origin().to_euclid().to_vector().cast::<f32>();
+            ItemTransform::translation(-origin.x, -origin.y)
+                .cast()
+                .then_scale(item.transform_scale_x(), item.transform_scale_y())
+                .then_rotate(euclid::Angle { radians: item.transform_rotation().to_radians() })
+                .then_translate(origin)
+        })
+    }
+
+    /// Returns the inverse of the children transform.
+    ///
+    /// None if children_transform is None or in the case of
+    /// non-invertible transforms (which should be extremely rare).
+    pub fn inverse_children_transform(&self) -> Option<ItemTransform> {
+        self.children_transform()
+            // Should practically always be possible.
+            .and_then(|child_transform| child_transform.inverse())
+    }
+
+    /// Scrolls every `Flickable` ancestor up to the nearest popup by the smallest amount that brings `self` into view.
+    /// Does nothing if no such ancestor is a `Flickable`.
+    pub fn try_scroll_into_visible(&self, scroll_behavior: ScrollBehavior) {
+        self.try_scroll_rect_into_visible(self.geometry(), scroll_behavior);
+    }
+
+    /// Like [`Self::try_scroll_into_visible`], but brings only `geo` into view.
+    /// `geo` is relative to the parent item, like [`Self::geometry`].
+    pub(crate) fn try_scroll_rect_into_visible(
+        &self,
+        geo: LogicalRect,
+        scroll_behavior: ScrollBehavior,
+    ) {
+        let supports_transformations = self
+            .window_adapter()
+            .is_none_or(|adapter| adapter.renderer().supports_transformations());
+        let mut points = [geo.min(), geo.max()];
+        let mut current = self.clone();
+        while let Some(parent) = current.parent_item(ParentItemTraversalMode::StopAtPopups) {
+            if let Some(flickable) =
+                vtable::VRef::downcast_pin::<crate::items::Flickable>(parent.borrow())
+            {
+                let offset =
+                    LogicalVector::from_lengths(flickable.content_x(), flickable.content_y());
+                let content_points = points.map(|p| p - offset);
+                let target = flickable.reveal_points(&parent, &content_points, scroll_behavior);
+                points = content_points.map(|p| p + target);
+            }
+            let step = parent.step_transform(supports_transformations);
+            points = points.map(|p| step.transform_point(p.cast()).cast());
+            current = parent;
+        }
+    }
+}
+
+impl PartialEq for ItemRc {
+    fn eq(&self, other: &Self) -> bool {
+        VRc::ptr_eq(&self.item_tree, &other.item_tree) && self.index == other.index
+    }
+}
+
+impl Eq for ItemRc {}
+
+/// A Weak reference to an item that can be constructed from an ItemRc.
+#[derive(Clone, Default)]
+#[repr(C)]
+pub struct ItemWeak {
+    item_tree: crate::item_tree::ItemTreeWeak,
+    index: u32,
+}
+
+impl ItemWeak {
+    pub fn upgrade(&self) -> Option<ItemRc> {
+        self.item_tree.upgrade().map(|c| ItemRc::new(c, self.index))
+    }
+}
+
+impl PartialEq for ItemWeak {
+    fn eq(&self, other: &Self) -> bool {
+        VWeak::ptr_eq(&self.item_tree, &other.item_tree) && self.index == other.index
+    }
+}
+
+impl Eq for ItemWeak {}
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TraversalOrder {
+    BackToFront,
+    FrontToBack,
+}
+
+/// The return value of the ItemTree::visit_children_item function
+///
+/// Represents something like `enum { Continue, Aborted{aborted_at_item: isize} }`.
+/// But this is just wrapping a int because it is easier to use ffi with isize than
+/// complex enum.
+///
+/// -1 means the visitor will continue
+/// otherwise this is the index of the item that aborted the visit.
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct VisitChildrenResult(u64);
+impl VisitChildrenResult {
+    /// The result used for a visitor that want to continue the visit
+    pub const CONTINUE: Self = Self(u64::MAX);
+
+    /// Returns a result that means that the visitor must stop, and convey the item that caused the abort
+    pub fn abort(item_index: u32, index_within_repeater: usize) -> Self {
+        assert!(index_within_repeater < u32::MAX as usize);
+        Self(item_index as u64 | (index_within_repeater as u64) << 32)
+    }
+    /// True if the visitor wants to abort the visit
+    pub fn has_aborted(&self) -> bool {
+        self.0 != Self::CONTINUE.0
+    }
+    pub fn aborted_index(&self) -> Option<usize> {
+        if self.0 != Self::CONTINUE.0 { Some((self.0 & 0xffff_ffff) as usize) } else { None }
+    }
+    pub fn aborted_indexes(&self) -> Option<(usize, usize)> {
+        if self.0 != Self::CONTINUE.0 {
+            Some(((self.0 & 0xffff_ffff) as usize, (self.0 >> 32) as usize))
+        } else {
+            None
+        }
+    }
+}
+impl core::fmt::Debug for VisitChildrenResult {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 == Self::CONTINUE.0 {
+            write!(f, "CONTINUE")
+        } else {
+            write!(f, "({},{})", (self.0 & 0xffff_ffff) as usize, (self.0 >> 32) as usize)
+        }
+    }
+}
+
+/// The item tree is an array of ItemTreeNode representing a static tree of items
+/// within a ItemTree.
+#[repr(u8)]
+#[derive(Debug)]
+pub enum ItemTreeNode {
+    /// Static item
+    Item {
+        /// True when the item has accessibility properties attached
+        is_accessible: bool,
+
+        /// number of children
+        children_count: u32,
+
+        /// index of the first children within the item tree
+        children_index: u32,
+
+        /// The index of the parent item (not valid for the root)
+        parent_index: u32,
+
+        /// The index in the extra item_array
+        item_array_index: u32,
+    },
+    /// A placeholder for many instance of item in their own ItemTree which
+    /// are instantiated according to a model like repeaters
+    DynamicTree {
+        /// the index which is passed in the visit_dynamic callback.
+        index: u32,
+
+        /// The index of the parent item (not valid for the root)
+        parent_index: u32,
+    },
+}
+
+impl ItemTreeNode {
+    pub fn parent_index(&self) -> u32 {
+        match self {
+            ItemTreeNode::Item { parent_index, .. } => *parent_index,
+            ItemTreeNode::DynamicTree { parent_index, .. } => *parent_index,
+        }
+    }
+}
+
+/// The `ItemTreeNodeArray` provides tree walking code for the physical ItemTree stored in
+/// a `ItemTree` without stitching any inter-ItemTree links together!
+pub struct ItemTreeNodeArray<'a> {
+    node_array: &'a [ItemTreeNode],
+}
+
+impl<'a> ItemTreeNodeArray<'a> {
+    /// Create a new `ItemTree` from its raw data.
+    pub fn new(comp_ref_pin: &'a Pin<VRef<'a, ItemTreeVTable>>) -> Self {
+        Self { node_array: comp_ref_pin.as_ref().get_item_tree().as_slice() }
+    }
+
+    /// Get a ItemTreeNode
+    pub fn get(&self, index: u32) -> Option<&ItemTreeNode> {
+        self.node_array.get(index as usize)
+    }
+
+    /// Get the parent of a node, returns `None` if this is the root node of this item tree.
+    pub fn parent(&self, index: u32) -> Option<u32> {
+        let index = index as usize;
+        (index < self.node_array.len() && index != ItemRc::root_index() as usize)
+            .then(|| self.node_array[index].parent_index())
+    }
+
+    /// Returns the next sibling or `None` if this is the last sibling.
+    pub fn next_sibling(&self, index: u32) -> Option<u32> {
+        if let Some(parent_index) = self.parent(index) {
+            match self.node_array[parent_index as usize] {
+                ItemTreeNode::Item { children_index, children_count, .. } => {
+                    (index < (children_count + children_index - 1)).then_some(index + 1)
+                }
+                ItemTreeNode::DynamicTree { .. } => {
+                    unreachable!("Parent in same item tree is a repeater.")
+                }
+            }
+        } else {
+            None // No parent, so we have no siblings either:-)
+        }
+    }
+
+    /// Returns the previous sibling or `None` if this is the first sibling.
+    pub fn previous_sibling(&self, index: u32) -> Option<u32> {
+        if let Some(parent_index) = self.parent(index) {
+            match self.node_array[parent_index as usize] {
+                ItemTreeNode::Item { children_index, .. } => {
+                    (index > children_index).then_some(index - 1)
+                }
+                ItemTreeNode::DynamicTree { .. } => {
+                    unreachable!("Parent in same item tree is a repeater.")
+                }
+            }
+        } else {
+            None // No parent, so we have no siblings either:-)
+        }
+    }
+
+    /// Returns the first child or `None` if there are no children or the `index`
+    /// points to a `DynamicTree`.
+    pub fn first_child(&self, index: u32) -> Option<u32> {
+        match self.node_array.get(index as usize)? {
+            ItemTreeNode::Item { children_index, children_count, .. } => {
+                (*children_count != 0).then_some(*children_index as _)
+            }
+            ItemTreeNode::DynamicTree { .. } => None,
+        }
+    }
+
+    /// Returns the last child or `None` if this are no children or the `index`
+    /// points to an `DynamicTree`.
+    pub fn last_child(&self, index: u32) -> Option<u32> {
+        match self.node_array.get(index as usize)? {
+            ItemTreeNode::Item { children_index, children_count, .. } => {
+                if *children_count != 0 {
+                    Some(*children_index + *children_count - 1)
+                } else {
+                    None
+                }
+            }
+            ItemTreeNode::DynamicTree { .. } => None,
+        }
+    }
+
+    /// Returns the number of nodes in the `ItemTreeNodeArray`
+    pub fn node_count(&self) -> usize {
+        self.node_array.len()
+    }
+}
+
+impl<'a> From<&'a [ItemTreeNode]> for ItemTreeNodeArray<'a> {
+    fn from(item_tree: &'a [ItemTreeNode]) -> Self {
+        Self { node_array: item_tree }
+    }
+}
+
+#[cfg_attr(not(feature = "ffi"), i_slint_core_macros::remove_extern)]
+#[vtable]
+#[repr(C)]
+/// Object to be passed in visit_item_children method of the ItemTree.
+pub struct ItemVisitorVTable {
+    /// Called for each child of the visited item
+    ///
+    /// The `item_tree` parameter is the ItemTree in which the item live which might not be the same
+    /// as the parent's ItemTree.
+    /// `index` is to be used again in the visit_item_children function of the ItemTree (the one passed as parameter)
+    /// and `item` is a reference to the item itself
+    visit_item: extern "C" fn(
+        VRefMut<ItemVisitorVTable>,
+        item_tree: &VRc<ItemTreeVTable, vtable::Dyn>,
+        index: u32,
+        item: Pin<VRef<ItemVTable>>,
+    ) -> VisitChildrenResult,
+    /// Destructor
+    drop: extern "C" fn(VRefMut<ItemVisitorVTable>),
+}
+
+/// Type alias to `vtable::VRefMut<ItemVisitorVTable>`
+pub type ItemVisitorRefMut<'a> = vtable::VRefMut<'a, ItemVisitorVTable>;
+
+impl<T: FnMut(&ItemTreeRc, u32, Pin<ItemRef>) -> VisitChildrenResult> ItemVisitor for T {
+    fn visit_item(
+        &mut self,
+        item_tree: &ItemTreeRc,
+        index: u32,
+        item: Pin<ItemRef>,
+    ) -> VisitChildrenResult {
+        self(item_tree, index, item)
+    }
+}
+pub enum ItemVisitorResult<State> {
+    Continue(State),
+    SkipChildren,
+    Abort,
+}
+
+/// Visit each items recursively
+///
+/// The state parameter returned by the visitor is passed to each child.
+///
+/// Returns the index of the item that cancelled, or -1 if nobody cancelled
+pub fn visit_items<State>(
+    item_tree: &ItemTreeRc,
+    order: TraversalOrder,
+    mut visitor: impl FnMut(&ItemTreeRc, Pin<ItemRef>, u32, &State) -> ItemVisitorResult<State>,
+    state: State,
+) -> VisitChildrenResult {
+    visit_internal(item_tree, order, &mut visitor, -1, &state)
+}
+
+fn visit_internal<State>(
+    item_tree: &ItemTreeRc,
+    order: TraversalOrder,
+    visitor: &mut impl FnMut(&ItemTreeRc, Pin<ItemRef>, u32, &State) -> ItemVisitorResult<State>,
+    index: isize,
+    state: &State,
+) -> VisitChildrenResult {
+    let mut actual_visitor =
+        |item_tree: &ItemTreeRc, index: u32, item: Pin<ItemRef>| -> VisitChildrenResult {
+            match visitor(item_tree, item, index, state) {
+                ItemVisitorResult::Continue(state) => {
+                    visit_internal(item_tree, order, visitor, index as isize, &state)
+                }
+                ItemVisitorResult::SkipChildren => VisitChildrenResult::CONTINUE,
+                ItemVisitorResult::Abort => VisitChildrenResult::abort(index, 0),
+            }
+        };
+    vtable::new_vref!(let mut actual_visitor : VRefMut<ItemVisitorVTable> for ItemVisitor = &mut actual_visitor);
+    VRc::borrow_pin(item_tree).as_ref().visit_children_item(index, order, actual_visitor)
+}
+
+/// One entry in the z-ordered traversal of an element's children: a plain child,
+/// or a single instance of a repeated child.
+#[derive(Clone, Copy, Debug)]
+struct ZSortedChild {
+    /// The z value used for sorting
+    z: f32,
+    /// Offset of the child within the parent's children (relative to children_index)
+    child_offset: u32,
+    /// The repeater instance (a model row index, as accepted by the `get_subtree`
+    /// vtable entry) when the child is a repeated element expanded per instance,
+    /// or `None` to visit the whole child
+    instance: Option<u32>,
+}
+
+/// Visit one child of `index`'s children (an item, or a dynamic node forwarded to
+/// `visit_dynamic`), shared between the sequential and the z-sorted traversal.
+fn visit_child_at_index(
+    item_tree: &ItemTreeRc,
+    item_tree_array: &[ItemTreeNode],
+    idx: u32,
+    order: TraversalOrder,
+    visitor: &mut vtable::VRefMut<ItemVisitorVTable>,
+    visit_dynamic: &mut dyn FnMut(
+        TraversalOrder,
+        vtable::VRefMut<ItemVisitorVTable>,
+        u32,
+    ) -> VisitChildrenResult,
+) -> VisitChildrenResult {
+    match &item_tree_array[idx as usize] {
+        ItemTreeNode::Item { .. } => {
+            let item = crate::items::ItemRc::new(item_tree.clone(), idx);
+            visitor.visit_item(item_tree, idx, item.borrow())
+        }
+        ItemTreeNode::DynamicTree { index, .. } => {
+            if let Some(sub_idx) =
+                visit_dynamic(order, visitor.borrow_mut(), *index).aborted_index()
+            {
+                VisitChildrenResult::abort(idx, sub_idx)
+            } else {
+                VisitChildrenResult::CONTINUE
+            }
+        }
+    }
+}
+
+/// Visit the children within an array of ItemTreeNode
+///
+/// The dynamic visitor is called for the dynamic nodes, its signature is
+/// `fn(order: TraversalOrder, visitor: vtable::VRefMut<ItemVisitorVTable>, dyn_index: u32)`.
+/// It is a `dyn` callback (capturing the component) rather than generic, so this function is
+/// not duplicated per component type.
+///
+/// FIXME: the design of this use lots of indirection and stack frame in recursive functions
+/// Need to check if the compiler is able to optimize away some of it.
+/// Possibly we should generate code that directly call the visitor instead
+pub fn visit_item_tree(
+    item_tree: &ItemTreeRc,
+    item_tree_array: &[ItemTreeNode],
+    index: isize,
+    order: TraversalOrder,
+    mut visitor: vtable::VRefMut<ItemVisitorVTable>,
+    visit_dynamic: &mut dyn FnMut(
+        TraversalOrder,
+        vtable::VRefMut<ItemVisitorVTable>,
+        u32,
+    ) -> VisitChildrenResult,
+) -> VisitChildrenResult {
+    if index == -1 {
+        visit_child_at_index(item_tree, item_tree_array, 0, order, &mut visitor, visit_dynamic)
+    } else {
+        match &item_tree_array[index as usize] {
+            ItemTreeNode::Item { children_index, children_count, .. } => {
+                for c in 0..*children_count {
+                    let idx = match order {
+                        TraversalOrder::BackToFront => *children_index + c,
+                        TraversalOrder::FrontToBack => *children_index + *children_count - c - 1,
+                    };
+                    let maybe_abort_index = visit_child_at_index(
+                        item_tree,
+                        item_tree_array,
+                        idx,
+                        order,
+                        &mut visitor,
+                        visit_dynamic,
+                    );
+                    if maybe_abort_index.has_aborted() {
+                        return maybe_abort_index;
+                    }
+                }
+            }
+            ItemTreeNode::DynamicTree { .. } => panic!("should not be called with dynamic items"),
+        };
+        VisitChildrenResult::CONTINUE
+    }
+}
+
+/// Visit the children of the node at `index` (which must be an `ItemTreeNode::Item` whose
+/// children have dynamic z-ordering) sorted by their z value.
+///
+/// `collect_z` is invoked once with a `push(child_offset, instance, z)` sink and must push
+/// one entry for every child: either a single entry with `instance == None`, which visits
+/// the whole child (including a repeated child as one block), or one entry per instance of
+/// a repeated child that is expanded and sorted individually (`instance == Some(i)`), so
+/// the entries can outnumber the children. `collect_z` must be side-effect free: it runs on
+/// every children traversal, and property reads in it are what registers the dependencies
+/// that re-trigger rendering when a z value changes.
+///
+/// The entries are sorted by z, ties broken by declaration order (`child_offset`) then
+/// instance, and visited in that order — reversed for `FrontToBack`. An entry with a
+/// specific instance is visited directly through the `get_subtree` vtable entry of
+/// `item_tree` (so the instance index is a model row index, as used by `get_subtree`
+/// and `get_subtree_range`), without going through `visit_dynamic`.
+pub fn visit_item_tree_z_sorted(
+    item_tree: &ItemTreeRc,
+    item_tree_array: &[ItemTreeNode],
+    index: isize,
+    order: TraversalOrder,
+    mut visitor: vtable::VRefMut<ItemVisitorVTable>,
+    visit_dynamic: &mut dyn FnMut(
+        TraversalOrder,
+        vtable::VRefMut<ItemVisitorVTable>,
+        u32,
+    ) -> VisitChildrenResult,
+    collect_z: &mut dyn FnMut(&mut dyn FnMut(u32, Option<u32>, f32)),
+) -> VisitChildrenResult {
+    let ItemTreeNode::Item { children_index, children_count, .. } =
+        &item_tree_array[index as usize]
+    else {
+        panic!("should not be called with dynamic items")
+    };
+    let mut entries = alloc::vec::Vec::with_capacity(*children_count as usize);
+    collect_z(&mut |child_offset, instance, z| {
+        entries.push(ZSortedChild { z, child_offset, instance })
+    });
+    entries.sort_unstable_by(|a: &ZSortedChild, b: &ZSortedChild| {
+        a.z.total_cmp(&b.z)
+            .then(a.child_offset.cmp(&b.child_offset))
+            .then(a.instance.cmp(&b.instance))
+    });
+    for i in 0..entries.len() {
+        let entry = &entries[match order {
+            TraversalOrder::BackToFront => i,
+            TraversalOrder::FrontToBack => entries.len() - 1 - i,
+        }];
+        let idx = *children_index + entry.child_offset;
+        let maybe_abort_index = match (&item_tree_array[idx as usize], entry.instance) {
+            (ItemTreeNode::DynamicTree { index: dyn_index, .. }, Some(instance)) => {
+                // A single expanded instance: reach it through the vtable instead of the
+                // component's dynamic-visit dispatch. An instance that disappeared since
+                // `collect_z` ran is skipped.
+                let mut instance_tree: vtable::VWeak<ItemTreeVTable, Dyn> = Default::default();
+                VRc::borrow_pin(item_tree).as_ref().get_subtree(
+                    *dyn_index,
+                    instance as usize,
+                    &mut instance_tree,
+                );
+                match instance_tree.upgrade() {
+                    Some(t)
+                        if VRc::borrow_pin(&t)
+                            .as_ref()
+                            .visit_children_item(-1, order, visitor.borrow_mut())
+                            .has_aborted() =>
+                    {
+                        VisitChildrenResult::abort(idx, instance as usize)
+                    }
+                    _ => VisitChildrenResult::CONTINUE,
+                }
+            }
+            _ => visit_child_at_index(
+                item_tree,
+                item_tree_array,
+                idx,
+                order,
+                &mut visitor,
+                visit_dynamic,
+            ),
+        };
+        if maybe_abort_index.has_aborted() {
+            return maybe_abort_index;
+        }
+    }
+    VisitChildrenResult::CONTINUE
+}
+
+#[cfg(feature = "ffi")]
+pub(crate) mod ffi {
+    #![allow(unsafe_code)]
+
+    use super::*;
+    use core::ffi::c_void;
+
+    /// Call init() on the ItemVTable of each item in the item array.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn slint_register_item_tree(
+        item_tree_rc: &ItemTreeRc,
+        window_handle: *const crate::window::ffi::WindowAdapterRcOpaque,
+    ) {
+        unsafe {
+            let window_adapter = (window_handle as *const WindowAdapterRc).as_ref().cloned();
+            super::register_item_tree(item_tree_rc, window_adapter)
+        }
+    }
+
+    /// Free the backend graphics resources allocated in the item array.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn slint_unregister_item_tree(
+        component: ItemTreeRefPin,
+        item_array: Slice<vtable::VOffset<u8, ItemVTable, vtable::AllowPin>>,
+        window_handle: *const crate::window::ffi::WindowAdapterRcOpaque,
+    ) {
+        unsafe {
+            let window_adapter = &*(window_handle as *const WindowAdapterRc);
+            super::unregister_item_tree(
+                core::pin::Pin::new_unchecked(&*(component.as_ptr() as *const u8)),
+                core::pin::Pin::into_inner(component),
+                item_array.as_slice(),
+                window_adapter,
+            )
+        }
+    }
+
+    /// Expose `crate::item_tree::visit_item_tree` to C++
+    ///
+    /// Safety: Assume a correct implementation of the item_tree array
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn slint_visit_item_tree(
+        item_tree: &ItemTreeRc,
+        item_tree_array: Slice<ItemTreeNode>,
+        index: isize,
+        order: TraversalOrder,
+        visitor: VRefMut<ItemVisitorVTable>,
+        visit_dynamic: extern "C" fn(
+            base: *const c_void,
+            order: TraversalOrder,
+            visitor: vtable::VRefMut<ItemVisitorVTable>,
+            dyn_index: u32,
+        ) -> VisitChildrenResult,
+    ) -> VisitChildrenResult {
+        let base = VRc::as_pin_ref(item_tree).get_ref() as *const vtable::Dyn as *const c_void;
+        crate::item_tree::visit_item_tree(
+            item_tree,
+            item_tree_array.as_slice(),
+            index,
+            order,
+            visitor,
+            &mut |order, visitor, dyn_index| visit_dynamic(base, order, visitor, dyn_index),
+        )
+    }
+
+    /// Expose `crate::item_tree::visit_item_tree_z_sorted` to C++.
+    ///
+    /// `collect_z` receives the component `base`, an opaque `push_ctx`, and a `push`
+    /// function; it must call `push(push_ctx, child_offset, instance, z)` once per entry,
+    /// with `instance == u32::MAX` for entries that visit the whole child. See
+    /// [`crate::item_tree::visit_item_tree_z_sorted`] for the contract.
+    ///
+    /// Safety: Assume a correct implementation of the item_tree array, and of the
+    /// `visit_dynamic` and `collect_z` callbacks: both must be valid function pointers,
+    /// `collect_z` must forward the given `push_ctx` unchanged to `push` and only call
+    /// `push` for the duration of the `collect_z` call, and it must only push
+    /// `child_offset` values that are within the children of the node at `index`.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn slint_visit_item_tree_z_sorted(
+        item_tree: &ItemTreeRc,
+        item_tree_array: Slice<ItemTreeNode>,
+        index: isize,
+        order: TraversalOrder,
+        visitor: VRefMut<ItemVisitorVTable>,
+        visit_dynamic: extern "C" fn(
+            base: *const c_void,
+            order: TraversalOrder,
+            visitor: vtable::VRefMut<ItemVisitorVTable>,
+            dyn_index: u32,
+        ) -> VisitChildrenResult,
+        collect_z: extern "C" fn(
+            base: *const c_void,
+            push_ctx: *mut c_void,
+            push: extern "C" fn(push_ctx: *mut c_void, child_offset: u32, instance: u32, z: f32),
+        ),
+    ) -> VisitChildrenResult {
+        let base = VRc::as_pin_ref(item_tree).get_ref() as *const vtable::Dyn as *const c_void;
+        crate::item_tree::visit_item_tree_z_sorted(
+            item_tree,
+            item_tree_array.as_slice(),
+            index,
+            order,
+            visitor,
+            &mut |order, visitor, dyn_index| visit_dynamic(base, order, visitor, dyn_index),
+            &mut |push| {
+                extern "C" fn push_trampoline(
+                    push_ctx: *mut c_void,
+                    child_offset: u32,
+                    instance: u32,
+                    z: f32,
+                ) {
+                    let push =
+                        unsafe { &mut **(push_ctx as *mut &mut dyn FnMut(u32, Option<u32>, f32)) };
+                    push(child_offset, (instance != u32::MAX).then_some(instance), z);
+                }
+                let mut push_ctx: &mut dyn FnMut(u32, Option<u32>, f32) = push;
+                collect_z(base, core::ptr::addr_of_mut!(push_ctx) as *mut c_void, push_trampoline);
+            },
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Property;
+    use crate::api::LogicalPosition;
+    use crate::api::Window;
+    use crate::items::{Clip, Transform, WindowItem};
+    use crate::lengths::LogicalLength;
+    use crate::lengths::LogicalSize;
+    use euclid::Point2D;
+    use std::{boxed::Box, rc::Rc, vec};
+
+    const GEOMETRY_POSITION_X: f32 = 6.;
+    const GEOMETRY_POSITION_Y: f32 = 27.;
+    const GEOMETRY_WIDTH: f32 = 33.;
+    const GEOMETRY_HEIGHT: f32 = 42.;
+
+    #[derive(Default)]
+    struct Renderer {
+        supports_transformations: bool,
+    }
+
+    struct WindowAdapter {
+        renderer: Renderer,
+        window: Window,
+    }
+
+    impl WindowAdapter {
+        fn new() -> Rc<Self> {
+            Self::new_with_transformations(false)
+        }
+
+        fn new_with_transformations(supports_transformations: bool) -> Rc<Self> {
+            Rc::<Self>::new_cyclic(|w| Self {
+                window: Window::new(w.clone()),
+                renderer: Renderer { supports_transformations },
+            })
+        }
+    }
+
+    impl crate::window::WindowAdapter for WindowAdapter {
+        fn window(&self) -> &crate::api::Window {
+            &self.window
+        }
+
+        fn size(&self) -> crate::api::PhysicalSize {
+            crate::api::PhysicalSize::new(100, 100)
+        }
+
+        fn renderer(&self) -> &dyn crate::platform::Renderer {
+            &self.renderer
+        }
+    }
+
+    struct TestItemTree {
+        parent_component: Option<ItemTreeWeak>,
+        /// First item is always the root, the next ones are the children and subchildren and so on
+        item_tree: Vec<ItemTreeNode>,
+        /// Contains the trees of the dynamic components
+        subtrees: std::cell::RefCell<Vec<Vec<vtable::VRc<ItemTreeVTable, TestItemTree>>>>,
+        subtree_index: usize,
+
+        window_adapter: std::rc::Weak<dyn crate::window::WindowAdapter>,
+        window_item: Option<crate::items::WindowItem>,
+    }
+
+    impl ItemTree for TestItemTree {
+        fn visit_children_item(
+            self: core::pin::Pin<&Self>,
+            _1: isize,
+            _2: crate::item_tree::TraversalOrder,
+            _3: vtable::VRefMut<crate::item_tree::ItemVisitorVTable>,
+        ) -> crate::item_tree::VisitChildrenResult {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn get_item_ref(
+            self: core::pin::Pin<&Self>,
+            index: u32,
+        ) -> core::pin::Pin<vtable::VRef<'_, super::ItemVTable>> {
+            if index == 0 {
+                return Pin::new(VRef::new(
+                    self.get_ref().window_item.as_ref().expect("Not needed for this test"),
+                ));
+            }
+            unimplemented!("Not needed for this test")
+        }
+
+        fn get_item_tree(self: core::pin::Pin<&Self>) -> Slice<'_, ItemTreeNode> {
+            Slice::from_slice(&self.get_ref().item_tree)
+        }
+
+        fn parent_node(self: core::pin::Pin<&Self>, result: &mut ItemWeak) {
+            if let Some(parent_item) = self.parent_component.as_ref().and_then(|w| w.upgrade()) {
+                *result = ItemRc::new(parent_item, self.item_tree[0].parent_index()).downgrade();
+            }
+        }
+
+        fn embed_component(
+            self: core::pin::Pin<&Self>,
+            _parent_component: &ItemTreeWeak,
+            _item_tree_index: u32,
+        ) -> bool {
+            false
+        }
+
+        fn ensure_instantiated(self: core::pin::Pin<&Self>) -> bool {
+            false
+        }
+
+        fn layout_info(self: core::pin::Pin<&Self>, o: Orientation) -> LayoutInfo {
+            if let Some(wi) = &self.window_item {
+                match o {
+                    Orientation::Horizontal => {
+                        return LayoutInfo {
+                            max: wi.width.get_internal().0,
+                            max_percent: 100.,
+                            min: wi.width.get_internal().0,
+                            min_percent: 100.,
+                            preferred: wi.width.get_internal().0,
+                            stretch: 1.,
+                        };
+                    }
+                    Orientation::Vertical => {
+                        return LayoutInfo {
+                            max: wi.height.get_internal().0,
+                            max_percent: 100.,
+                            min: wi.height.get_internal().0,
+                            min_percent: 100.,
+                            preferred: wi.height.get_internal().0,
+                            stretch: 1.,
+                        };
+                    }
+                }
+            }
+            unimplemented!("Not needed for this test")
+        }
+
+        fn subtree_index(self: core::pin::Pin<&Self>) -> usize {
+            self.subtree_index
+        }
+
+        fn get_subtree_range(self: core::pin::Pin<&Self>, subtree_index: u32) -> IndexRange {
+            (0..self.subtrees.borrow()[subtree_index as usize].len()).into()
+        }
+
+        fn get_subtree(
+            self: core::pin::Pin<&Self>,
+            subtree_index: u32,
+            component_index: usize,
+            result: &mut ItemTreeWeak,
+        ) {
+            if let Some(vrc) = self.subtrees.borrow()[subtree_index as usize].get(component_index) {
+                *result = vtable::VRc::downgrade(&vtable::VRc::into_dyn(vrc.clone()))
+            }
+        }
+
+        fn accessible_role(self: Pin<&Self>, _: u32) -> AccessibleRole {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn accessible_string_property(
+            self: Pin<&Self>,
+            _: u32,
+            _: AccessibleStringProperty,
+            _: &mut SharedString,
+        ) -> bool {
+            false
+        }
+
+        fn item_element_infos(self: Pin<&Self>, _: u32, _: &mut SharedString) -> bool {
+            false
+        }
+
+        fn element_testable_properties(self: Pin<&Self>, _: u32, _: &mut SharedString) -> bool {
+            false
+        }
+
+        fn element_testable_property_value(
+            self: Pin<&Self>,
+            _: u32,
+            _: Slice<u8>,
+            _: &mut SharedString,
+        ) -> bool {
+            false
+        }
+
+        fn window_adapter(
+            self: Pin<&Self>,
+            _do_create: bool,
+            result: &mut Option<WindowAdapterRc>,
+        ) {
+            *result = self.window_adapter.upgrade()
+        }
+
+        fn slint_context(self: Pin<&Self>, _result: &mut Option<SlintContext>) {}
+
+        fn item_geometry(self: Pin<&Self>, _: u32) -> LogicalRect {
+            LogicalRect::new(
+                euclid::Point2D::new(GEOMETRY_POSITION_X, GEOMETRY_POSITION_Y),
+                euclid::Size2D::new(GEOMETRY_WIDTH, GEOMETRY_HEIGHT),
+            )
+        }
+
+        fn accessibility_action(self: core::pin::Pin<&Self>, _: u32, _: &AccessibilityAction) {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn supported_accessibility_actions(
+            self: core::pin::Pin<&Self>,
+            _: u32,
+        ) -> SupportedAccessibilityAction {
+            unimplemented!("Not needed for this test")
+        }
+    }
+
+    crate::item_tree::ItemTreeVTable_static!(static TEST_COMPONENT_VT for TestItemTree);
+
+    fn create_one_node_component(
+        window_item: Option<WindowItem>,
+    ) -> (std::rc::Rc<WindowAdapter>, VRc<ItemTreeVTable, vtable::Dyn>) {
+        let window_adapter = WindowAdapter::new();
+        let component = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 1,
+                parent_index: 0,
+                item_array_index: 0,
+            }],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: Rc::downgrade(&window_adapter) as _,
+            window_item,
+        });
+        (window_adapter, VRc::into_dyn(component))
+    }
+
+    #[test]
+    fn test_tree_traversal_one_node_structure() {
+        let component = create_one_node_component(None).1;
+
+        let item = ItemRc::new_root(component.clone());
+
+        assert!(item.first_child().is_none());
+        assert!(item.last_child().is_none());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+    }
+
+    #[test]
+    fn test_tree_traversal_one_node_forward_focus() {
+        let component = create_one_node_component(None).1;
+
+        let item = ItemRc::new_root(component.clone());
+
+        // Wrap the focus around:
+        assert_eq!(item.next_focus_item(), item);
+    }
+
+    #[test]
+    fn test_tree_traversal_one_node_backward_focus() {
+        let component = create_one_node_component(None).1;
+
+        let item = ItemRc::new_root(component.clone());
+
+        // Wrap the focus around:
+        assert_eq!(item.previous_focus_item(), item);
+    }
+
+    fn create_children_nodes() -> VRc<ItemTreeVTable, vtable::Dyn> {
+        let component = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 3,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0, // Index in this array
+                },
+                // First child of the root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4, // Does not matter because children_count is zero
+                    parent_index: 0,   // Root as parent
+                    item_array_index: 1, // Index in this array
+                },
+                // Second child of the root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4, // Does not matter because children_count is zero
+                    parent_index: 0,   // Root as parent
+                    item_array_index: 2,
+                },
+                // Third child of the root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4, // Does not matter because children_count is zero
+                    parent_index: 0,   // Root as parent
+                    item_array_index: 3,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: Rc::downgrade(&WindowAdapter::new()) as _,
+            window_item: None,
+        });
+        VRc::into_dyn(component)
+    }
+
+    #[test]
+    fn test_tree_traversal_children_nodes_structure() {
+        let component: VRc<ItemTreeVTable> = create_children_nodes();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+
+        let fc = item.first_child().unwrap();
+        assert_eq!(fc.index(), 1);
+        assert!(VRc::ptr_eq(fc.item_tree(), item.item_tree()));
+
+        let fcn = fc.next_sibling().unwrap();
+        assert_eq!(fcn.index(), 2);
+
+        let lc = item.last_child().unwrap();
+        assert_eq!(lc.index(), 3);
+        assert!(VRc::ptr_eq(lc.item_tree(), item.item_tree()));
+
+        let lcp = lc.previous_sibling().unwrap();
+        assert!(VRc::ptr_eq(lcp.item_tree(), item.item_tree()));
+        assert_eq!(lcp.index(), 2);
+
+        // Examine first child:
+        assert!(fc.first_child().is_none());
+        assert!(fc.last_child().is_none());
+        assert!(fc.previous_sibling().is_none());
+        assert_eq!(fc.parent_item(ParentItemTraversalMode::StopAtPopups).unwrap(), item);
+
+        // Examine item between first and last child:
+        assert_eq!(fcn, lcp);
+        assert_eq!(lcp.parent_item(ParentItemTraversalMode::StopAtPopups).unwrap(), item);
+        assert_eq!(fcn.previous_sibling().unwrap(), fc);
+        assert_eq!(fcn.next_sibling().unwrap(), lc);
+
+        // Examine last child:
+        assert!(lc.first_child().is_none());
+        assert!(lc.last_child().is_none());
+        assert!(lc.next_sibling().is_none());
+        assert_eq!(lc.parent_item(ParentItemTraversalMode::StopAtPopups).unwrap(), item);
+    }
+
+    #[test]
+    fn test_tree_traversal_children_nodes_forward_focus() {
+        let component = create_children_nodes();
+
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+        let lc = item.last_child().unwrap();
+
+        let mut cursor = item.clone();
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    #[test]
+    fn test_tree_traversal_children_nodes_backward_focus() {
+        let component = create_children_nodes();
+
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+        let lc = item.last_child().unwrap();
+
+        let mut cursor = item.clone();
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    fn create_empty_subtree() -> VRc<ItemTreeVTable, vtable::Dyn> {
+        let component = vtable::VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 1,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+            ],
+            subtrees: std::cell::RefCell::new(vec![Vec::new()]),
+            subtree_index: usize::MAX,
+
+            window_adapter: Rc::downgrade(&WindowAdapter::new()) as _,
+            window_item: None,
+        });
+        vtable::VRc::into_dyn(component)
+    }
+
+    #[test]
+    fn test_tree_traversal_empty_subtree_structure() {
+        let component = create_empty_subtree();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+        assert!(item.first_child().is_none());
+        assert!(item.last_child().is_none());
+
+        // Wrap the focus around:
+        assert!(item.previous_focus_item() == item);
+        assert!(item.next_focus_item() == item);
+    }
+
+    #[test]
+    fn test_tree_traversal_empty_subtree_forward_focus() {
+        let component = create_empty_subtree();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+
+        assert!(item.next_focus_item() == item);
+    }
+
+    #[test]
+    fn test_tree_traversal_empty_subtree_backward_focus() {
+        let component = create_empty_subtree();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+
+        assert!(item.previous_focus_item() == item);
+    }
+
+    fn create_item_subtree_item() -> VRc<ItemTreeVTable, vtable::Dyn> {
+        let window_adapter = WindowAdapter::new();
+        let weak_adapter =
+            Rc::downgrade(&window_adapter) as std::rc::Weak<dyn crate::window::WindowAdapter>;
+        let component = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 3,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                // First child
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4, // Does not matter because children_count is zero
+                    parent_index: 0,   // Root as parent
+                    item_array_index: 0,
+                },
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4,
+                    parent_index: 0, // Root as parent
+                    item_array_index: 0,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: weak_adapter.clone(),
+            window_item: None,
+        });
+
+        component.as_pin_ref().subtrees.replace(vec![vec![VRc::new(TestItemTree {
+            parent_component: Some(VRc::downgrade(&VRc::into_dyn(component.clone()))),
+            item_tree: vec![ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 1,
+                parent_index: 2,
+                item_array_index: 0,
+            }],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: 0,
+
+            window_adapter: weak_adapter,
+            window_item: None,
+        })]]);
+
+        VRc::into_dyn(component)
+    }
+
+    #[test]
+    fn test_tree_traversal_item_subtree_item_structure() {
+        let component = create_item_subtree_item();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+
+        let fc = item.first_child().unwrap();
+        assert!(VRc::ptr_eq(fc.item_tree(), item.item_tree()));
+        assert_eq!(fc.index(), 1);
+
+        let lc = item.last_child().unwrap();
+        assert!(VRc::ptr_eq(lc.item_tree(), item.item_tree()));
+        assert_eq!(lc.index(), 3);
+
+        let fcn = fc.next_sibling().unwrap();
+        let lcp = lc.previous_sibling().unwrap();
+
+        assert_eq!(fcn, lcp);
+        assert!(!VRc::ptr_eq(fcn.item_tree(), item.item_tree()));
+
+        let last = fcn.next_sibling().unwrap();
+        assert_eq!(last, lc);
+
+        let first = lcp.previous_sibling().unwrap();
+        assert_eq!(first, fc);
+    }
+
+    #[test]
+    fn test_tree_traversal_item_subtree_item_forward_focus() {
+        let component = create_item_subtree_item();
+
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let lc = item.last_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+
+        let mut cursor = item.clone();
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    #[test]
+    fn test_tree_traversal_item_subtree_item_backward_focus() {
+        let component = create_item_subtree_item();
+
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let lc = item.last_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+
+        let mut cursor = item.clone();
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    fn create_nested_subtrees() -> VRc<ItemTreeVTable, vtable::Dyn> {
+        // Nesting the subtrees
+        // sub_component2 as subtree of sub_component1
+        // sub_component1 as subtree of the main component
+
+        let window_adapter = WindowAdapter::new();
+        let weak_adapter =
+            Rc::downgrade(&window_adapter) as std::rc::Weak<dyn crate::window::WindowAdapter>;
+
+        let component = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 3,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                // First child
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                // Second child
+                // Relates to the first subtree in this component (sub_component1, added below)
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+                // Third child
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: weak_adapter.clone(),
+            window_item: None,
+        });
+
+        let sub_component1 = VRc::new(TestItemTree {
+            parent_component: Some(VRc::downgrade(&VRc::into_dyn(component.clone()))),
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 1,
+                    children_index: 1,
+                    parent_index: 2,
+                    item_array_index: 0,
+                },
+                // First child
+                // Relates to the first subtree in this component (sub_component2, added below)
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: weak_adapter.clone(),
+            window_item: None,
+        });
+        let sub_component2 = VRc::new(TestItemTree {
+            parent_component: Some(VRc::downgrade(&VRc::into_dyn(sub_component1.clone()))),
+            item_tree: vec![
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 1,
+                    children_index: 1,
+                    parent_index: 1,
+                    item_array_index: 0,
+                },
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 2,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: weak_adapter,
+            window_item: None,
+        });
+
+        sub_component1.as_pin_ref().subtrees.replace(vec![vec![sub_component2]]);
+        component.as_pin_ref().subtrees.replace(vec![vec![sub_component1]]);
+
+        VRc::into_dyn(component)
+    }
+
+    #[test]
+    fn test_tree_traversal_nested_subtrees_structure() {
+        let component = create_nested_subtrees();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+
+        let fc = item.first_child().unwrap();
+        assert!(VRc::ptr_eq(fc.item_tree(), item.item_tree()));
+        assert_eq!(fc.index(), 1);
+
+        let lc = item.last_child().unwrap();
+        assert!(VRc::ptr_eq(lc.item_tree(), item.item_tree()));
+        assert_eq!(lc.index(), 3);
+
+        let fcn = fc.next_sibling().unwrap();
+        let lcp = lc.previous_sibling().unwrap();
+
+        assert_eq!(fcn, lcp);
+        assert!(!VRc::ptr_eq(fcn.item_tree(), item.item_tree()));
+
+        let last = fcn.next_sibling().unwrap();
+        assert_eq!(last, lc);
+
+        let first = lcp.previous_sibling().unwrap();
+        assert_eq!(first, fc);
+
+        // Nested component:
+        let nested_root = fcn.first_child().unwrap();
+        assert_eq!(nested_root, fcn.last_child().unwrap());
+        assert!(nested_root.next_sibling().is_none());
+        assert!(nested_root.previous_sibling().is_none());
+        assert!(!VRc::ptr_eq(nested_root.item_tree(), item.item_tree()));
+        assert!(!VRc::ptr_eq(nested_root.item_tree(), fcn.item_tree()));
+
+        let nested_child = nested_root.first_child().unwrap();
+        assert_eq!(nested_child, nested_root.last_child().unwrap());
+        assert!(VRc::ptr_eq(nested_root.item_tree(), nested_child.item_tree()));
+    }
+
+    #[test]
+    fn test_tree_traversal_nested_subtrees_forward_focus() {
+        let component = create_nested_subtrees();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+        let lc = item.last_child().unwrap();
+        let nested_root = fcn.first_child().unwrap();
+        let nested_child = nested_root.first_child().unwrap();
+
+        // Focus traversal:
+        let mut cursor = item.clone();
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, nested_root);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, nested_child);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.next_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    #[test]
+    fn test_tree_traversal_nested_subtrees_backward_focus() {
+        let component = create_nested_subtrees();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        let fc = item.first_child().unwrap();
+        let fcn = fc.next_sibling().unwrap();
+        let lc = item.last_child().unwrap();
+        let nested_root = fcn.first_child().unwrap();
+        let nested_child = nested_root.first_child().unwrap();
+
+        // Focus traversal:
+        let mut cursor = item.clone();
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, lc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, nested_child);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, nested_root);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fcn);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, fc);
+
+        cursor = cursor.previous_focus_item();
+        assert_eq!(cursor, item);
+    }
+
+    fn create_subtrees_item() -> VRc<ItemTreeVTable, vtable::Dyn> {
+        let window_adapter = WindowAdapter::new();
+        let weak_adapter =
+            Rc::downgrade(&window_adapter) as std::rc::Weak<dyn crate::window::WindowAdapter>;
+
+        let component = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 2,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 4,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+
+            window_adapter: weak_adapter.clone(),
+            window_item: None,
+        });
+
+        component.as_pin_ref().subtrees.replace(vec![vec![
+            VRc::new(TestItemTree {
+                parent_component: Some(VRc::downgrade(&VRc::into_dyn(component.clone()))),
+                item_tree: vec![ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 1,
+                    parent_index: 1,
+                    item_array_index: 0,
+                }],
+                subtrees: std::cell::RefCell::new(Vec::new()),
+                subtree_index: 0,
+
+                window_adapter: weak_adapter.clone(),
+                window_item: None,
+            }),
+            VRc::new(TestItemTree {
+                parent_component: Some(VRc::downgrade(&VRc::into_dyn(component.clone()))),
+                item_tree: vec![ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 1,
+                    parent_index: 1,
+                    item_array_index: 0,
+                }],
+                subtrees: std::cell::RefCell::new(Vec::new()),
+                subtree_index: 1,
+
+                window_adapter: weak_adapter.clone(),
+                window_item: None,
+            }),
+            VRc::new(TestItemTree {
+                parent_component: Some(VRc::downgrade(&VRc::into_dyn(component.clone()))),
+                item_tree: vec![ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 1,
+                    parent_index: 1,
+                    item_array_index: 0,
+                }],
+                subtrees: std::cell::RefCell::new(Vec::new()),
+                subtree_index: 2,
+
+                window_adapter: weak_adapter,
+                window_item: None,
+            }),
+        ]]);
+
+        VRc::into_dyn(component)
+    }
+
+    #[test]
+    fn test_tree_traversal_subtrees_item_structure() {
+        let component = create_subtrees_item();
+
+        // Examine root node:
+        let item = ItemRc::new_root(component.clone());
+        assert!(item.previous_sibling().is_none());
+        assert!(item.next_sibling().is_none());
+
+        let sub1 = item.first_child().unwrap();
+        assert_eq!(sub1.index(), 0);
+        assert!(!VRc::ptr_eq(sub1.item_tree(), item.item_tree()));
+
+        // assert!(sub1.previous_sibling().is_none());
+
+        let sub2 = sub1.next_sibling().unwrap();
+        assert_eq!(sub2.index(), 0);
+        assert!(!VRc::ptr_eq(sub1.item_tree(), sub2.item_tree()));
+        assert!(!VRc::ptr_eq(item.item_tree(), sub2.item_tree()));
+
+        assert!(sub2.previous_sibling() == Some(sub1.clone()));
+
+        let sub3 = sub2.next_sibling().unwrap();
+        assert_eq!(sub3.index(), 0);
+        assert!(!VRc::ptr_eq(sub1.item_tree(), sub2.item_tree()));
+        assert!(!VRc::ptr_eq(sub2.item_tree(), sub3.item_tree()));
+        assert!(!VRc::ptr_eq(item.item_tree(), sub3.item_tree()));
+
+        assert_eq!(sub3.previous_sibling().unwrap(), sub2.clone());
+    }
+
+    #[test]
+    fn test_component_item_tree_root_only() {
+        let nodes = vec![ItemTreeNode::Item {
+            is_accessible: false,
+            children_count: 0,
+            children_index: 1,
+            parent_index: 0,
+            item_array_index: 0,
+        }];
+
+        let tree: ItemTreeNodeArray = (nodes.as_slice()).into();
+
+        assert_eq!(tree.first_child(0), None);
+        assert_eq!(tree.last_child(0), None);
+        assert_eq!(tree.previous_sibling(0), None);
+        assert_eq!(tree.next_sibling(0), None);
+        assert_eq!(tree.parent(0), None);
+    }
+
+    #[test]
+    fn test_component_item_tree_one_child() {
+        let nodes = vec![
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 1,
+                children_index: 1,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 2,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+        ];
+
+        let tree: ItemTreeNodeArray = (nodes.as_slice()).into();
+
+        assert_eq!(tree.first_child(0), Some(1));
+        assert_eq!(tree.last_child(0), Some(1));
+        assert_eq!(tree.previous_sibling(0), None);
+        assert_eq!(tree.next_sibling(0), None);
+        assert_eq!(tree.parent(0), None);
+        assert_eq!(tree.previous_sibling(1), None);
+        assert_eq!(tree.next_sibling(1), None);
+        assert_eq!(tree.parent(1), Some(0));
+    }
+
+    #[test]
+    fn test_component_item_tree_tree_children() {
+        let nodes = vec![
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 3,
+                children_index: 1,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 4,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 4,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+            ItemTreeNode::Item {
+                is_accessible: false,
+                children_count: 0,
+                children_index: 4,
+                parent_index: 0,
+                item_array_index: 0,
+            },
+        ];
+
+        let tree: ItemTreeNodeArray = (nodes.as_slice()).into();
+
+        assert_eq!(tree.first_child(0), Some(1));
+        assert_eq!(tree.last_child(0), Some(3));
+        assert_eq!(tree.previous_sibling(0), None);
+        assert_eq!(tree.next_sibling(0), None);
+        assert_eq!(tree.parent(0), None);
+
+        assert_eq!(tree.previous_sibling(1), None);
+        assert_eq!(tree.next_sibling(1), Some(2));
+        assert_eq!(tree.parent(1), Some(0));
+
+        assert_eq!(tree.previous_sibling(2), Some(1));
+        assert_eq!(tree.next_sibling(2), Some(3));
+        assert_eq!(tree.parent(2), Some(0));
+
+        assert_eq!(tree.previous_sibling(3), Some(2));
+        assert_eq!(tree.next_sibling(3), None);
+        assert_eq!(tree.parent(3), Some(0));
+    }
+
+    // It does not contain any dynamic elements
+    fn create_subsubtree_items(
+        window_adapter: Option<std::rc::Rc<WindowAdapter>>,
+    ) -> (std::rc::Rc<WindowAdapter>, VRc<ItemTreeVTable>) {
+        let window_adapter = window_adapter.unwrap_or(WindowAdapter::new());
+        let mut window_item = WindowItem::default();
+        window_item.width = Property::new(LogicalLength::new(30.));
+        window_item.height = Property::new(LogicalLength::new(30.));
+        (
+            window_adapter.clone(),
+            VRc::into_dyn(VRc::new(TestItemTree {
+                parent_component: None,
+                item_tree: vec![
+                    // Root
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 1,
+                        children_index: 1,
+                        parent_index: 0,
+                        item_array_index: 0,
+                    },
+                    // First child
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 1,
+                        children_index: 2, // Monotonic increasing
+                        parent_index: 0,
+                        item_array_index: 1,
+                    },
+                    // First child of the first child of the root
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 0,
+                        children_index: 3, // Not relevant because it has no children
+                        parent_index: 1,
+                        item_array_index: 2,
+                    },
+                ],
+                subtrees: std::cell::RefCell::new(Vec::new()),
+                subtree_index: usize::MAX,
+                window_adapter: Rc::downgrade(&window_adapter) as _,
+                window_item: Some(window_item),
+            })),
+        )
+    }
+
+    struct TransformTestItemTree {
+        item_tree: Vec<ItemTreeNode>,
+        geometries: Vec<LogicalRect>,
+        window_adapter: std::rc::Weak<dyn crate::window::WindowAdapter>,
+        root: WindowItem,
+        transform: Transform,
+        clip: Clip,
+        leaf: WindowItem,
+    }
+
+    impl ItemTree for TransformTestItemTree {
+        fn visit_children_item(
+            self: Pin<&Self>,
+            _index: isize,
+            _order: TraversalOrder,
+            _visitor: vtable::VRefMut<ItemVisitorVTable>,
+        ) -> VisitChildrenResult {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn get_item_ref(self: Pin<&Self>, index: u32) -> Pin<VRef<'_, ItemVTable>> {
+            let this = self.get_ref();
+            match index {
+                0 => Pin::new(VRef::new(&this.root)),
+                1 => Pin::new(VRef::new(&this.transform)),
+                2 => Pin::new(VRef::new(&this.clip)),
+                3 => Pin::new(VRef::new(&this.leaf)),
+                _ => unimplemented!("Not needed for this test"),
+            }
+        }
+
+        fn get_item_tree(self: Pin<&Self>) -> Slice<'_, ItemTreeNode> {
+            Slice::from_slice(&self.get_ref().item_tree)
+        }
+
+        fn parent_node(self: Pin<&Self>, _result: &mut ItemWeak) {}
+
+        fn embed_component(
+            self: Pin<&Self>,
+            _parent_component: &ItemTreeWeak,
+            _item_tree_index: u32,
+        ) -> bool {
+            false
+        }
+
+        fn layout_info(self: Pin<&Self>, _orientation: Orientation) -> LayoutInfo {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn subtree_index(self: Pin<&Self>) -> usize {
+            usize::MAX
+        }
+
+        fn get_subtree_range(self: Pin<&Self>, _subtree_index: u32) -> IndexRange {
+            (0..0).into()
+        }
+
+        fn get_subtree(
+            self: Pin<&Self>,
+            _subtree_index: u32,
+            _component_index: usize,
+            _result: &mut ItemTreeWeak,
+        ) {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn accessible_role(self: Pin<&Self>, _index: u32) -> AccessibleRole {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn accessible_string_property(
+            self: Pin<&Self>,
+            _index: u32,
+            _what: AccessibleStringProperty,
+            _result: &mut SharedString,
+        ) -> bool {
+            false
+        }
+
+        fn item_element_infos(self: Pin<&Self>, _index: u32, _result: &mut SharedString) -> bool {
+            false
+        }
+
+        fn element_testable_properties(
+            self: Pin<&Self>,
+            _index: u32,
+            _result: &mut SharedString,
+        ) -> bool {
+            false
+        }
+
+        fn element_testable_property_value(
+            self: Pin<&Self>,
+            _index: u32,
+            _property_name: Slice<u8>,
+            _result: &mut SharedString,
+        ) -> bool {
+            false
+        }
+
+        fn ensure_instantiated(self: Pin<&Self>) -> bool {
+            false
+        }
+
+        fn window_adapter(
+            self: Pin<&Self>,
+            _do_create: bool,
+            result: &mut Option<WindowAdapterRc>,
+        ) {
+            *result = self.window_adapter.upgrade()
+        }
+
+        fn slint_context(self: Pin<&Self>, _result: &mut Option<SlintContext>) {}
+
+        fn item_geometry(self: Pin<&Self>, index: u32) -> LogicalRect {
+            self.geometries[index as usize]
+        }
+
+        fn accessibility_action(self: Pin<&Self>, _index: u32, _action: &AccessibilityAction) {
+            unimplemented!("Not needed for this test")
+        }
+
+        fn supported_accessibility_actions(
+            self: Pin<&Self>,
+            _index: u32,
+        ) -> SupportedAccessibilityAction {
+            unimplemented!("Not needed for this test")
+        }
+    }
+
+    crate::item_tree::ItemTreeVTable_static!(static TRANSFORM_TEST_COMPONENT_VT for TransformTestItemTree);
+
+    fn create_transform_test_items() -> (std::rc::Rc<WindowAdapter>, VRc<ItemTreeVTable>) {
+        let window_adapter = WindowAdapter::new_with_transformations(true);
+
+        let mut transform = Transform::default();
+        transform.transform_scale_x = Property::new(2.);
+        transform.transform_scale_y = Property::new(3.);
+        transform.transform_rotation = Property::new(0.);
+        transform.transform_origin = Property::new(LogicalPosition::new(0., 0.));
+
+        let mut clip = Clip::default();
+        clip.clip = Property::new(true);
+
+        (
+            window_adapter.clone(),
+            VRc::into_dyn(VRc::new(TransformTestItemTree {
+                item_tree: vec![
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 1,
+                        children_index: 1,
+                        parent_index: 0,
+                        item_array_index: 0,
+                    },
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 1,
+                        children_index: 2,
+                        parent_index: 0,
+                        item_array_index: 1,
+                    },
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 1,
+                        children_index: 3,
+                        parent_index: 1,
+                        item_array_index: 2,
+                    },
+                    ItemTreeNode::Item {
+                        is_accessible: false,
+                        children_count: 0,
+                        children_index: 4,
+                        parent_index: 2,
+                        item_array_index: 3,
+                    },
+                ],
+                geometries: vec![
+                    LogicalRect::new(Point2D::new(0., 0.), LogicalSize::new(100., 100.)),
+                    LogicalRect::new(Point2D::new(10., 20.), LogicalSize::new(40., 40.)),
+                    LogicalRect::new(Point2D::new(5., 6.), LogicalSize::new(20., 20.)),
+                    LogicalRect::new(Point2D::new(8., 4.), LogicalSize::new(10., 10.)),
+                ],
+                window_adapter: Rc::downgrade(&window_adapter) as _,
+                root: WindowItem::default(),
+                transform,
+                clip,
+                leaf: WindowItem::default(),
+            })),
+        )
+    }
+
+    fn assert_point_approx_eq(actual: LogicalPoint, expected: LogicalPoint) {
+        const EPSILON: f32 = 0.0001;
+        assert!(
+            (actual.x - expected.x).abs() < EPSILON,
+            "actual x {}, expected x {}",
+            actual.x,
+            expected.x
+        );
+        assert!(
+            (actual.y - expected.y).abs() < EPSILON,
+            "actual y {}, expected y {}",
+            actual.y,
+            expected.y
+        );
+    }
+
+    #[test]
+    fn test_map_to_ancestor() {
+        let (_window_adapter, item_tree) = create_subsubtree_items(None);
+        let root = ItemRc::new_root(item_tree);
+        let first_child = root.first_child().unwrap();
+        let first_child_of_first_child = first_child.first_child().unwrap();
+
+        {
+            let point = first_child.map_to_ancestor(Point2D::new(6., 19.), &root);
+            assert_eq!(point.x, 6.);
+            assert_eq!(point.y, 19.);
+        }
+
+        {
+            let point =
+                first_child_of_first_child.map_to_ancestor(Point2D::new(27., -10.), &first_child);
+            assert_eq!(point.x, 27.);
+            assert_eq!(point.y, -10.);
+        }
+
+        {
+            // Position of the parent must be added
+            let point = first_child_of_first_child.map_to_ancestor(Point2D::new(27., -10.), &root);
+            // Position of          first child
+            assert_eq!(point.x, GEOMETRY_POSITION_X + 27.);
+            assert_eq!(point.y, GEOMETRY_POSITION_Y - 10.);
+        }
+    }
+
+    #[test]
+    fn test_map_to_window() {
+        let (_window_adapter, item_tree) = create_subsubtree_items(None);
+        let root = ItemRc::new_root(item_tree);
+        let first_child = root.first_child().unwrap();
+        let first_child_of_first_child = first_child.first_child().unwrap();
+
+        let point = first_child_of_first_child.map_to_window(Point2D::new(-5., 7.));
+        // Position of position of first_child  + first_child_of_first_child
+        assert_eq!(point.x, GEOMETRY_POSITION_X + GEOMETRY_POSITION_X - 5.);
+        assert_eq!(point.y, GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y + 7.);
+    }
+
+    #[test]
+    fn test_map_to_window_through_transform_roundtrip() {
+        let (_window_adapter, item_tree) = create_transform_test_items();
+        let root = ItemRc::new_root(item_tree);
+        let transform = root.first_child().unwrap();
+        let clip = transform.first_child().unwrap();
+        let leaf = clip.first_child().unwrap();
+
+        let local_point = Point2D::new(4., 5.);
+        let window_point = leaf.map_to_window(local_point);
+        assert_point_approx_eq(window_point, Point2D::new(28., 53.));
+    }
+
+    #[test]
+    fn test_visibility_with_clip_under_transform() {
+        let (_window_adapter, item_tree) = create_transform_test_items();
+        let root = ItemRc::new_root(item_tree);
+        let transform = root.first_child().unwrap();
+        let clip = transform.first_child().unwrap();
+        let leaf = clip.first_child().unwrap();
+
+        assert!(leaf.is_visible());
+
+        let hidden_point = leaf.map_to_window(Point2D::new(25., 25.));
+        let (clip_rect, leaf_geometry) = leaf.absolute_clip_rect_and_geometry();
+        assert!(clip_rect.intersection(&leaf_geometry).is_some());
+        assert!(!clip_rect.contains(hidden_point));
+    }
+
+    #[test]
+    fn test_absolute_clip_rect_and_geometry_under_transform() {
+        let (_window_adapter, item_tree) = create_transform_test_items();
+        let root = ItemRc::new_root(item_tree);
+        let transform = root.first_child().unwrap();
+        let clip = transform.first_child().unwrap();
+        let leaf = clip.first_child().unwrap();
+
+        let (clip_rect, leaf_geometry) = leaf.absolute_clip_rect_and_geometry();
+        // The clip item (5,6,20x20) scaled by (2,3) and offset by the transform
+        // item's position (10,20).
+        assert_point_approx_eq(clip_rect.origin, Point2D::new(20., 38.));
+        assert_point_approx_eq(
+            Point2D::new(clip_rect.width(), clip_rect.height()),
+            Point2D::new(40., 60.),
+        );
+        // The leaf (8,4,10x10) offset by the clip item's position (5,6), scaled by (2,3),
+        // and offset by the transform item's position (10,20). The scale must apply to the
+        // clip item's offset too: it lives in the transform item's coordinate space.
+        assert_point_approx_eq(leaf_geometry.origin, Point2D::new(36., 50.));
+        assert_point_approx_eq(
+            Point2D::new(leaf_geometry.width(), leaf_geometry.height()),
+            Point2D::new(20., 30.),
+        );
+    }
+
+    #[test]
+    fn test_map_to_native_window_popup() {
+        const POPUP_LOCATION: LogicalPosition = LogicalPosition::new(20., 33.);
+        let mut window_item = WindowItem::default();
+        window_item.width = Property::new(LogicalLength::new(30.));
+        window_item.height = Property::new(LogicalLength::new(30.));
+        // A popup has it's own ItemTreeVTable
+        let (window_adapter, parent) = create_one_node_component(Some(window_item));
+        let popup_component = create_subsubtree_items(Some(window_adapter.clone())).1;
+        window_adapter.window.0.show_popup(
+            &popup_component,
+            alloc::boxed::Box::new(move || POPUP_LOCATION),
+            crate::items::PopupClosePolicy::NoAutoClose,
+            &ItemRc::new_root(parent.clone()),
+            crate::window::WindowKind::Popup,
+            alloc::boxed::Box::new(|_| {}),
+        );
+
+        let root = ItemRc::new_root(popup_component);
+        let first_child = root.first_child().unwrap();
+        let first_child_of_first_child = first_child.first_child().unwrap();
+
+        // Check that we have a ChildWindow popup
+        let active_popups = window_adapter.window.0.active_popups();
+        assert_eq!(active_popups.len(), 1);
+        let popup = active_popups.first().unwrap();
+        assert!(matches!(popup.location, crate::window::PopupWindowLocation::ChildWindow { .. }));
+
+        // The popup is not a real window and therefore it does not have it's own coordinate system
+        // So map_to_window is really absolute to the window not to the popup window
+        let point = first_child_of_first_child.map_to_native_window(Point2D::new(3., -82.));
+        assert_eq!(
+            point.x,
+            // ------------- Popup --------------- +     root.x          + first_child.x       + 3
+            POPUP_LOCATION.x + GEOMETRY_POSITION_X + GEOMETRY_POSITION_X + GEOMETRY_POSITION_X + 3.
+        );
+        assert_eq!(
+            point.y,
+            POPUP_LOCATION.y + GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y
+                - 82.
+        );
+    }
+
+    #[test]
+    fn test_window_overlay_renders_above_child_popups_without_joining_popup_stack() {
+        let mut window_item = WindowItem::default();
+        window_item.width = Property::new(LogicalLength::new(30.));
+        window_item.height = Property::new(LogicalLength::new(30.));
+        let (window_adapter, component) = create_one_node_component(Some(window_item));
+        window_adapter
+            .window
+            .0
+            .set_context(crate::SlintContext::new(Box::new(crate::testing::NoWindowPlatform)));
+        window_adapter.window.0.set_component(&component);
+
+        let popup = create_subsubtree_items(Some(window_adapter.clone())).1;
+        window_adapter.window.0.show_popup(
+            &popup,
+            alloc::boxed::Box::new(|| LogicalPosition::new(10., 20.)),
+            crate::items::PopupClosePolicy::NoAutoClose,
+            &ItemRc::new_root(component.clone()),
+            crate::window::WindowKind::Popup,
+            alloc::boxed::Box::new(|_| {}),
+        );
+
+        let overlay = create_subsubtree_items(Some(window_adapter.clone())).1;
+        window_adapter.window.0.add_overlay(&overlay).unwrap();
+        let unrelated_overlay = create_subsubtree_items(None).1;
+        assert!(window_adapter.window.0.add_overlay(&unrelated_overlay).is_err());
+
+        let resized = LogicalSize::new(75., 65.);
+        window_adapter.window.0.set_window_item_geometry(resized);
+        let overlay_window = ItemRc::new_root(overlay.clone()).downcast::<WindowItem>().unwrap();
+        assert_eq!(overlay_window.as_pin_ref().width().0, resized.width);
+        assert_eq!(overlay_window.as_pin_ref().height().0, resized.height);
+
+        assert_eq!(window_adapter.window.0.active_popups().len(), 1);
+        let rendered_components = || {
+            window_adapter
+                .window
+                .0
+                .draw_contents(|components, _| {
+                    components
+                        .iter()
+                        .map(|(component, _)| component.upgrade().unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap()
+        };
+        for (actual, expected) in rendered_components().iter().zip([&component, &popup, &overlay]) {
+            assert!(VRc::ptr_eq(actual, expected));
+        }
+
+        window_adapter.window.0.close_top_popup();
+        assert!(window_adapter.window.0.active_popups().is_empty());
+        let components_without_popup = rendered_components();
+        assert_eq!(components_without_popup.len(), 2);
+        assert!(VRc::ptr_eq(&components_without_popup[1], &overlay));
+
+        window_adapter.window.0.clear_overlays();
+        assert_eq!(rendered_components().len(), 1);
+
+        window_adapter.window.0.add_overlay(&overlay).unwrap();
+        let replacement = create_subsubtree_items(Some(window_adapter.clone())).1;
+        window_adapter.window.0.set_component(&replacement);
+        let components_after_replacement = rendered_components();
+        assert_eq!(components_after_replacement.len(), 1);
+        assert!(VRc::ptr_eq(&components_after_replacement[0], &replacement));
+    }
+
+    #[test]
+    fn test_map_to_window_popup() {
+        const POPUP_LOCATION: LogicalPosition = LogicalPosition::new(20., 33.);
+        let (window_adapter, item_tree) = create_subsubtree_items(None);
+        window_adapter.window.0.show_popup(
+            &item_tree,
+            alloc::boxed::Box::new(move || POPUP_LOCATION),
+            crate::items::PopupClosePolicy::NoAutoClose,
+            &ItemRc::new_root(item_tree.clone()),
+            crate::window::WindowKind::Popup,
+            alloc::boxed::Box::new(|_| {}),
+        );
+
+        let root = ItemRc::new_root(item_tree);
+        let first_child = root.first_child().unwrap();
+        let first_child_of_first_child = first_child.first_child().unwrap();
+
+        // Check that we have a ChildWindow popup
+        let active_popups = window_adapter.window.0.active_popups();
+        assert_eq!(active_popups.len(), 1);
+        let popup = active_popups.first().unwrap();
+        assert!(matches!(popup.location, crate::window::PopupWindowLocation::ChildWindow { .. }));
+
+        // The popup is not a real window and therefore it does not have it's own coordinate system
+        // So map_to_window is really absolute to the window not to the popup window
+        let point = first_child_of_first_child.map_to_window(Point2D::new(3., -82.));
+        // Does not consider the popup location
+        //                         Root.x       +     first_child.x   + 3
+        assert_eq!(point.x, GEOMETRY_POSITION_X + GEOMETRY_POSITION_X + 3.);
+        assert_eq!(point.y, GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y - 82.);
+    }
+
+    #[test]
+    fn test_showing_and_closing_popups_bumps_popups_generation() {
+        let (window_adapter, item_tree) = create_subsubtree_items(None);
+        let window = &window_adapter.window.0;
+        let tracker = Box::pin(crate::properties::PropertyTracker::<false>::default());
+        let observe = || tracker.as_ref().evaluate(|| window.popups_generation());
+        let show = || {
+            window.show_popup(
+                &item_tree,
+                Box::new(LogicalPosition::default),
+                crate::items::PopupClosePolicy::NoAutoClose,
+                &ItemRc::new_root(item_tree.clone()),
+                crate::window::WindowKind::Popup,
+                Box::new(|_| {}),
+            )
+        };
+
+        let mut generation = observe();
+        let mut assert_bumped = |what: &str| {
+            assert!(tracker.is_dirty(), "{what} didn't dirty a dependent");
+            let next = observe();
+            assert_ne!(next, generation, "{what} didn't bump the generation");
+            generation = next;
+        };
+
+        let popup = show();
+        assert_bumped("showing a popup");
+        window.close_popup(popup);
+        assert_bumped("closing a popup");
+        show();
+        assert_bumped("showing a popup");
+        window.close_top_popup();
+        assert_bumped("closing the top popup");
+        show();
+        assert_bumped("showing a popup");
+        window.close_all_popups();
+        assert_bumped("closing all popups");
+
+        window.close_all_popups();
+        window.close_top_popup();
+        assert!(!tracker.is_dirty(), "closing no popup dirtied a dependent");
+    }
+
+    // Includes also dynamic elements
+    fn create_subsubtree_items_dynamic_elements(
+        window_adapter: Rc<WindowAdapter>,
+    ) -> VRc<ItemTreeVTable> {
+        let weak_adapter =
+            Rc::downgrade(&window_adapter) as std::rc::Weak<dyn crate::window::WindowAdapter>;
+        let mut window_item = WindowItem::default();
+        window_item.width = Property::new(LogicalLength::new(30.));
+        window_item.height = Property::new(LogicalLength::new(30.));
+
+        let item_tree = VRc::new(TestItemTree {
+            parent_component: None,
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 1,
+                    children_index: 1,
+                    parent_index: 0,
+                    item_array_index: 0,
+                },
+                // First child
+                ItemTreeNode::DynamicTree { index: 0, parent_index: 0 },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: usize::MAX,
+            window_adapter: weak_adapter.clone(),
+            window_item: Some(window_item),
+        });
+
+        item_tree.as_pin_ref().subtrees.replace(vec![vec![VRc::new(TestItemTree {
+            parent_component: Some(VRc::downgrade(&VRc::into_dyn(item_tree.clone()))),
+            item_tree: vec![
+                // Root
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 1,
+                    children_index: 1,
+                    parent_index: 1, // The index in the parent item tree
+                    item_array_index: 0,
+                },
+                // First child
+                ItemTreeNode::Item {
+                    is_accessible: false,
+                    children_count: 0,
+                    children_index: 0,
+                    parent_index: 0,
+                    item_array_index: 1,
+                },
+            ],
+            subtrees: std::cell::RefCell::new(Vec::new()),
+            subtree_index: 0,
+
+            window_adapter: weak_adapter,
+            window_item: None,
+        })]]);
+
+        VRc::into_dyn(item_tree)
+    }
+
+    // This time the element is a child of a dynamic element with a different item tree
+    // Therefore we have to make sure we go up recursively
+    #[test]
+    fn test_map_to_native_window_popup_dynamic_element() {
+        const POPUP_LOCATION: LogicalPosition = LogicalPosition::new(20., 33.);
+
+        let mut window_item = WindowItem::default();
+        window_item.width = Property::new(LogicalLength::new(30.));
+        window_item.height = Property::new(LogicalLength::new(30.));
+
+        // A popup has it's own ItemTreeVTable
+        let (window_adapter, parent) = create_one_node_component(Some(window_item));
+        let popup_component = create_subsubtree_items_dynamic_elements(window_adapter.clone());
+        window_adapter.window.0.show_popup(
+            &popup_component,
+            alloc::boxed::Box::new(move || POPUP_LOCATION),
+            crate::items::PopupClosePolicy::NoAutoClose,
+            &ItemRc::new_root(parent.clone()),
+            crate::window::WindowKind::Popup,
+            alloc::boxed::Box::new(|_| {}),
+        );
+
+        // Check that we have a ChildWindow popup, otherwise the popup has its own coordinate system
+        let active_popups = window_adapter.window.0.active_popups();
+        assert_eq!(active_popups.len(), 1);
+        let popup = active_popups.first().unwrap();
+        assert!(matches!(popup.location, crate::window::PopupWindowLocation::ChildWindow { .. }));
+
+        let root = ItemRc::new_root(popup_component);
+        let first_child = root.first_child().unwrap();
+        // Check if the first item is a dynamic tree!
+        let comp_ref_pin = vtable::VRc::borrow_pin(&root.item_tree);
+        let item_tree_array = crate::item_tree::ItemTreeNodeArray::new(&comp_ref_pin);
+        assert!(matches!(
+            item_tree_array.get(1).expect("Must be one element"),
+            ItemTreeNode::DynamicTree { .. }
+        ));
+        // Because of the dynamic tree, the item tree is not the same as for the root
+        let first_child_of_first_child = first_child.first_child().expect("We have one child");
+
+        // The popup is not a real window and therefore it does not have it's own coordinate system
+        // So map_to_window is really absolute to the window not to the popup window
+        let point = first_child_of_first_child.map_to_native_window(Point2D::new(3., -82.));
+        assert_eq!(
+            point.x,
+            // ------------- Popup --------------- +     root.x          + first_child.x       + 3
+            POPUP_LOCATION.x + GEOMETRY_POSITION_X + GEOMETRY_POSITION_X + GEOMETRY_POSITION_X + 3.
+        );
+        assert_eq!(
+            point.y,
+            POPUP_LOCATION.y + GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y + GEOMETRY_POSITION_Y
+                - 82.
+        );
+    }
+
+    impl crate::renderer::RendererSealed for Renderer {
+        fn char_size(
+            &self,
+            _font_request: crate::graphics::FontRequest,
+            _line_height_factor: Option<f32>,
+            _ch: char,
+        ) -> LogicalSize {
+            LogicalSize::new(5., 10.)
+        }
+
+        fn font_metrics(
+            &self,
+            _font_request: crate::graphics::FontRequest,
+        ) -> crate::items::FontMetrics {
+            crate::items::FontMetrics { ..Default::default() }
+        }
+
+        fn free_graphics_resources(
+            &self,
+            _component: ItemTreeRef,
+            _items: &mut dyn Iterator<Item = Pin<crate::items::ItemRef<'_>>>,
+        ) -> Result<(), crate::platform::PlatformError> {
+            Ok(())
+        }
+
+        fn mark_dirty_region(&self, _region: crate::partial_renderer::DirtyRegion) {
+            // Will be called when showing a popup to mark the previous position dirty
+        }
+
+        fn register_bitmap_font(&self, _font_data: &'static crate::graphics::BitmapFont) {
+            unimplemented!("Not required in this test");
+        }
+
+        fn register_font_from_memory(
+            &self,
+            _data: &'static [u8],
+        ) -> Result<(), std::prelude::v1::Box<dyn std::error::Error>> {
+            unimplemented!("Not required in this test");
+        }
+
+        fn register_font_from_path(
+            &self,
+            _path: &std::path::Path,
+        ) -> Result<(), std::prelude::v1::Box<dyn std::error::Error>> {
+            unimplemented!("Not required in this test");
+        }
+
+        fn resize(&self, _size: crate::api::PhysicalSize) -> Result<(), crate::api::PlatformError> {
+            Ok(())
+        }
+
+        fn scale_factor(&self) -> Option<crate::lengths::ScaleFactor> {
+            None
+        }
+
+        fn set_rendering_notifier(
+            &self,
+            _callback: std::prelude::v1::Box<dyn crate::api::RenderingNotifier>,
+        ) -> Result<(), crate::api::SetRenderingNotifierError> {
+            Ok(())
+        }
+
+        fn set_window_adapter(
+            &self,
+            _window_adapter: &std::rc::Rc<dyn crate::window::WindowAdapter>,
+        ) {
+        }
+
+        fn slint_context(&self) -> Option<crate::SlintContext> {
+            None
+        }
+
+        fn supports_transformations(&self) -> bool {
+            self.supports_transformations
+        }
+
+        fn take_snapshot(
+            &self,
+        ) -> Result<crate::api::SharedPixelBuffer<crate::api::Rgba8Pixel>, crate::api::PlatformError>
+        {
+            unimplemented!("Not required in this test");
+        }
+
+        fn text_input_byte_offset_for_position(
+            &self,
+            _text_input: Pin<&crate::items::TextInput>,
+            _item_rc: &ItemRc,
+            _pos: LogicalPoint,
+        ) -> (usize, crate::items::TextCursorAffinity) {
+            unimplemented!("Not required in this test");
+        }
+
+        fn text_input_cursor_rect_for_byte_offset(
+            &self,
+            _text_input: Pin<&crate::items::TextInput>,
+            _item_rc: &ItemRc,
+            _byte_offset: usize,
+            _affinity: crate::items::TextCursorAffinity,
+        ) -> LogicalRect {
+            unimplemented!("Not required in this test");
+        }
+
+        fn text_size(
+            &self,
+            _text_item: Pin<&dyn crate::item_rendering::RenderString>,
+            _item_rc: &crate::item_tree::ItemRc,
+            _max_width: Option<crate::lengths::LogicalLength>,
+            _text_wrap: crate::items::TextWrap,
+        ) -> crate::lengths::LogicalSize {
+            unimplemented!("Not required in this test");
+        }
+
+        fn window_adapter(&self) -> Option<std::rc::Rc<dyn crate::window::WindowAdapter>> {
+            unimplemented!("Not required in this test");
+        }
+    }
+}
