@@ -23,6 +23,7 @@ use taffy::{
     compute_oof_layout, prelude::*,
 };
 
+pub(crate) mod block_item;
 pub(crate) mod construct;
 pub(crate) mod damage;
 pub(crate) mod inline;
@@ -988,7 +989,7 @@ impl taffy::LayoutBlockContainer for LayoutPassState<'_> {
         Self: 'a;
 
     type BlockItemStyle<'a>
-        = TaffyStyloStyle<ComputedStyleRef<'a>>
+        = block_item::BlockChildStyle<ComputedStyleRef<'a>>
     where
         Self: 'a;
 
@@ -997,7 +998,22 @@ impl taffy::LayoutBlockContainer for LayoutPassState<'_> {
     }
 
     fn get_block_child_style(&self, child_node_id: NodeId) -> Self::BlockItemStyle<'_> {
-        self.child_layout_style(self.node_from_id(child_node_id))
+        let node = self.node_from_id(child_node_id);
+        // An image that won't load is laid out with its alt text, if it has any.
+        let shows_alt_text = node.element_data().is_some_and(|element| {
+            let unavailable = match &element.special_data {
+                SpecialElementData::Image(image) => matches!(**image, ImageData::Unavailable),
+                _ => false,
+            };
+            unavailable
+                && element
+                    .attr(local_name!("alt"))
+                    .is_some_and(|alt| !alt.trim().is_empty())
+        });
+        block_item::BlockChildStyle {
+            style: self.child_layout_style(node),
+            shows_alt_text,
+        }
     }
 
     #[inline(always)]

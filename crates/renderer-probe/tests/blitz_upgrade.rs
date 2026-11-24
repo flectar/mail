@@ -2349,3 +2349,21 @@ fn a_fixed_size_inline_block_keeps_its_baseline_when_its_cell_is_measured() {
     );
     close(node(&doc, "#t").final_layout().size.height, 32.0);
 }
+
+#[test]
+fn a_block_level_replaced_element_shrinks_with_its_column() {
+    // A replaced element whose `max-width` is a percentage adds nothing to
+    // its column's minimum width (CSS Sizing 3 section 5.2.2) when it is
+    // block-level as when it is inline, as in Chrome, so a table column
+    // holding a `display: block` image can shrink on a narrow screen. An
+    // image showing its alt text keeps its width, as a broken one in Chrome.
+    let doc = document(
+        "<style>table{border-spacing:0}</style>
+         <table style='width:1px'><tr><td id=a><canvas style='display:block;width:48px;max-width:100%'></canvas></td></tr></table>
+         <table style='width:1px'><tr><td id=b><canvas style='display:block;width:48px'></canvas></td></tr></table>
+         <table style='width:1px'><tr><td id=c><img alt='editorialista' style='display:block;width:48px;max-width:100%'></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 1.0);
+    close(node(&doc, "#b").final_layout().size.width, 48.0);
+    close(node(&doc, "#c").final_layout().size.width, 48.0);
+}
