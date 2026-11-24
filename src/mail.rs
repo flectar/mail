@@ -2319,6 +2319,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_compose_in_window(&self, enabled: bool) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.compose_in_window = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_conversation_view(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.conversation_view = enabled;

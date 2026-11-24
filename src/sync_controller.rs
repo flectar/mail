@@ -1118,6 +1118,7 @@ fn show_preferences(
         .set_policy(settings.read_receipts.as_str().into());
     crate::apply_list_rows(app, settings);
     app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_in_window(settings.compose_in_window);
     app.set_compose_text_size(settings.compose_text_size.as_str().into());
     crate::mail_rules::apply_cleanup(
         app,
