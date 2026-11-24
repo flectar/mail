@@ -21,7 +21,7 @@ const WIDTH: u32 = 1320;
 const HEIGHT: u32 = 800;
 
 fn render(app: &AppWindow, scale: f32) -> renderer::RenderedEmail {
-    let width = app.get_email_viewport_width();
+    let width = app.global::<ReaderUi>().get_email_viewport_width();
     assert!(width > 1.0, "the reading pane must be laid out first");
     renderer::render_screenshot_email(
         &std::fs::read_to_string(HTML_PATH).unwrap(),

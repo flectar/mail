@@ -78,7 +78,7 @@ impl Controller {
             return;
         };
         let account_id = row.account_id;
-        let sender = app.get_selected_sender().to_string();
+        let sender = app.global::<ReaderUi>().get_selected_sender().to_string();
         self.spawn(
             async move {
                 let Some(message_id) = core.unsubscribe_message_of(target).await? else {

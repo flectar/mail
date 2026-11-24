@@ -203,3 +203,17 @@ def event_defaults:
     | .has_favicon = (.outgoing | not)
   )
 | .selected_thread_index = (if $show_threads then (.selected_thread_index // 0) else 0 end)
+# The open message's state is in the ReaderUi global, as a reader shows it
+# (#254), and the viewer sets a global's properties under its name.
+| reduce ([
+    "thread_messages", "selected_thread_index", "mail_labels", "mail_label_results",
+    "selected_mail_label_count", "selected_account_uses_labels", "email_tiles", "email_links",
+    "selected_sender", "selected_address", "selected_subject", "selected_time", "selected_to",
+    "selected_details", "selected_label", "selected_initials", "selected_favicon",
+    "selected_has_favicon", "selected_plain_text", "selected_source", "selected_text",
+    "has_selection", "clipboard_request", "clipboard_request_id", "selected_starred",
+    "selected_unread", "selected_is_draft", "selected_sender_verification",
+    "remote-images-blocked", "text_mode", "source_mode", "rendering_info_open",
+    "email-content-aspect", "email-scroll-y"
+  ][]) as $key (.;
+    if has($key) then .["ReaderUi." + $key] = .[$key] | del(.[$key]) else . end)

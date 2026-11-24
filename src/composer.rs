@@ -983,7 +983,7 @@ impl Composers {
         let prepared = match prepare_message_compose(
             &source,
             action,
-            app.get_selected_plain_text().as_str(),
+            app.global::<ReaderUi>().get_selected_plain_text().as_str(),
             |message| translated(app, &message).into(),
         ) {
             Ok(prepared) => prepared,

@@ -123,7 +123,8 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert_eq!(requests.borrow().last(), Some(&ids[1]));
     assert_eq!(app.global::<EmailReader>().get_message_id(), ids[1]);
     assert!(
-        app.get_selected_plain_text()
+        app.global::<ReaderUi>()
+            .get_selected_plain_text()
             .contains("Reader verification 1")
     );
     let draw = |name: &str, width: u32, height: u32| {
@@ -201,7 +202,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     // Icon controls must remain keyboard operable after replacing native buttons.
     pointer(721.0, 263.0);
     assert_eq!(
-        app.get_email_scroll_y(),
+        app.global::<ReaderUi>().get_email_scroll_y(),
         0.0,
         "zoom must not hide the remote-image consent banner"
     );
@@ -289,7 +290,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     key("a".into(), true);
     key("a".into(), false);
     assert!(
-        app.get_has_selection(),
+        app.global::<ReaderUi>().get_has_selection(),
         "Ctrl+A must reach the rendered body"
     );
     key("c".into(), true);
@@ -318,13 +319,13 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.set_theme_mode("dark".into());
     draw("desktop-dark", 1280, 900);
     assert!(app.global::<MessageColors>().get_dark());
-    let source = app.get_selected_source();
+    let source = app.global::<ReaderUi>().get_selected_source();
     let selection = renderer.borrow().selected_text();
     let loaded_key = renderer.borrow().loaded_key;
     let tile_count = renderer.borrow().tile_count;
     app.global::<MessageColors>().set_original(true);
     draw("message-original-colors", 1280, 900);
-    assert_eq!(app.get_selected_source(), source);
+    assert_eq!(app.global::<ReaderUi>().get_selected_source(), source);
     assert_eq!(renderer.borrow().selected_text(), selection);
     assert_eq!(renderer.borrow().loaded_key, loaded_key);
     assert!(renderer.borrow().tile_count > tile_count);
@@ -388,24 +389,26 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.global::<EmailReader>().set_reader_mode(false);
     render_current(&app, &state, runtime.handle()).unwrap();
     draw("html-before-reader", 1280, 900);
-    let long_html_aspect = app.get_email_content_aspect();
+    let long_html_aspect = app.global::<ReaderUi>().get_email_content_aspect();
     assert!(
-        long_html_aspect * app.get_email_viewport_width() > 2.0 * app.get_email_viewport_height(),
+        long_html_aspect * app.global::<ReaderUi>().get_email_viewport_width()
+            > 2.0 * app.global::<ReaderUi>().get_email_viewport_height(),
         "The HTML fixture must actually be taller than the viewport"
     );
     app.global::<EmailReader>().invoke_command("end".into());
     assert!(
-        -app.get_email_scroll_y() > app.get_email_viewport_height(),
+        -app.global::<ReaderUi>().get_email_scroll_y()
+            > app.global::<ReaderUi>().get_email_viewport_height(),
         "The long HTML message should have a real outer scroll range"
     );
     app.global::<EmailReader>().set_reader_mode(true);
     draw("reader-long-html", 1280, 900);
     assert!(!app.global::<EmailReader>().get_body_pending());
     assert!(app.global::<EmailReader>().get_items().row_count() > 0);
-    assert_eq!(app.get_email_scroll_y(), 0.0);
+    assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), 0.0);
     app.global::<EmailReader>().invoke_command("end".into());
     assert!(
-        app.get_email_scroll_y().abs() <= 1.0,
+        app.global::<ReaderUi>().get_email_scroll_y().abs() <= 1.0,
         "Reader mode must keep the header in view when its content fits"
     );
     let header_pixels = |pixels: &[Rgb8Pixel]| {
@@ -428,7 +431,9 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
             });
         std::thread::sleep(std::time::Duration::from_millis(300));
         slint::platform::update_timers_and_animations();
-        assert!((app.get_email_content_aspect() - long_html_aspect).abs() < 0.1);
+        assert!(
+            (app.global::<ReaderUi>().get_email_content_aspect() - long_html_aspect).abs() < 0.1
+        );
         assert_eq!(
             header_pixels(&flush_reader_layout()),
             header_before_wheel,
@@ -439,14 +444,15 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     draw("html-after-reader", 1280, 900);
     app.global::<EmailReader>().invoke_command("end".into());
     assert!(
-        -app.get_email_scroll_y() > app.get_email_viewport_height(),
+        -app.global::<ReaderUi>().get_email_scroll_y()
+            > app.global::<ReaderUi>().get_email_viewport_height(),
         "Switching back must restore the HTML scroll range"
     );
     state.borrow_mut().messages[0].html = original_html;
     render_current(&app, &state, runtime.handle()).unwrap();
     app.global::<EmailReader>().set_reader_mode(true);
-    app.invoke_select_email_text();
-    assert!(app.get_has_selection());
+    app.global::<ReaderUi>().invoke_select_email_text();
+    assert!(app.global::<ReaderUi>().get_has_selection());
     // Hydrated attachments must survive a body-rendering failure and remain
     // projected independently of the HTML/plain-text reader.
     state.borrow_mut().messages[0].attachments = vec![
@@ -471,14 +477,15 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     // previous message's accessible content visible over the fallback.
     state.borrow_mut().messages[0].html = Some("<span>x</span>".repeat(16_000));
     render_current(&app, &state, runtime.handle()).unwrap();
-    assert!(app.get_text_mode());
+    assert!(app.global::<ReaderUi>().get_text_mode());
     assert!(!app.global::<EmailReader>().get_available());
-    assert!(!app.get_has_selection());
-    assert!(app.get_selected_text().is_empty());
+    assert!(!app.global::<ReaderUi>().get_has_selection());
+    assert!(app.global::<ReaderUi>().get_selected_text().is_empty());
     assert!(!app.global::<EmailReader>().get_reader_mode());
     assert_eq!(app.global::<EmailReader>().get_items().row_count(), 0);
     assert!(
-        !app.get_selected_plain_text()
+        !app.global::<ReaderUi>()
+            .get_selected_plain_text()
             .contains("Reader verification")
     );
     assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 2);
@@ -495,11 +502,11 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     draw("mail-attachments-fallback", 1280, 900);
     draw("mail-attachments-landscape", 844, 390);
     assert!(
-        app.get_email_viewport_height() >= 40.0,
+        app.global::<ReaderUi>().get_email_viewport_height() >= 40.0,
         "Short windows must retain room for the body while attachments remain available in the toolbar"
     );
-    app.set_text_mode(false);
-    app.set_email_content_aspect(8.0);
+    app.global::<ReaderUi>().set_text_mode(false);
+    app.global::<ReaderUi>().set_email_content_aspect(8.0);
     app.global::<EmailReader>().invoke_command("end".into());
     draw("mail-long-message-actions", 1280, 900);
 
@@ -592,8 +599,8 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     );
     // High-frequency scroll input updates the final position immediately,
     // but raster work is deferred and coalesced into one timer callback.
-    app.set_remote_images_blocked(false);
-    app.set_text_mode(false);
+    app.global::<ReaderUi>().set_remote_images_blocked(false);
+    app.global::<ReaderUi>().set_text_mode(false);
     let html = format!(
         "<body>{}</body>",
         "<p style='height:110px'>Scroll integration</p>".repeat(100)
@@ -610,11 +617,12 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         .unwrap()
         .unwrap();
     apply_cpu_frame(&app, frame);
-    let tiles_model = app.get_email_tiles();
+    let tiles_model = app.global::<ReaderUi>().get_email_tiles();
     let tiles_before = renderer.borrow().tile_count;
     let layouts_before = renderer.borrow().layout_count;
     for y in [600.0, 1500.0, 3000.0] {
-        app.invoke_email_scroll(y, height as f32);
+        app.global::<ReaderUi>()
+            .invoke_email_scroll(y, height as f32);
     }
     assert_eq!(
         renderer.borrow().tile_count,
@@ -627,7 +635,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer.borrow().tile_count <= tiles_before + 5);
     assert_eq!(renderer.borrow().layout_count, layouts_before);
     assert_eq!(
-        app.get_email_tiles(),
+        app.global::<ReaderUi>().get_email_tiles(),
         tiles_model,
         "scroll must retain Slint's tile model"
     );
@@ -717,8 +725,8 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         app.set_active_view(view.into());
         draw(&format!("product-switch-{view}"), 1280, 900);
         if view == "mail" {
-            assert!(app.get_email_viewport_width() > 1.0);
-            assert!(app.get_email_viewport_height() > 1.0);
+            assert!(app.global::<ReaderUi>().get_email_viewport_width() > 1.0);
+            assert!(app.global::<ReaderUi>().get_email_viewport_height() > 1.0);
         }
     }
     // Releasing a product must retain the source record of an edited contact.
@@ -928,7 +936,8 @@ impl SoftwareReader {
         state.messages = messages;
         state.mailboxes = fixture_mailboxes(&state.messages);
         app.set_emails(state.email_rows.clone().into());
-        app.set_thread_messages(state.conversation_rows.clone().into());
+        app.global::<ReaderUi>()
+            .set_thread_messages(state.conversation_rows.clone().into());
         let renderer = state.email_renderer.clone();
         register_renderer_input_callbacks(
             &app,
@@ -974,9 +983,9 @@ impl SoftwareReader {
 
     /// Height of the open message's rendered body in physical pixels.
     fn body_height(&self) -> f32 {
-        self.app.get_email_viewport_width()
+        self.app.global::<ReaderUi>().get_email_viewport_width()
             * self.app.global::<EmailReader>().get_width_ratio()
-            * self.app.get_email_content_aspect()
+            * self.app.global::<ReaderUi>().get_email_content_aspect()
             * self.app.window().scale_factor()
     }
 
@@ -1012,7 +1021,7 @@ fn blocks_message() -> MailMessage {
 fn an_unreported_reader_width_keeps_the_fallback_ratio() {
     let view = SoftwareReader::new(vec![blocks_message()]);
     let app = &view.app;
-    app.set_email_viewport_width(0.0);
+    app.global::<ReaderUi>().set_email_viewport_width(0.0);
     view.render();
     sync_reader_metadata(app, &view.renderer);
     let (fallback, _) = email_viewport_size(app);
@@ -1036,11 +1045,11 @@ fn readers_that_never_resize_draw_tiles_at_their_painted_size() {
     sync_reader_metadata(&view.app, &view.renderer);
     view.paint();
     let app = &view.app;
-    let width = app.get_email_viewport_width();
+    let width = app.global::<ReaderUi>().get_email_viewport_width();
     assert!(width > 0.0, "the reader never learned the pane's width");
     let ratio = app.global::<EmailReader>().get_width_ratio();
     let scale = app.window().scale_factor();
-    let tiles = app.get_email_tiles();
+    let tiles = app.global::<ReaderUi>().get_email_tiles();
     assert!(tiles.row_count() > 1, "the message spans several tiles");
     for tile in tiles.iter() {
         let drawn = tile.height * width * ratio * scale;
@@ -1077,7 +1086,7 @@ fn tall_messages_paint_with_the_software_renderer() {
         "the message must exceed the software renderer's range, got {physical_height}"
     );
     assert!(reader.get_body_pending());
-    assert!(!app.get_text_mode());
+    assert!(!app.global::<ReaderUi>().get_text_mode());
     assert!(reader.get_images().row_count() > 0);
     // The skeleton fades out over the loaded body.
     reader.set_body_pending(false);
@@ -1106,7 +1115,7 @@ fn tall_messages_paint_with_the_software_renderer() {
     view.paint();
     reader.invoke_command("end".into());
     view.paint();
-    assert!(!app.get_text_mode());
+    assert!(!app.global::<ReaderUi>().get_text_mode());
     app.hide().unwrap();
 }
 
@@ -1165,7 +1174,13 @@ fn long_quoted_conversations_paint_with_the_software_renderer() {
         state.conversation_selected_index = 45;
     }
     view.render();
-    assert_eq!(view.app.get_thread_messages().row_count(), 46);
+    assert_eq!(
+        view.app
+            .global::<ReaderUi>()
+            .get_thread_messages()
+            .row_count(),
+        46
+    );
     let physical_height = view.body_height();
     assert!(
         physical_height > f32::from(i16::MAX),
@@ -1177,7 +1192,7 @@ fn long_quoted_conversations_paint_with_the_software_renderer() {
     view.paint();
     assert!(view.body_height() > f32::from(i16::MAX));
     view.scroll_through();
-    assert!(!view.app.get_text_mode());
+    assert!(!view.app.global::<ReaderUi>().get_text_mode());
     view.app.hide().unwrap();
 }
 
@@ -1244,6 +1259,6 @@ fn messages_growing_as_images_load_paint_with_the_software_renderer() {
         "loaded images must grow the message past the renderer's range, got {physical_height}"
     );
     view.scroll_through();
-    assert!(!view.app.get_text_mode());
+    assert!(!view.app.global::<ReaderUi>().get_text_mode());
     view.app.hide().unwrap();
 }

@@ -95,16 +95,26 @@ pub(super) fn update_email_selection(
 ) {
     let renderer = email_renderer.borrow();
     let selected_text = renderer.selected_text().unwrap_or_default();
-    if app.get_selected_text().as_str() != selected_text {
+    if app.global::<ReaderUi>().get_selected_text().as_str() != selected_text {
         crate::reader_clipboard::set_primary(&selected_text);
     }
-    app.set_selected_text(selected_text.into());
-    app.set_has_selection(renderer.has_selection());
+    app.global::<ReaderUi>()
+        .set_selected_text(selected_text.into());
+    app.global::<ReaderUi>()
+        .set_has_selection(renderer.has_selection());
 }
 
 pub(super) fn email_viewport_size(app: &AppWindow) -> (u32, u32) {
-    let width = app.get_email_viewport_width().max(1.0).ceil() as u32;
-    let height = app.get_email_viewport_height().max(1.0).ceil() as u32;
+    let width = app
+        .global::<ReaderUi>()
+        .get_email_viewport_width()
+        .max(1.0)
+        .ceil() as u32;
+    let height = app
+        .global::<ReaderUi>()
+        .get_email_viewport_height()
+        .max(1.0)
+        .ceil() as u32;
     // Before Slint's first layout pass these output properties can still be
     // zero. Use the fallback canvas only for that initial frame.
     if width <= 1 || height <= 1 {
@@ -147,10 +157,10 @@ pub(super) fn clear_reader_projection(app: &AppWindow) {
     reader.set_images(ModelRc::default());
     reader.set_selection_start(Default::default());
     reader.set_selection_end(Default::default());
-    app.set_email_tiles(ModelRc::default());
-    app.set_email_links(ModelRc::default());
-    app.set_selected_text("".into());
-    app.set_has_selection(false);
+    app.global::<ReaderUi>().set_email_tiles(ModelRc::default());
+    app.global::<ReaderUi>().set_email_links(ModelRc::default());
+    app.global::<ReaderUi>().set_selected_text("".into());
+    app.global::<ReaderUi>().set_has_selection(false);
 }
 
 /// A name and address as one mailbox for the clipboard, as a header writes it
@@ -218,14 +228,21 @@ pub(super) fn apply_email(
     use_wgpu: bool,
     allow_remote_images: bool,
 ) -> Result<(), String> {
-    app.set_selected_sender(email.sender.clone().into());
-    app.set_selected_address(email.address.clone().into());
-    app.set_selected_subject(email.subject.clone().into());
-    app.set_selected_time(message_time(email.date_ms, &Local::now()).into());
-    app.set_selected_to(email.to.clone().into());
-    app.set_selected_details(message_details(&email));
-    app.set_selected_label(email.label.clone().into());
-    app.set_selected_is_draft(
+    app.global::<ReaderUi>()
+        .set_selected_sender(email.sender.clone().into());
+    app.global::<ReaderUi>()
+        .set_selected_address(email.address.clone().into());
+    app.global::<ReaderUi>()
+        .set_selected_subject(email.subject.clone().into());
+    app.global::<ReaderUi>()
+        .set_selected_time(message_time(email.date_ms, &Local::now()).into());
+    app.global::<ReaderUi>()
+        .set_selected_to(email.to.clone().into());
+    app.global::<ReaderUi>()
+        .set_selected_details(message_details(&email));
+    app.global::<ReaderUi>()
+        .set_selected_label(email.label.clone().into());
+    app.global::<ReaderUi>().set_selected_is_draft(
         email.folder == "Drafts" || email.send_at.is_some() || email.label == "DRAFT",
     );
     // In the Scheduled view: when the draft goes out, or why it did not.
@@ -239,10 +256,12 @@ pub(super) fn apply_email(
     );
     send_later.set_open_send_error(email.send_error.clone().unwrap_or_default().into());
     send_later.set_open_send_uncertain(email.send_uncertain);
-    app.set_selected_initials(email.initials.clone().into());
-    app.set_selected_starred(email.starred);
-    app.set_selected_unread(email.unread);
-    app.set_selected_sender_verification(email.sender_verification.clone().into());
+    app.global::<ReaderUi>()
+        .set_selected_initials(email.initials.clone().into());
+    app.global::<ReaderUi>().set_selected_starred(email.starred);
+    app.global::<ReaderUi>().set_selected_unread(email.unread);
+    app.global::<ReaderUi>()
+        .set_selected_sender_verification(email.sender_verification.clone().into());
     app.global::<Unsubscribe>()
         .set_available(email.can_unsubscribe);
     let block = app.global::<BlockSender>();
@@ -257,7 +276,7 @@ pub(super) fn apply_email(
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
     let same_message = reader.get_message_id() == email.id;
     let mut scroll = if same_message {
-        app.get_email_scroll_y()
+        app.global::<ReaderUi>().get_email_scroll_y()
     } else {
         0.0
     };
@@ -274,7 +293,7 @@ pub(super) fn apply_email(
         reader.set_destination("".into());
     }
     crate::attachment_controller::project(app, &email, same_message);
-    app.set_email_scroll_y(scroll);
+    app.global::<ReaderUi>().set_email_scroll_y(scroll);
 
     let preview = display_preview(&email.preview);
     let fallback_html = format!(
@@ -298,15 +317,17 @@ pub(super) fn apply_email(
         return Ok(());
     }
     let blocked = renderer::has_remote_images(html) && !allow_remote_images;
-    if same_message && app.get_remote_images_blocked() != blocked {
+    if same_message && app.global::<ReaderUi>().get_remote_images_blocked() != blocked {
         scroll = (scroll + if blocked { -60.0 } else { 60.0 }).min(0.0);
     }
     // The source is the message's own, translated or not.
-    app.set_selected_source(email.html.as_deref().unwrap_or(&fallback_html).into());
-    app.set_remote_images_blocked(blocked);
-    app.set_email_scroll_y(scroll);
+    app.global::<ReaderUi>()
+        .set_selected_source(email.html.as_deref().unwrap_or(&fallback_html).into());
+    app.global::<ReaderUi>().set_remote_images_blocked(blocked);
+    app.global::<ReaderUi>().set_email_scroll_y(scroll);
     // Store readable recovery content before entering any renderer code.
-    app.set_selected_plain_text(crate::email_document::fallback(html).into());
+    app.global::<ReaderUi>()
+        .set_selected_plain_text(crate::email_document::fallback(html).into());
     let (viewport_width, viewport_height) = email_viewport_size(app);
     let scale = app.window().scale_factor();
     email_renderer.borrow_mut().preparation_viewport = (
@@ -322,8 +343,8 @@ pub(super) fn apply_email(
     // Drop the old DOM, decoded images and tile model before allocating the
     // replacement. Selection offsets above are small and can be restored.
     email_renderer.borrow_mut().clear();
-    app.set_email_tiles(ModelRc::default());
-    app.set_email_links(ModelRc::default());
+    app.global::<ReaderUi>().set_email_tiles(ModelRc::default());
+    app.global::<ReaderUi>().set_email_links(ModelRc::default());
     reader.set_items(ModelRc::default());
     reader.set_images(ModelRc::default());
     let prepare_result = email_renderer
@@ -335,7 +356,7 @@ pub(super) fn apply_email(
             email_renderer.borrow_mut().clear();
             clear_reader_projection(app);
             reader.set_notice(error.into());
-            app.set_text_mode(true);
+            app.global::<ReaderUi>().set_text_mode(true);
             return Ok(());
         }
     };
@@ -347,12 +368,16 @@ pub(super) fn apply_email(
         // Release the previous tile model before allocating the first
         // viewport-sized tile set for the replacement message. Rendering is
         // synchronous here, so no intermediate frame is exposed.
-        app.set_email_tiles(ModelRc::new(VecModel::default()));
+        app.global::<ReaderUi>()
+            .set_email_tiles(ModelRc::new(VecModel::default()));
         let mut renderer = email_renderer.borrow_mut();
         renderer.set_email(prepared);
         renderer.restore_selection(bookmark);
         renderer.loaded_key = Some(key);
-        renderer.set_visible_region(-scroll, app.get_email_viewport_height());
+        renderer.set_visible_region(
+            -scroll,
+            app.global::<ReaderUi>().get_email_viewport_height(),
+        );
         let (width, height) = email_viewport_size(app);
         let rendered =
             match renderer.render_cpu_if_needed(width, height, app.window().scale_factor()) {
@@ -361,7 +386,7 @@ pub(super) fn apply_email(
                 Err(error) => {
                     clear_reader_projection(app);
                     reader.set_notice(error.into());
-                    app.set_text_mode(true);
+                    app.global::<ReaderUi>().set_text_mode(true);
                     return Ok(());
                 }
             };
@@ -372,7 +397,8 @@ pub(super) fn apply_email(
         reader.set_failed_images(renderer.failed_images());
         reader.set_notice(renderer.notice.clone().unwrap_or_default().into());
         drop(renderer);
-        app.set_selected_plain_text(plain_text.into());
+        app.global::<ReaderUi>()
+            .set_selected_plain_text(plain_text.into());
         update_email_selection(app, email_renderer);
         apply_cpu_frame(app, rendered);
         return Ok(());
@@ -382,14 +408,18 @@ pub(super) fn apply_email(
     email_renderer.borrow_mut().set_email(prepared);
     email_renderer.borrow_mut().restore_selection(bookmark);
     email_renderer.borrow_mut().loaded_key = Some(key);
-    email_renderer
-        .borrow_mut()
-        .set_visible_region(-scroll, app.get_email_viewport_height());
-    app.set_email_tiles(ModelRc::new(VecModel::default()));
-    app.set_email_links(ModelRc::new(VecModel::from(
-        links.into_iter().map(slint_email_link).collect::<Vec<_>>(),
-    )));
-    app.set_selected_plain_text(plain_text.into());
+    email_renderer.borrow_mut().set_visible_region(
+        -scroll,
+        app.global::<ReaderUi>().get_email_viewport_height(),
+    );
+    app.global::<ReaderUi>()
+        .set_email_tiles(ModelRc::new(VecModel::default()));
+    app.global::<ReaderUi>()
+        .set_email_links(ModelRc::new(VecModel::from(
+            links.into_iter().map(slint_email_link).collect::<Vec<_>>(),
+        )));
+    app.global::<ReaderUi>()
+        .set_selected_plain_text(plain_text.into());
     update_email_selection(app, email_renderer);
     app.set_render_status(UiMessage::plain("Message ready."));
     Ok(())
@@ -421,23 +451,32 @@ pub(super) fn apply_gpu_frame(app: &AppWindow, rendered: RenderedEmail) {
 
 pub(super) fn apply_cpu_frame(app: &AppWindow, rendered: RenderedEmail) {
     let start = renderer::render_timings_enabled().then(std::time::Instant::now);
-    app.set_email_content_aspect(rendered.height as f32 / rendered.width.max(1) as f32);
+    app.global::<ReaderUi>()
+        .set_email_content_aspect(rendered.height as f32 / rendered.width.max(1) as f32);
     let tiles: Vec<_> = rendered.tiles.into_iter().map(slint_email_tile).collect();
-    let retained = app.get_email_tiles();
+    let retained = app.global::<ReaderUi>().get_email_tiles();
     if let Some(model) = retained.as_any().downcast_ref::<VecModel<EmailTile>>() {
         // Keep Slint image items (and their software-renderer caches) alive
         // when scrolling only adds or removes tiles at the viewport edges.
         crate::reconcile_model_rows_by(model, tiles, |tile| tile.y.to_bits(), PartialEq::eq);
     } else {
-        app.set_email_tiles(ModelRc::new(VecModel::from(tiles)));
+        app.global::<ReaderUi>()
+            .set_email_tiles(ModelRc::new(VecModel::from(tiles)));
     }
     let links = rendered
         .links
         .into_iter()
         .map(slint_email_link)
         .collect::<Vec<_>>();
-    if app.get_email_links().iter().collect::<Vec<_>>() != links {
-        app.set_email_links(ModelRc::new(VecModel::from(links)));
+    if app
+        .global::<ReaderUi>()
+        .get_email_links()
+        .iter()
+        .collect::<Vec<_>>()
+        != links
+    {
+        app.global::<ReaderUi>()
+            .set_email_links(ModelRc::new(VecModel::from(links)));
     }
     app.set_render_status(UiMessage::plain("Message ready."));
     if let Some(start) = start {
@@ -451,11 +490,12 @@ pub(super) fn apply_cpu_frame(app: &AppWindow, rendered: RenderedEmail) {
 /// Show only the tiles the renderer still holds after it released memory.
 pub(super) fn retain_email_tiles(app: &AppWindow, tiles: Vec<renderer::RenderedEmailTile>) {
     let tiles: Vec<_> = tiles.into_iter().map(slint_email_tile).collect();
-    let retained = app.get_email_tiles();
+    let retained = app.global::<ReaderUi>().get_email_tiles();
     if let Some(model) = retained.as_any().downcast_ref::<VecModel<EmailTile>>() {
         crate::reconcile_model_rows_by(model, tiles, |tile| tile.y.to_bits(), PartialEq::eq);
     } else {
-        app.set_email_tiles(ModelRc::new(VecModel::from(tiles)));
+        app.global::<ReaderUi>()
+            .set_email_tiles(ModelRc::new(VecModel::from(tiles)));
     }
 }
 
@@ -482,7 +522,7 @@ pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEma
         clear_reader_projection(app);
         if let Some(notice) = &renderer.notice {
             reader.set_notice(notice.clone().into());
-            app.set_text_mode(true);
+            app.global::<ReaderUi>().set_text_mode(true);
         }
         return;
     }
@@ -506,7 +546,8 @@ pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEma
     }
     let plain = renderer.plain_text();
     if !plain.is_empty() {
-        app.set_selected_plain_text(plain.into());
+        app.global::<ReaderUi>()
+            .set_selected_plain_text(plain.into());
     }
 }
 
