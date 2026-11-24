@@ -4348,13 +4348,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             }
         }
         if let Some(app) = mail_update_app.upgrade() {
-            let calendar_month = calendar_for_core_updates.borrow().visible_month;
             device_sync_for_core_updates.apply(
                 &app,
                 &mail_update_state,
                 &mail_update_runtime,
                 &ui_task_tx_for_device_sync,
-                calendar_month,
                 pending.device_sync,
             );
         }

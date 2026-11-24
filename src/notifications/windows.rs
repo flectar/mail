@@ -123,6 +123,29 @@ impl Install {
     }
 }
 
+/// A copy of Flectar Mail without package identity, whose taskbar button,
+/// shortcuts and toasts share its app id.
+pub(crate) struct Unpackaged {
+    pub(crate) app_id: &'static str,
+    /// Run from the portable ZIP, so without a Start menu shortcut.
+    pub(crate) portable: bool,
+}
+
+/// This copy, unless it runs from the Store package.
+pub(crate) fn unpackaged() -> Option<Unpackaged> {
+    match Install::of_this_process() {
+        Install::Packaged { .. } => None,
+        Install::Installed => Some(Unpackaged {
+            app_id: INSTALLED_AUMID,
+            portable: false,
+        }),
+        Install::Portable => Some(Unpackaged {
+            app_id: PORTABLE_AUMID,
+            portable: true,
+        }),
+    }
+}
+
 /// Whether COM started this process for a click on a toast. The click
 /// itself arrives through the activator once it is registered; until then
 /// the process starts like a sign-in launch, so a button needs no window.

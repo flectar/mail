@@ -362,8 +362,12 @@ impl Core {
                     .prepare("SELECT id, sync_id FROM accounts WHERE sync_id IS NOT NULL")?
                     .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                     .collect::<rusqlite::Result<_>>()?;
+                // Accounts this device had before it joined share only once
+                // the user says so.
+                let held = repo::sign_ins::held(conn)?;
                 let candidates = repo::accounts::list(conn)?
                     .into_iter()
+                    .filter(|account| !held.contains(&account.id))
                     .filter_map(|account| {
                         Some(Candidate {
                             id: account.id,
