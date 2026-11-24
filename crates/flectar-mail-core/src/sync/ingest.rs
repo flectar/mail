@@ -180,10 +180,16 @@ impl Importer {
         imported: &Imported,
     ) -> Result<()> {
         let when = imported.arrival_ms;
-        if imported.is_outgoing
-            && self.settings.collect_outgoing_contacts
-            && when >= self.outgoing_learning_since
-        {
+        if imported.is_outgoing {
+            // Only mail in Sent says whom the user wrote to. A From with the
+            // user's own address is easy to forge, and its recipients would
+            // rise in suggestions and count as people the user knows.
+            if imported.folder_role.as_deref() != Some(roles::SENT)
+                || !self.settings.collect_outgoing_contacts
+                || when < self.outgoing_learning_since
+            {
+                return Ok(());
+            }
             let mut harvested = std::collections::HashSet::new();
             for address in headers
                 .to
@@ -531,6 +537,68 @@ mod tests {
         assert!(chime_worthy(false, "alice@example.com"));
         assert!(!chime_worthy(true, "digest@example.com"));
         assert!(!chime_worthy(false, "notifications@example.com"));
+    }
+
+    #[test]
+    fn only_sent_mail_teaches_whom_the_user_wrote_to() {
+        use crate::db::testutil;
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Sent', 'sent')",
+            [],
+        )
+        .unwrap();
+        let mut own = crate::db::repo::sender_identities::OwnAddresses::default();
+        own.insert("me@test.dev".to_owned());
+        let mut importer = super::Importer::with_own_addresses(&conn, 1, own).unwrap();
+        // The first is a forgery of the user's own address that reached the
+        // inbox, the second a message the user sent.
+        for (folder_id, role, to) in [
+            (1, "inbox", "jane.boss@lookalike.example"),
+            (2, "sent", "jane@example.com"),
+        ] {
+            let raw = format!(
+                "From: Me <me@test.dev>\r\n\
+                 To: Jane <{to}>\r\n\
+                 Subject: Hi\r\n\
+                 Message-ID: <m{folder_id}@test.dev>\r\n\
+                 Date: Tue, 01 Sep 2026 12:00:00 +0000\r\n\
+                 \r\n\
+                 body\r\n"
+            );
+            let parsed = crate::mime::parse_message(raw.as_bytes()).unwrap();
+            let imported = importer
+                .insert(
+                    &conn,
+                    &parsed.headers,
+                    &super::Delivery {
+                        folder_id,
+                        folder_role: Some(role),
+                        uid: None,
+                        received_ms: Some(1_800_000_000_000),
+                        seen: false,
+                        flagged: false,
+                        draft: false,
+                        has_attachments: false,
+                        size: None,
+                        receipt_handled: true,
+                    },
+                )
+                .unwrap();
+            assert!(imported.is_outgoing);
+            importer
+                .learn_contacts(&conn, &parsed.headers, &imported)
+                .unwrap();
+        }
+        let learned: Vec<(String, i64)> = conn
+            .prepare("SELECT email, send_count FROM contacts ORDER BY email")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(learned, vec![("jane@example.com".to_owned(), 1)]);
     }
 
     #[test]

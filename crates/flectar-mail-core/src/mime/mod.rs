@@ -1771,6 +1771,53 @@ mod read_receipt_tests {
     }
 
     #[test]
+    fn a_receipt_keeps_the_original_subject_on_one_line() {
+        let recipient = Address {
+            name: None,
+            email: "me@example.org".into(),
+        };
+        let to = [Address {
+            name: None,
+            email: "ana@example.com".into(),
+        }];
+        let (_, raw) = build_read_receipt(&ReadReceipt {
+            recipient: &recipient,
+            to: &to,
+            original_subject: "Plan\r\nBcc: third@example.net",
+            original_message_id: Some("<plan\r\nBcc: third@example.net>"),
+            user_agreed: true,
+            reporting_domain: "example.org",
+        })
+        .unwrap();
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw[..])
+            .unwrap();
+        assert!(parsed.bcc().is_none());
+        let raw = String::from_utf8_lossy(&raw);
+        assert!(
+            raw.contains("Subject: Read: Plan  Bcc: third@example.net\r\n"),
+            "{raw}"
+        );
+        assert!(!raw.contains("Original-Message-ID"), "{raw}");
+
+        let to = [Address {
+            name: None,
+            email: "ana@example.com>, <third@example.net".into(),
+        }];
+        assert!(
+            build_read_receipt(&ReadReceipt {
+                recipient: &recipient,
+                to: &to,
+                original_subject: "Plan",
+                original_message_id: None,
+                user_agreed: true,
+                reporting_domain: "example.org",
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
     fn a_receipt_settings_sent_says_so_and_marks_itself_automatic() {
         let raw = build(false, None);
         assert!(raw.contains("Disposition: manual-action/MDN-sent-automatically; displayed\r\n"));
@@ -2633,7 +2680,7 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
         submission_id: raw_header(msg, SUBMISSION_ID_HEADER)
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace)),
-        subject: msg.subject().unwrap_or_default().to_string(),
+        subject: header_text(msg.subject().unwrap_or_default()).into_owned(),
         from,
         to: collect_addrs(msg.to()),
         cc: collect_addrs(msg.cc()),
@@ -3572,16 +3619,11 @@ pub struct ReadReceipt<'a> {
 pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
     use mail_builder::headers::content_type::ContentType;
     use mail_builder::mime::{BodyPart, MimePart};
-    let msg_id = format!(
-        "{}.{}@{}",
-        chrono::Utc::now().timestamp_micros(),
-        rand_token(),
-        receipt.reporting_domain
-    );
-    let original_id = receipt
-        .original_message_id
-        .map(|id| id.trim().trim_matches(['<', '>']))
-        .filter(|id| !id.is_empty() && !id.contains(['\r', '\n']));
+    check_addresses(std::iter::once(receipt.recipient).chain(receipt.to))?;
+    let msg_id = new_message_id(receipt.reporting_domain)
+        .trim_matches(['<', '>'])
+        .to_owned();
+    let original_id = receipt.original_message_id.and_then(plain_message_id);
     // Section 3: "manual-action" even when the user set the client to send
     // on its own; MDN-sent-manually only for one they agreed to.
     let sending_mode = if receipt.user_agreed {
@@ -3643,7 +3685,7 @@ pub fn build_read_receipt(receipt: &ReadReceipt) -> Result<(String, Vec<u8>)> {
                 })
                 .collect(),
         ))
-        .subject(format!("Read: {}", receipt.original_subject))
+        .subject(format!("Read: {}", header_text(receipt.original_subject)))
         .body(MimePart::new(
             ContentType::new("multipart/report")
                 .attribute("report-type", "disposition-notification"),
@@ -3714,21 +3756,18 @@ fn build_message_with_attachments<'a>(
         .iter()
         .position(|attachment| imip_method(&attachment.mime_type).is_some())
         .map(|index| attachments.remove(index));
-    let stable_id = out
-        .message_id
-        .map(str::trim)
-        .map(|value| value.trim_matches(['<', '>']))
-        .filter(|value| !value.is_empty() && !value.contains('\r') && !value.contains('\n'));
+    check_addresses(
+        std::iter::once(&out.from)
+            .chain(&out.reply_to)
+            .chain(out.to)
+            .chain(out.cc)
+            .chain(out.bcc)
+            .chain(out.receipt_to),
+    )?;
+    let stable_id = out.message_id.and_then(plain_message_id);
     let msg_id = stable_id
         .map(|value| format!("<{value}>"))
-        .unwrap_or_else(|| {
-            format!(
-                "<{}.{}@{}>",
-                chrono::Utc::now().timestamp_micros(),
-                rand_token(),
-                out.message_id_domain
-            )
-        });
+        .unwrap_or_else(|| new_message_id(out.message_id_domain));
 
     let addresses = |items: &'a [Address]| {
         mail_builder::headers::address::Address::new_list(
@@ -3754,7 +3793,7 @@ fn build_message_with_attachments<'a>(
             out.from.name.as_deref().unwrap_or_default(),
             out.from.email.as_str(),
         ))
-        .subject(out.subject)
+        .subject(header_text(out.subject).into_owned())
         .text_body(out.body_text);
     if let Some(reply_to) = &out.reply_to {
         builder = builder.reply_to(mail_builder::headers::address::Address::new_address(
@@ -3862,14 +3901,17 @@ fn build_message_with_attachments<'a>(
             .get_or_insert_with(Vec::new)
             .extend(attachments.into_iter().map(attachment_part));
     }
-    if let Some(irt) = out.in_reply_to {
-        builder = builder.in_reply_to(irt.trim_matches(['<', '>']));
+    if let Some(irt) = out.in_reply_to.and_then(plain_message_id) {
+        builder = builder.in_reply_to(irt);
     }
-    if !out.references.is_empty() {
+    let references: Vec<&str> = out
+        .references
+        .iter()
+        .filter_map(|reference| plain_message_id(reference))
+        .collect();
+    if !references.is_empty() {
         builder = builder.references(mail_builder::headers::message_id::MessageId::new_list(
-            out.references
-                .iter()
-                .map(|reference| reference.trim_matches(['<', '>'])),
+            references.into_iter(),
         ));
     }
 
@@ -3893,6 +3935,82 @@ fn build_message_with_attachments<'a>(
             .map_err(|e| CoreError::Mime(e.to_string()))?
     };
     Ok((msg_id, raw))
+}
+
+/// `value` on one line, for a header such as Subject. A subject copied from
+/// received mail can carry encoded line breaks, and mail-builder writes a
+/// short ASCII value as it is, so a line break would start a header of the
+/// sender's choosing.
+pub fn header_text(value: &str) -> std::borrow::Cow<'_, str> {
+    let breaks =
+        |character: char| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}');
+    if value.chars().any(breaks) {
+        std::borrow::Cow::Owned(
+            value
+                .chars()
+                .map(|character| if breaks(character) { ' ' } else { character })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
+}
+
+/// A Message-ID without its angle brackets, when it can go into a header as
+/// it is: one taken from received mail can hold line breaks.
+fn plain_message_id(value: &str) -> Option<&str> {
+    let value = value.trim().trim_matches(['<', '>']);
+    (!value.is_empty()
+        && !value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || matches!(character, '<' | '>')
+        }))
+    .then_some(value)
+}
+
+/// Whether `email` can go between `<` and `>` as it is. A control character
+/// would end the header line, and outside a quoted local part a bracket,
+/// comma, semicolon, quote or space would end the address or start another.
+/// Some addresses come straight from received mail, such as where a read
+/// receipt goes.
+fn plain_address(email: &str) -> bool {
+    let Some((local, domain)) = email.rsplit_once('@') else {
+        return false;
+    };
+    let quoted = local.len() >= 2 && local.starts_with('"') && local.ends_with('"');
+    !local.is_empty()
+        && !domain.is_empty()
+        && !email.chars().any(char::is_control)
+        && !(if quoted { domain } else { email })
+            .chars()
+            .any(|character| {
+                character.is_whitespace() || matches!(character, '<' | '>' | ',' | ';' | '"')
+            })
+}
+
+/// Fails unless every address can go into the message's headers as it is.
+fn check_addresses<'a>(addresses: impl IntoIterator<Item = &'a Address>) -> Result<()> {
+    match addresses
+        .into_iter()
+        .find(|address| !plain_address(&address.email))
+    {
+        Some(address) => Err(CoreError::Mime(format!(
+            "{:?} is not an address a message can go to",
+            address.email
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// A new Message-ID for `domain`, in angle brackets. Its left part is random:
+/// one made from the time would tell every recipient when the message was
+/// written, which a scheduled message is often meant not to.
+fn new_message_id(domain: &str) -> String {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    let token: String = (0..26)
+        .map(|_| char::from_digit(rng.random_range(0..36), 36).unwrap_or('0'))
+        .collect();
+    format!("<{token}@{domain}>")
 }
 
 pub(crate) fn rand_token() -> String {
@@ -4937,6 +5055,85 @@ mod tests {
         let (generated, raw) = build_message(&message).unwrap();
         assert_ne!(generated, "<bad\r\nBcc: injected@example.com>");
         assert!(!String::from_utf8_lossy(&raw).contains("Bcc: injected@example.com"));
+    }
+
+    #[test]
+    fn received_subjects_stay_on_one_line() {
+        let raw = "From: a@example.com\r\n\
+            Subject: =?us-ascii?Q?Invoice=0D=0ABcc:_spy@example.net?=\r\n\
+            \r\n\
+            body\r\n";
+        let parsed = parse_message(raw.as_bytes()).unwrap();
+        assert_eq!(parsed.headers.subject, "Invoice  Bcc: spy@example.net");
+    }
+
+    #[test]
+    fn line_breaks_from_received_mail_never_start_a_header() {
+        let references = [
+            "orig@example.com".to_owned(),
+            "a\rBcc: x@example.net".to_owned(),
+        ];
+        let mut message = outgoing("plain", None);
+        message.subject = "Re: Invoice 4471\r\nCc: spy@example.net\r\n\r\n.";
+        message.in_reply_to = Some("orig\r\nBcc: x@example.net");
+        message.references = &references;
+        let (_, raw) = build_message(&message).unwrap();
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw[..])
+            .unwrap();
+        assert!(parsed.cc().is_none());
+        assert!(parsed.bcc().is_none());
+        assert!(parsed.in_reply_to().is_empty());
+        assert_eq!(parsed.body_text(0).as_deref(), Some("plain"));
+        let raw = String::from_utf8_lossy(&raw);
+        assert!(
+            raw.contains("Subject: Re: Invoice 4471  Cc: spy@example.net    .\r\n"),
+            "{raw}"
+        );
+        assert!(raw.contains("References: <orig@example.com>\r\n"), "{raw}");
+    }
+
+    #[test]
+    fn an_address_that_would_break_its_header_is_refused() {
+        for email in [
+            "boss@example.com>, <spy@example.net",
+            "x\rBcc: y@example.net",
+            "a b@example.com",
+            "no-at-sign",
+        ] {
+            let to = [Address {
+                name: None,
+                email: email.into(),
+            }];
+            let mut message = outgoing("plain", None);
+            message.to = &to;
+            assert!(build_message(&message).is_err(), "{email}");
+        }
+        let to = [Address {
+            name: None,
+            email: "\"Doe, Jane\"@example.com".into(),
+        }];
+        let mut message = outgoing("plain", None);
+        message.to = &to;
+        assert!(build_message(&message).is_ok());
+    }
+
+    #[test]
+    fn new_message_ids_say_nothing_about_when_a_message_was_written() {
+        let (first, _) = build_message(&outgoing("plain", None)).unwrap();
+        let (second, _) = build_message(&outgoing("plain", None)).unwrap();
+        assert_ne!(first, second);
+        for id in [first, second] {
+            let local = id
+                .trim_matches(['<', '>'])
+                .split('@')
+                .next()
+                .unwrap()
+                .to_owned();
+            assert_eq!(local.len(), 26, "{id}");
+            assert!(!local.contains('.'), "{id}");
+            assert!(id.ends_with("@example.com>"), "{id}");
+        }
     }
 
     #[test]
