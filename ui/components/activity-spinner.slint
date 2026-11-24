@@ -3,7 +3,8 @@ import { MotionSettings } from "../design-system.slint";
 // A small busy indicator: eight spokes, fading behind the one in front. The
 // front spoke steps round eight times a second rather than turning smoothly,
 // so a long check redraws the window eight times a second instead of every
-// frame. While motion is reduced it holds still.
+// frame. While motion is reduced it doesn't turn: it fades in and out in place,
+// as a spinner that stood still would look stuck.
 //
 // When it is not running it draws `progress` of its spokes, from the top and
 // clockwise, the way a pull-to-refresh spinner fills in while it is pulled.
@@ -14,16 +15,20 @@ export component ActivitySpinner {
     private property <int> step: 0;
     // The spokes are drawn for 14px and grow with the spinner.
     private property <float> unit: self.width / 14px;
+    private property <bool> turning: MotionSettings.movement;
+    // Without turning, one fade out and in over sixteen steps, two seconds.
+    private property <float> fade: 0.65 + 0.35 * cos(root.step * 22.5deg);
 
     width: 14px;
     height: 14px;
     accessible-role: none;
+    opacity: root.running && !root.turning ? root.fade : 1;
 
     Timer {
         interval: 125ms;
-        running: root.running && MotionSettings.movement;
+        running: root.running;
         triggered => {
-            root.step = mod(root.step + 1, 8);
+            root.step = mod(root.step + 1, root.turning ? 8 : 16);
         }
     }
 
@@ -37,7 +42,7 @@ export component ActivitySpinner {
         stroke: root.color;
         stroke-width: 1.6px * root.unit;
         stroke-line-cap: round;
-        opacity: root.running ? max(0.2, 1 - self.behind * 0.12)
+        opacity: root.running ? (root.turning ? max(0.2, 1 - self.behind * 0.12) : 0.8)
             : index < round(root.progress * 8) ? 0.8 : 0;
 
         MoveTo {
