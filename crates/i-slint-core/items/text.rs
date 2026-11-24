@@ -1,0 +1,2946 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore textitem
+/*!
+This module contains the builtin text related items.
+
+When adding an item or a property, it needs to be kept in sync with different place.
+Lookup the [`crate::items`] module documentation.
+*/
+use super::{
+    EventResult, FontMetrics, InputMethodHints, InputType, Item, ItemConsts, ItemRc, ItemRef,
+    KeyEventArg, KeyEventResult, KeyEventType, PointArg, PointerEventButton, RenderingResult,
+    StringArg, TextHorizontalAlignment, TextOverflow, TextStrokeStyle, TextVerticalAlignment,
+    TextWrap, VoidArg,
+};
+use crate::graphics::{Brush, Color, FontRequest};
+use crate::input::{
+    FocusEvent, FocusEventResult, FocusReason, InputEventFilterResult, InputEventResult,
+    InternalKeyEvent, KeyboardModifiers, MouseEvent, StandardShortcut, TextShortcut, key_codes,
+};
+use crate::item_rendering::{
+    CachedRenderingData, HasFont, ItemRenderer, PlainOrStyledText, RenderString, RenderText,
+    TextForWidth, resolve_line_height_factor,
+};
+use crate::layout::{LayoutInfo, Orientation};
+use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize};
+use crate::platform::Clipboard;
+#[cfg(feature = "rtti")]
+use crate::rtti::*;
+use crate::window::{InputMethodProperties, InputMethodRequest, WindowAdapter, WindowInner};
+use crate::{Callback, Coord, Property, SharedString, SharedVector};
+use alloc::{rc::Rc, string::String};
+use const_field_offset::FieldOffsets;
+use core::cell::Cell;
+use core::pin::Pin;
+#[allow(unused)]
+use euclid::num::Ceil;
+use i_slint_core_macros::*;
+use unicode_segmentation::UnicodeSegmentation;
+
+/// The implementation of the `Text` element
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement)]
+#[pin]
+pub struct ComplexText {
+    pub width: Property<LogicalLength>,
+    pub height: Property<LogicalLength>,
+    pub text: Property<SharedString>,
+    pub font_size: Property<LogicalLength>,
+    pub font_weight: Property<i32>,
+    pub color: Property<Brush>,
+    pub horizontal_alignment: Property<TextHorizontalAlignment>,
+    pub vertical_alignment: Property<TextVerticalAlignment>,
+    pub max_lines: Property<i32>,
+
+    pub font_family: Property<SharedString>,
+    pub font_italic: Property<bool>,
+    pub wrap: Property<TextWrap>,
+    pub overflow: Property<TextOverflow>,
+    pub letter_spacing: Property<LogicalLength>,
+    pub line_height_factor: Property<f32>,
+    pub stroke: Property<Brush>,
+    pub stroke_width: Property<LogicalLength>,
+    pub stroke_style: Property<TextStrokeStyle>,
+    pub cached_rendering_data: CachedRenderingData,
+}
+
+impl Item for ComplexText {
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
+
+    fn deinit(self: Pin<&Self>, _window_adapter: &Rc<dyn WindowAdapter>) {}
+
+    fn layout_info(
+        self: Pin<&Self>,
+        orientation: Orientation,
+        cross_axis_constraint: Coord,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LayoutInfo {
+        text_layout_info(
+            self,
+            self_rc,
+            window_adapter,
+            orientation,
+            Self::FIELD_OFFSETS.width().apply_pin(self),
+            cross_axis_constraint,
+        )
+    }
+
+    fn input_event_filter_before_children(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventFilterResult {
+        InputEventFilterResult::ForwardAndIgnore
+    }
+
+    fn input_event(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventResult {
+        InputEventResult::EventIgnored
+    }
+
+    fn capture_key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn focus_event(
+        self: Pin<&Self>,
+        _: &FocusEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> FocusEventResult {
+        FocusEventResult::FocusIgnored
+    }
+
+    fn render(
+        self: Pin<&Self>,
+        backend: &mut &mut dyn ItemRenderer,
+        self_rc: &ItemRc,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    fn bounding_rect(
+        self: core::pin::Pin<&Self>,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        geometry: LogicalRect,
+    ) -> LogicalRect {
+        geometry
+    }
+
+    fn clips_children(self: core::pin::Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl ItemConsts for ComplexText {
+    const cached_rendering_data_offset: const_field_offset::FieldOffset<
+        ComplexText,
+        CachedRenderingData,
+    > = ComplexText::FIELD_OFFSETS.cached_rendering_data().as_unpinned_projection();
+}
+
+impl HasFont for ComplexText {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        crate::items::WindowItem::resolved_font_request(
+            self_rc,
+            self.font_family(),
+            self.font_weight(),
+            self.font_size(),
+            self.letter_spacing(),
+            self.font_italic(),
+        )
+    }
+}
+
+impl RenderString for ComplexText {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        PlainOrStyledText::Plain(self.text())
+    }
+    fn line_height_factor(self: Pin<&Self>) -> Option<f32> {
+        resolve_line_height_factor(Self::FIELD_OFFSETS.line_height_factor().apply_pin(self).get())
+    }
+
+    fn max_lines(self: Pin<&Self>) -> i32 {
+        Self::FIELD_OFFSETS.max_lines().apply_pin(self).get()
+    }
+
+    fn stroke(self: Pin<&Self>) -> (Brush, LogicalLength, TextStrokeStyle) {
+        (self.stroke(), self.stroke_width(), self.stroke_style())
+    }
+}
+
+impl RenderText for ComplexText {
+    fn target_size(self: Pin<&Self>) -> LogicalSize {
+        LogicalSize::from_lengths(self.width(), self.height())
+    }
+
+    fn color(self: Pin<&Self>) -> Brush {
+        self.color()
+    }
+
+    fn alignment(
+        self: Pin<&Self>,
+    ) -> (super::TextHorizontalAlignment, super::TextVerticalAlignment) {
+        (self.horizontal_alignment(), self.vertical_alignment())
+    }
+
+    fn wrap(self: Pin<&Self>) -> TextWrap {
+        self.wrap()
+    }
+
+    fn overflow(self: Pin<&Self>) -> TextOverflow {
+        self.overflow()
+    }
+
+    fn is_markdown(self: Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl ComplexText {
+    pub fn font_metrics(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> FontMetrics {
+        let font_request = self.font_request(self_rc);
+        window_adapter.renderer().font_metrics(font_request)
+    }
+}
+
+/// The implementation of the `Text` element
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement)]
+#[pin]
+pub struct StyledTextItem {
+    pub width: Property<LogicalLength>,
+    pub height: Property<LogicalLength>,
+    pub text: Property<crate::styled_text::StyledText>,
+    pub default_color: Property<Brush>,
+    pub default_font_size: Property<LogicalLength>,
+    pub default_font_family: Property<SharedString>,
+    pub horizontal_alignment: Property<TextHorizontalAlignment>,
+    pub vertical_alignment: Property<TextVerticalAlignment>,
+    pub max_lines: Property<i32>,
+    pub link_clicked: Callback<StringArg>,
+    pub link_color: Property<Color>,
+    pub selectable: Property<bool>,
+    pub selection_background_color: Property<Color>,
+    pub selection_foreground_color: Property<Color>,
+    /// The selection's ends, as byte offsets into the text as `styled_text::get_raw_text`
+    /// joins it. They aren't in the `.slint` interface: `has-selection` and the selection
+    /// functions work on them. They are clamped to the text wherever they are read, so a
+    /// change of `text` leaves them as they are.
+    anchor_position_byte_offset: Property<i32>,
+    cursor_position_byte_offset: Property<i32>,
+    pub cached_rendering_data: CachedRenderingData,
+    /// The unit of the mouse selection under way, if any.
+    #[cfg_attr(not(feature = "shared-parley"), allow(dead_code))]
+    mouse_selection: Cell<MouseSelection>,
+}
+
+/// What a mouse selection in a `StyledText` grows by: a press selects by character, a double
+/// click by word and a triple click by paragraph.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(not(feature = "shared-parley"), allow(dead_code))]
+enum SelectionUnit {
+    Character = 1,
+    Word,
+    Paragraph,
+}
+
+impl SelectionUnit {
+    /// `click_count` counts the clicks before this one at the same spot.
+    #[cfg(feature = "shared-parley")]
+    fn for_click_count(click_count: u8) -> Self {
+        match click_count % 3 {
+            0 => Self::Character,
+            1 => Self::Word,
+            _ => Self::Paragraph,
+        }
+    }
+}
+
+/// An `Option<SelectionUnit>` as a field of the item: cbindgen can't lay an `Option` of an
+/// enum out for the C++ struct, so it is the unit's discriminant, 0 for `None`.
+#[repr(transparent)]
+#[derive(Clone, Copy, Default)]
+struct MouseSelection(u8);
+
+#[cfg(feature = "shared-parley")]
+impl MouseSelection {
+    fn get(self) -> Option<SelectionUnit> {
+        match self.0 {
+            1 => Some(SelectionUnit::Character),
+            2 => Some(SelectionUnit::Word),
+            3 => Some(SelectionUnit::Paragraph),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "shared-parley")]
+impl From<Option<SelectionUnit>> for MouseSelection {
+    fn from(unit: Option<SelectionUnit>) -> Self {
+        Self(unit.map_or(0, |unit| unit as u8))
+    }
+}
+
+impl Item for StyledTextItem {
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
+
+    fn deinit(self: Pin<&Self>, _window_adapter: &Rc<dyn WindowAdapter>) {}
+
+    fn layout_info(
+        self: Pin<&Self>,
+        orientation: Orientation,
+        cross_axis_constraint: Coord,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LayoutInfo {
+        text_layout_info(
+            self,
+            self_rc,
+            window_adapter,
+            orientation,
+            Self::FIELD_OFFSETS.width().apply_pin(self),
+            cross_axis_constraint,
+        )
+    }
+
+    fn input_event_filter_before_children(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventFilterResult {
+        InputEventFilterResult::ForwardEvent
+    }
+
+    #[cfg_attr(not(feature = "shared-parley"), allow(unused))]
+    fn input_event(
+        self: Pin<&Self>,
+        event: &MouseEvent,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        cursor: &mut super::MouseCursorInner,
+    ) -> InputEventResult {
+        #[cfg(feature = "shared-parley")]
+        let renderer = window_adapter.renderer();
+        #[cfg(feature = "shared-parley")]
+        let scale_factor = crate::lengths::ScaleFactor::new(
+            WindowInner::from_pub(window_adapter.window()).scale_factor(),
+        );
+        #[cfg(feature = "shared-parley")]
+        let find_link = |position: &LogicalPoint| {
+            crate::textlayout::sharedparley::link_under_cursor(
+                scale_factor,
+                self,
+                self_rc,
+                LogicalSize::from_lengths(self.width(), self.height()),
+                *position * scale_factor,
+                window_adapter.window(),
+                renderer.text_layout_cache(),
+            )
+        };
+        #[cfg(feature = "shared-parley")]
+        // The offsets come from the parley layout, so a renderer drawing another one (the
+        // software renderer with a bitmap font) gets no mouse selection.
+        if self.selectable() && renderer.text_has_parley_layout(self, self_rc) {
+            let offset_at = |position: &LogicalPoint| {
+                crate::textlayout::sharedparley::byte_offset_under_cursor(
+                    scale_factor,
+                    self,
+                    self_rc,
+                    LogicalSize::from_lengths(self.width(), self.height()),
+                    *position * scale_factor,
+                    window_adapter.window(),
+                    renderer.text_layout_cache(),
+                )
+            };
+            if let Some(result) = self.selection_mouse_event(
+                event,
+                &find_link,
+                &offset_at,
+                cursor,
+                window_adapter,
+                self_rc,
+            ) {
+                return result;
+            }
+        } else {
+            // A selection under way ends when `selectable` goes.
+            self.mouse_selection.take();
+        }
+        match event {
+            #[cfg(feature = "shared-parley")]
+            MouseEvent::Released { position, button: PointerEventButton::Left, .. } => {
+                if let Some(link) = find_link(position) {
+                    *cursor = super::MouseCursorInner::BuiltIn(super::BuiltInMouseCursor::Pointer);
+                    Self::FIELD_OFFSETS.link_clicked().apply_pin(self).call(&(link.into(),));
+                }
+                InputEventResult::EventAccepted
+            }
+            #[cfg(feature = "shared-parley")]
+            MouseEvent::Moved { position, .. }
+            | MouseEvent::Pressed { position, .. }
+            | MouseEvent::Released { position, .. } => {
+                if find_link(position).is_some() {
+                    *cursor = super::MouseCursorInner::BuiltIn(super::BuiltInMouseCursor::Pointer);
+                }
+                InputEventResult::EventAccepted
+            }
+            _ => InputEventResult::EventIgnored,
+        }
+    }
+
+    fn capture_key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn key_event(
+        self: Pin<&Self>,
+        event: &InternalKeyEvent,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        if !self.selectable() || event.event_type != KeyEventType::KeyPressed {
+            return KeyEventResult::EventIgnored;
+        }
+        match event.shortcut() {
+            Some(StandardShortcut::Copy) => {
+                self.copy_clipboard(window_adapter, Clipboard::DefaultClipboard);
+                KeyEventResult::EventAccepted
+            }
+            Some(StandardShortcut::SelectAll) => {
+                self.select_all();
+                KeyEventResult::EventAccepted
+            }
+            _ => KeyEventResult::EventIgnored,
+        }
+    }
+
+    fn focus_event(
+        self: Pin<&Self>,
+        event: &FocusEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> FocusEventResult {
+        match event {
+            // A selecting press takes the focus, as in a `TextInput`, so that at most one item
+            // shows a mouse selection. Tabbing skips the text: there is nothing to type into.
+            FocusEvent::FocusIn(reason) => {
+                if self.selectable() && *reason != FocusReason::TabNavigation {
+                    FocusEventResult::FocusAccepted
+                } else {
+                    FocusEventResult::FocusIgnored
+                }
+            }
+            FocusEvent::FocusOut(reason) => {
+                if !matches!(reason, FocusReason::WindowActivation | FocusReason::PopupActivation) {
+                    self.clear_selection();
+                }
+                FocusEventResult::FocusAccepted
+            }
+        }
+    }
+
+    fn render(
+        self: Pin<&Self>,
+        backend: &mut &mut dyn ItemRenderer,
+        self_rc: &ItemRc,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    fn bounding_rect(
+        self: core::pin::Pin<&Self>,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        geometry: LogicalRect,
+    ) -> LogicalRect {
+        geometry
+    }
+
+    fn clips_children(self: Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl ItemConsts for StyledTextItem {
+    const cached_rendering_data_offset: const_field_offset::FieldOffset<
+        StyledTextItem,
+        CachedRenderingData,
+    > = StyledTextItem::FIELD_OFFSETS.cached_rendering_data().as_unpinned_projection();
+}
+
+impl HasFont for StyledTextItem {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        crate::items::WindowItem::resolved_font_request(
+            self_rc,
+            self.default_font_family(),
+            Default::default(),
+            self.default_font_size(),
+            Default::default(),
+            Default::default(),
+        )
+    }
+}
+
+impl RenderString for StyledTextItem {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        PlainOrStyledText::Styled(self.text())
+    }
+
+    fn max_lines(self: Pin<&Self>) -> i32 {
+        Self::FIELD_OFFSETS.max_lines().apply_pin(self).get()
+    }
+
+    fn link_color(self: Pin<&Self>) -> Color {
+        self.link_color()
+    }
+}
+
+impl RenderText for StyledTextItem {
+    fn target_size(self: Pin<&Self>) -> LogicalSize {
+        LogicalSize::from_lengths(self.width(), self.height())
+    }
+
+    fn color(self: Pin<&Self>) -> Brush {
+        self.default_color()
+    }
+
+    fn alignment(
+        self: Pin<&Self>,
+    ) -> (super::TextHorizontalAlignment, super::TextVerticalAlignment) {
+        (self.horizontal_alignment(), self.vertical_alignment())
+    }
+
+    fn wrap(self: Pin<&Self>) -> TextWrap {
+        TextWrap::WordWrap
+    }
+
+    fn overflow(self: Pin<&Self>) -> TextOverflow {
+        TextOverflow::Clip
+    }
+
+    fn is_markdown(self: Pin<&Self>) -> bool {
+        true
+    }
+
+    fn selection(self: Pin<&Self>) -> Option<crate::item_rendering::TextSelection> {
+        Some(crate::item_rendering::TextSelection {
+            range: self.selection_range()?,
+            background: self.selection_background_color(),
+            foreground: self.selection_foreground_color(),
+        })
+    }
+}
+
+impl StyledTextItem {
+    pub fn font_metrics(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> FontMetrics {
+        let font_request = self.font_request(self_rc);
+        window_adapter.renderer().font_metrics(font_request)
+    }
+
+    /// Whether text is selected, for the `has-selection` property.
+    pub fn has_selection(self: Pin<&Self>) -> bool {
+        self.selection_range().is_some()
+    }
+
+    /// The selection as a byte range into the raw text, ordered and clamped to the text;
+    /// `None` when nothing is selected.
+    fn selection_range(self: Pin<&Self>) -> Option<core::ops::Range<usize>> {
+        let (anchor, cursor) =
+            (self.anchor_position_byte_offset(), self.cursor_position_byte_offset());
+        if anchor == cursor {
+            return None;
+        }
+        let styled = self.text();
+        let (start, end) = ordered_raw_offsets(&styled, anchor, cursor);
+        (start < end).then_some(start..end)
+    }
+
+    /// Copies the selected text to the clipboard, without markup.
+    pub fn copy(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, _self_rc: &ItemRc) {
+        self.copy_clipboard(window_adapter, Clipboard::DefaultClipboard);
+    }
+
+    fn copy_clipboard(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        clipboard: Clipboard,
+    ) {
+        let Some(range) = self.selection_range() else {
+            return;
+        };
+        let styled = self.text();
+        let text = crate::styled_text::get_raw_text(&styled);
+        WindowInner::from_pub(window_adapter.window())
+            .context()
+            .platform()
+            .set_clipboard_text(&text[range], clipboard);
+    }
+
+    /// Selects the text between two byte offsets, clamped to the raw text.
+    pub fn set_selection_offsets(self: Pin<&Self>, anchor: i32, focus: i32) {
+        let styled = self.text();
+        self.anchor_position_byte_offset
+            .set(crate::styled_text::clamp_byte_offset(&styled, anchor) as i32);
+        self.cursor_position_byte_offset
+            .set(crate::styled_text::clamp_byte_offset(&styled, focus) as i32);
+    }
+
+    /// Selects all the text.
+    pub fn select_all(self: Pin<&Self>) {
+        self.anchor_position_byte_offset.set(0);
+        self.cursor_position_byte_offset.set(crate::styled_text::raw_text_len(&self.text()) as i32);
+    }
+
+    /// Clears the selection, leaving the cursor where it is.
+    pub fn clear_selection(self: Pin<&Self>) {
+        self.anchor_position_byte_offset.set(self.cursor_position_byte_offset());
+    }
+
+    /// Pressing and dragging selects; a double click selects a word, a triple click a paragraph.
+    /// `None` for the events the selection doesn't handle, a click without a drag among them:
+    /// `input_event` then follows a link under it, as without `selectable`.
+    #[cfg(feature = "shared-parley")]
+    fn selection_mouse_event(
+        self: Pin<&Self>,
+        event: &MouseEvent,
+        find_link: &dyn Fn(&LogicalPoint) -> Option<std::string::String>,
+        offset_at: &dyn Fn(&LogicalPoint) -> Option<usize>,
+        cursor: &mut super::MouseCursorInner,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> Option<InputEventResult> {
+        let set = |anchor: usize, focus: usize| {
+            self.anchor_position_byte_offset.set(anchor as i32);
+            self.cursor_position_byte_offset.set(focus as i32);
+        };
+        match event {
+            MouseEvent::Pressed {
+                position, button: PointerEventButton::Left, click_count, ..
+            } => {
+                let offset = offset_at(position)?;
+                let styled = self.text();
+                let offset = crate::styled_text::clamp_byte_offset(&styled, offset as i32);
+                let unit = SelectionUnit::for_click_count(*click_count);
+                self.mouse_selection.set(Some(unit).into());
+                *cursor = selectable_text_cursor(find_link(position).is_some());
+                // As in a `TextInput`, the press takes the focus, which clears the selection
+                // of the item that had it. A no-op when this item has it already.
+                WindowInner::from_pub(window_adapter.window()).set_focus_item(
+                    self_rc,
+                    true,
+                    FocusReason::PointerClick,
+                );
+                let anchor = if window_adapter.window().0.context().modifiers().get().shift() {
+                    crate::styled_text::clamp_byte_offset(
+                        &styled,
+                        self.anchor_position_byte_offset(),
+                    )
+                } else {
+                    offset
+                };
+                let (anchor, focus) = selection_by_unit(&styled, anchor, offset, unit);
+                set(anchor, focus);
+                Some(InputEventResult::GrabMouse)
+            }
+            MouseEvent::Moved { position, .. } => {
+                let Some(unit) = self.mouse_selection.get().get() else {
+                    *cursor = selectable_text_cursor(find_link(position).is_some());
+                    return Some(InputEventResult::EventAccepted);
+                };
+                *cursor = selectable_text_cursor(false);
+                if let Some(offset) = offset_at(position) {
+                    let styled = self.text();
+                    let offset = crate::styled_text::clamp_byte_offset(&styled, offset as i32);
+                    let anchor = crate::styled_text::clamp_byte_offset(
+                        &styled,
+                        self.anchor_position_byte_offset(),
+                    );
+                    let (anchor, focus) = selection_by_unit(&styled, anchor, offset, unit);
+                    set(anchor, focus);
+                }
+                Some(InputEventResult::GrabMouse)
+            }
+            MouseEvent::Released { position, button: PointerEventButton::Left, .. } => {
+                *cursor = selectable_text_cursor(find_link(position).is_some());
+                // A press released with nothing selected is a click, left to the link handling
+                // in `input_event`. (A Shift-click extends the selection without moving.)
+                let clicked = self.mouse_selection.take().get() == Some(SelectionUnit::Character)
+                    && !self.has_selection();
+                if clicked {
+                    return None;
+                }
+                self.copy_clipboard(window_adapter, Clipboard::SelectionClipboard);
+                Some(InputEventResult::EventAccepted)
+            }
+            MouseEvent::Exit => {
+                self.mouse_selection.take();
+                Some(InputEventResult::EventIgnored)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The pointer over a link, an I-beam over the rest of selectable text.
+#[cfg(feature = "shared-parley")]
+fn selectable_text_cursor(over_link: bool) -> super::MouseCursorInner {
+    super::MouseCursorInner::BuiltIn(if over_link {
+        super::BuiltInMouseCursor::Pointer
+    } else {
+        super::BuiltInMouseCursor::Text
+    })
+}
+
+/// `anchor` and `cursor` clamped into `text`, the smaller first.
+fn ordered_selection(text: &str, anchor: i32, cursor: i32) -> (usize, usize) {
+    let anchor = safe_byte_offset(anchor, text);
+    let cursor = safe_byte_offset(cursor, text);
+    (anchor.min(cursor), anchor.max(cursor))
+}
+
+/// `anchor` and `cursor` clamped into the raw text of `styled`, the smaller first.
+fn ordered_raw_offsets(
+    styled: &crate::styled_text::StyledText,
+    anchor: i32,
+    cursor: i32,
+) -> (usize, usize) {
+    let anchor = crate::styled_text::clamp_byte_offset(styled, anchor);
+    let cursor = crate::styled_text::clamp_byte_offset(styled, cursor);
+    (anchor.min(cursor), anchor.max(cursor))
+}
+
+/// `anchor..focus` (either way round), widened to whole words or paragraphs as `unit` says.
+/// A word or a paragraph lies within one paragraph of `styled`, so the text isn't joined.
+#[cfg(feature = "shared-parley")]
+fn selection_by_unit(
+    styled: &crate::styled_text::StyledText,
+    anchor: usize,
+    focus: usize,
+    unit: SelectionUnit,
+) -> (usize, usize) {
+    let unit_at = |offset: usize| -> core::ops::Range<usize> {
+        let Some((paragraph, range)) = crate::styled_text::paragraph_at(styled, offset) else {
+            return offset..offset;
+        };
+        match unit {
+            SelectionUnit::Character => offset..offset,
+            SelectionUnit::Word => {
+                let word = word_at(&paragraph.text, offset - range.start);
+                range.start + word.start..range.start + word.end
+            }
+            SelectionUnit::Paragraph => range,
+        }
+    };
+    let (anchor_unit, focus_unit) = (unit_at(anchor), unit_at(focus));
+    if anchor <= focus {
+        (anchor_unit.start, focus_unit.end)
+    } else {
+        (anchor_unit.end, focus_unit.start)
+    }
+}
+
+/// The implementation of the `Text` element
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement)]
+#[pin]
+pub struct SimpleText {
+    pub width: Property<LogicalLength>,
+    pub height: Property<LogicalLength>,
+    pub text: Property<SharedString>,
+    pub font_size: Property<LogicalLength>,
+    pub font_weight: Property<i32>,
+    pub color: Property<Brush>,
+    pub horizontal_alignment: Property<TextHorizontalAlignment>,
+    pub vertical_alignment: Property<TextVerticalAlignment>,
+    pub max_lines: Property<i32>,
+
+    pub cached_rendering_data: CachedRenderingData,
+}
+
+impl Item for SimpleText {
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
+
+    fn deinit(self: Pin<&Self>, _window_adapter: &Rc<dyn WindowAdapter>) {}
+
+    fn layout_info(
+        self: Pin<&Self>,
+        orientation: Orientation,
+        cross_axis_constraint: Coord,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LayoutInfo {
+        text_layout_info(
+            self,
+            self_rc,
+            window_adapter,
+            orientation,
+            Self::FIELD_OFFSETS.width().apply_pin(self),
+            cross_axis_constraint,
+        )
+    }
+
+    fn input_event_filter_before_children(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventFilterResult {
+        InputEventFilterResult::ForwardAndIgnore
+    }
+
+    fn input_event(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventResult {
+        InputEventResult::EventIgnored
+    }
+
+    fn capture_key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn focus_event(
+        self: Pin<&Self>,
+        _: &FocusEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> FocusEventResult {
+        FocusEventResult::FocusIgnored
+    }
+
+    fn render(
+        self: Pin<&Self>,
+        backend: &mut &mut dyn ItemRenderer,
+        self_rc: &ItemRc,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    fn bounding_rect(
+        self: core::pin::Pin<&Self>,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        geometry: LogicalRect,
+    ) -> LogicalRect {
+        geometry
+    }
+
+    fn clips_children(self: core::pin::Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl ItemConsts for SimpleText {
+    const cached_rendering_data_offset: const_field_offset::FieldOffset<
+        SimpleText,
+        CachedRenderingData,
+    > = SimpleText::FIELD_OFFSETS.cached_rendering_data().as_unpinned_projection();
+}
+
+impl HasFont for SimpleText {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        crate::items::WindowItem::resolved_font_request(
+            self_rc,
+            SharedString::default(),
+            self.font_weight(),
+            self.font_size(),
+            LogicalLength::default(),
+            false,
+        )
+    }
+}
+
+impl RenderString for SimpleText {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        PlainOrStyledText::Plain(self.text())
+    }
+
+    fn max_lines(self: Pin<&Self>) -> i32 {
+        Self::FIELD_OFFSETS.max_lines().apply_pin(self).get()
+    }
+}
+
+impl RenderText for SimpleText {
+    fn target_size(self: Pin<&Self>) -> LogicalSize {
+        LogicalSize::from_lengths(self.width(), self.height())
+    }
+
+    fn color(self: Pin<&Self>) -> Brush {
+        self.color()
+    }
+
+    fn alignment(
+        self: Pin<&Self>,
+    ) -> (super::TextHorizontalAlignment, super::TextVerticalAlignment) {
+        (self.horizontal_alignment(), self.vertical_alignment())
+    }
+
+    fn wrap(self: Pin<&Self>) -> TextWrap {
+        TextWrap::default()
+    }
+
+    fn overflow(self: Pin<&Self>) -> TextOverflow {
+        TextOverflow::default()
+    }
+
+    fn is_markdown(self: Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl SimpleText {
+    pub fn font_metrics(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> FontMetrics {
+        window_adapter.renderer().font_metrics(self.font_request(self_rc))
+    }
+}
+
+/// The height of a plain single-line `NoWrap` text, when it can be computed without shaping.
+fn single_line_height(
+    window_adapter: &Rc<dyn WindowAdapter>,
+    text: Pin<&(impl RenderString + ?Sized)>,
+    self_rc: &ItemRc,
+) -> Option<Coord> {
+    match text.text() {
+        PlainOrStyledText::Plain(s) if !s.contains('\n') => {
+            let font_request = text.font_request(self_rc);
+            let line_height =
+                window_adapter.renderer().text_line_height(font_request, text.line_height_factor());
+            line_height.map(|h| h.get())
+        }
+        _ => None,
+    }
+}
+
+// The compiler's single-cell box layout lowering relies on text and image
+// items keeping the default stretch of 0 in their layout info.
+fn text_layout_info(
+    text: Pin<&dyn RenderText>,
+    self_rc: &ItemRc,
+    window_adapter: &Rc<dyn WindowAdapter>,
+    orientation: Orientation,
+    width: Pin<&Property<LogicalLength>>,
+    cross_axis_constraint: Coord,
+) -> LayoutInfo {
+    // The text layout cache holds one wrap mode per item, and an unconstrained measurement
+    // doesn't need `NoWrap`: with no width to break at, the mode can't change the width.
+    let wrap = text.wrap();
+    let implicit_size = |text: Pin<&dyn RenderString>, max_width| {
+        window_adapter.renderer().text_size(text, self_rc, max_width, wrap)
+    };
+
+    // Stretch uses `round_layout` to explicitly align the top left and bottom right of layout nodes
+    // to pixel boundaries. To avoid rounding down causing the minimum width to become so little that
+    // letters will be cut off, apply the ceiling here.
+    match orientation {
+        Orientation::Horizontal => {
+            let width_text = TextForWidth(text);
+            let width_text = Pin::new(&width_text);
+            // A word-wrapping text mustn't be squeezed below its longest word. One
+            // content-widths measurement gives both that minimum and the single-line
+            // preferred width, so this replaces the plain measurement below.
+            let word_wrap_widths =
+                matches!((text.overflow(), wrap), (TextOverflow::Clip, TextWrap::WordWrap))
+                    .then(|| window_adapter.renderer().text_content_widths(text, self_rc))
+                    .flatten();
+
+            let (min, preferred) = match word_wrap_widths {
+                Some(widths) => (widths.min.get(), widths.max.get()),
+                None => {
+                    let unwrapped_width = implicit_size(width_text, None).width;
+                    let min = match text.overflow() {
+                        TextOverflow::Elide => unwrapped_width.min(
+                            window_adapter
+                                .renderer()
+                                .char_size(
+                                    width_text.font_request(self_rc),
+                                    width_text.line_height_factor(),
+                                    '…',
+                                )
+                                .width,
+                        ),
+                        TextOverflow::Clip => match wrap {
+                            TextWrap::NoWrap => unwrapped_width,
+                            // char-wrap can break anywhere, so it keeps no lower bound.
+                            TextWrap::WordWrap | TextWrap::CharWrap => 0 as Coord,
+                        },
+                    };
+                    (min, unwrapped_width)
+                }
+            };
+            LayoutInfo { min: min.ceil(), preferred: preferred.ceil(), ..LayoutInfo::default() }
+        }
+        Orientation::Vertical => {
+            let h = match wrap {
+                TextWrap::NoWrap => single_line_height(window_adapter, text, self_rc)
+                    .unwrap_or_else(|| implicit_size(text, None).height),
+                TextWrap::WordWrap | TextWrap::CharWrap => {
+                    let w = if cross_axis_constraint >= 0 as Coord {
+                        LogicalLength::new(cross_axis_constraint)
+                    } else {
+                        width.get()
+                    };
+                    implicit_size(text, Some(w)).height
+                }
+            }
+            .ceil();
+            LayoutInfo { min: h, preferred: h, ..LayoutInfo::default() }
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq)]
+/// Similar as `Option<core::ops::Range<i32>>` but `repr(C)`
+///
+/// This is the selection within a preedit
+struct PreEditSelection {
+    valid: bool,
+    start: i32,
+    end: i32,
+}
+
+impl From<Option<core::ops::Range<i32>>> for PreEditSelection {
+    fn from(value: Option<core::ops::Range<i32>>) -> Self {
+        value.map_or_else(Default::default, |r| Self { valid: true, start: r.start, end: r.end })
+    }
+}
+
+impl PreEditSelection {
+    fn as_option(self) -> Option<core::ops::Range<i32>> {
+        self.valid.then_some(self.start..self.end)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone)]
+enum UndoItemKind {
+    TextInsert,
+    TextRemove,
+}
+
+#[repr(C)]
+#[derive(Clone)]
+struct UndoItem {
+    pos: usize,
+    text: SharedString,
+    cursor: usize,
+    anchor: usize,
+    kind: UndoItemKind,
+}
+
+/// The implementation of the `TextInput` element
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement)]
+#[pin]
+pub struct TextInput {
+    pub text: Property<SharedString>,
+    pub font_family: Property<SharedString>,
+    pub font_size: Property<LogicalLength>,
+    pub font_weight: Property<i32>,
+    pub font_italic: Property<bool>,
+    pub color: Property<Brush>,
+    pub selection_foreground_color: Property<Color>,
+    pub selection_background_color: Property<Color>,
+    pub horizontal_alignment: Property<TextHorizontalAlignment>,
+    pub vertical_alignment: Property<TextVerticalAlignment>,
+    pub wrap: Property<TextWrap>,
+    pub input_type: Property<InputType>,
+    pub input_method_hints: Property<InputMethodHints>,
+    pub letter_spacing: Property<LogicalLength>,
+    pub line_height_factor: Property<f32>,
+    pub width: Property<LogicalLength>,
+    pub height: Property<LogicalLength>,
+    pub cursor_position_byte_offset: Property<i32>,
+    pub anchor_position_byte_offset: Property<i32>,
+    cursor_affinity: Cell<TextCursorAffinity>,
+    pub text_cursor_width: Property<LogicalLength>,
+    pub page_height: Property<LogicalLength>,
+    pub cursor_visible: Property<bool>,
+    pub has_focus: Property<bool>,
+    pub enabled: Property<bool>,
+    pub accepted: Callback<VoidArg>,
+    pub cursor_position_changed: Callback<PointArg>,
+    pub edited: Callback<VoidArg>,
+    pub key_pressed: Callback<KeyEventArg, EventResult>,
+    pub key_released: Callback<KeyEventArg, EventResult>,
+    pub single_line: Property<bool>,
+    pub read_only: Property<bool>,
+    pub preedit_text: Property<SharedString>,
+    /// A selection within the preedit (cursor and anchor)
+    preedit_selection: Property<PreEditSelection>,
+    pub cached_rendering_data: CachedRenderingData,
+    // The x position where the cursor wants to be.
+    // It is not updated when moving up and down even when the line is shorter.
+    preferred_x_pos: Cell<Coord>,
+    /// 0 = not pressed, 1 = single press, 2 = double clicked+press , ...
+    pressed: Cell<u8>,
+    undo_items: Cell<SharedVector<UndoItem>>,
+    redo_items: Cell<SharedVector<UndoItem>>,
+    /// Mirror of `text` as of the last internal edit. Used by the change handler installed
+    /// in `init` to tell internal edits apart from external assignments to the public `text`
+    /// property, so that only the latter realign the cursor/anchor offsets and undo stack.
+    internal_text: Cell<SharedString>,
+    /// Runs `align_to_text` whenever `text` is assigned externally (see issues #331 and #9024).
+    text_change_tracker: crate::properties::ChangeTracker,
+}
+
+impl Item for TextInput {
+    fn init(self: Pin<&Self>, self_rc: &ItemRc) {
+        // Seed the mirror so the change handler doesn't treat the initial text as external.
+        self.internal_text.set(self.text());
+        self.text_change_tracker.init_delayed(
+            self_rc.downgrade(),
+            |self_weak| {
+                self_weak
+                    .upgrade()
+                    .and_then(|rc| rc.downcast::<TextInput>())
+                    .map(|text_input| text_input.as_pin_ref().text())
+                    .unwrap_or_default()
+            },
+            |self_weak, new_text| {
+                let Some(self_rc) = self_weak.upgrade() else { return };
+                let Some(text_input) = self_rc.downcast::<TextInput>() else { return };
+                text_input.as_pin_ref().align_to_text(new_text, &self_rc);
+            },
+        );
+    }
+
+    fn deinit(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>) {
+        if self.has_focus() {
+            let window_inner = crate::window::WindowInner::from_pub(window_adapter.window());
+            window_inner.set_text_input_focused(false);
+        }
+    }
+
+    fn layout_info(
+        self: Pin<&Self>,
+        orientation: Orientation,
+        cross_axis_constraint: Coord,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LayoutInfo {
+        // See `text_layout_info` for why the wrap mode is the item's own.
+        let wrap = self.wrap();
+        let implicit_size =
+            |max_width| window_adapter.renderer().text_size(self, self_rc, max_width, wrap);
+
+        // Stretch uses `round_layout` to explicitly align the top left and bottom right of layout nodes
+        // to pixel boundaries. To avoid rounding down causing the minimum width to become so little that
+        // letters will be cut off, apply the ceiling here.
+        match orientation {
+            Orientation::Horizontal => {
+                let width_text = TextForWidth(self);
+                let width_text = Pin::new(&width_text);
+                let width =
+                    window_adapter.renderer().text_size(width_text, self_rc, None, wrap).width;
+                let min = match wrap {
+                    TextWrap::NoWrap => width,
+                    TextWrap::WordWrap | TextWrap::CharWrap => 0 as Coord,
+                };
+                LayoutInfo { min: min.ceil(), preferred: width.ceil(), ..LayoutInfo::default() }
+            }
+            Orientation::Vertical => {
+                let h = match wrap {
+                    TextWrap::NoWrap => single_line_height(window_adapter, self, self_rc)
+                        .unwrap_or_else(|| implicit_size(None).height),
+                    TextWrap::WordWrap | TextWrap::CharWrap => {
+                        let w = if cross_axis_constraint >= 0 as Coord {
+                            LogicalLength::new(cross_axis_constraint)
+                        } else {
+                            self.width()
+                        };
+                        implicit_size(Some(w)).height
+                    }
+                }
+                .ceil();
+                LayoutInfo { min: h, preferred: h, ..LayoutInfo::default() }
+            }
+        }
+    }
+
+    fn input_event_filter_before_children(
+        self: Pin<&Self>,
+        _: &MouseEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        _: &mut super::MouseCursorInner,
+    ) -> InputEventFilterResult {
+        InputEventFilterResult::ForwardEvent
+    }
+
+    fn input_event(
+        self: Pin<&Self>,
+        event: &MouseEvent,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        cursor: &mut super::MouseCursorInner,
+    ) -> InputEventResult {
+        if !self.enabled() {
+            return InputEventResult::EventIgnored;
+        }
+
+        *cursor = super::MouseCursorInner::BuiltIn(super::BuiltInMouseCursor::Text);
+
+        match event {
+            MouseEvent::Pressed {
+                position, button: PointerEventButton::Left, click_count, ..
+            } => {
+                let (clicked_offset, clicked_affinity) =
+                    self.byte_offset_for_position(*position, window_adapter, self_rc);
+                let clicked_offset = clicked_offset as i32;
+                self.as_ref().pressed.set((click_count % 3) + 1);
+
+                if !window_adapter.window().0.context().modifiers().get().shift() {
+                    self.as_ref().anchor_position_byte_offset.set(clicked_offset);
+                }
+
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
+
+                match click_count % 3 {
+                    0 => self.set_cursor_position_with_affinity(
+                        clicked_offset,
+                        clicked_affinity,
+                        true,
+                        TextChangeNotify::TriggerCallbacks,
+                        window_adapter,
+                        self_rc,
+                    ),
+                    1 => self.select_word(window_adapter, self_rc),
+                    2 => self.select_paragraph(window_adapter, self_rc),
+                    _ => unreachable!(),
+                };
+
+                return InputEventResult::GrabMouse;
+            }
+            MouseEvent::Pressed { button: PointerEventButton::Middle, .. } => {
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
+            }
+            MouseEvent::Released { button: PointerEventButton::Left, .. } => {
+                self.as_ref().pressed.set(0);
+                self.copy_clipboard(window_adapter, Clipboard::SelectionClipboard);
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
+            }
+            MouseEvent::Released { position, button: PointerEventButton::Middle, .. } => {
+                if self.read_only() {
+                    return InputEventResult::EventAccepted;
+                }
+                let (clicked_offset, clicked_affinity) =
+                    self.byte_offset_for_position(*position, window_adapter, self_rc);
+                let clicked_offset = clicked_offset as i32;
+                self.as_ref().anchor_position_byte_offset.set(clicked_offset);
+                self.set_cursor_position_with_affinity(
+                    clicked_offset,
+                    clicked_affinity,
+                    true,
+                    // We trigger the callbacks because paste_clipboard might not if there is no clipboard
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+                self.paste_clipboard(window_adapter, self_rc, Clipboard::SelectionClipboard);
+            }
+            MouseEvent::Exit => self.as_ref().pressed.set(0),
+            MouseEvent::Moved { position, .. } => {
+                let pressed = self.as_ref().pressed.get();
+                if pressed > 0 {
+                    let (clicked_offset, clicked_affinity) =
+                        self.byte_offset_for_position(*position, window_adapter, self_rc);
+                    // Like Android's native text fields, dragging a finger after a single tap moves
+                    // the cursor instead of selecting.
+                    #[cfg(target_os = "android")]
+                    if pressed == 1 && event.is_from_touch() {
+                        self.as_ref().anchor_position_byte_offset.set(clicked_offset as i32);
+                    }
+                    self.set_cursor_position_with_affinity(
+                        clicked_offset as i32,
+                        clicked_affinity,
+                        true,
+                        if (pressed - 1).is_multiple_of(3) {
+                            TextChangeNotify::TriggerCallbacks
+                        } else {
+                            TextChangeNotify::SkipCallbacks
+                        },
+                        window_adapter,
+                        self_rc,
+                    );
+                    match (pressed - 1) % 3 {
+                        0 => (),
+                        1 => self.select_word(window_adapter, self_rc),
+                        2 => self.select_paragraph(window_adapter, self_rc),
+                        _ => unreachable!(),
+                    }
+                    return InputEventResult::GrabMouse;
+                }
+            }
+            _ => return InputEventResult::EventIgnored,
+        }
+        InputEventResult::EventAccepted
+    }
+
+    fn capture_key_event(
+        self: Pin<&Self>,
+        _: &InternalKeyEvent,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        KeyEventResult::EventIgnored
+    }
+
+    fn key_event(
+        self: Pin<&Self>,
+        event: &InternalKeyEvent,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> KeyEventResult {
+        if !self.enabled() {
+            return KeyEventResult::EventIgnored;
+        }
+        match event.event_type {
+            KeyEventType::KeyPressed => {
+                // invoke first key_pressed callback to give the developer/designer the possibility to implement a custom behavior
+                if Self::FIELD_OFFSETS
+                    .key_pressed()
+                    .apply_pin(self)
+                    .call(&(event.key_event.clone(),))
+                    == EventResult::Accept
+                {
+                    return KeyEventResult::EventAccepted;
+                }
+
+                let delete_direction = match event.text_shortcut() {
+                    Some(TextShortcut::Move(direction)) => {
+                        TextInput::move_cursor(
+                            self,
+                            direction,
+                            event.key_event.modifiers.into(),
+                            TextChangeNotify::TriggerCallbacks,
+                            window_adapter,
+                            self_rc,
+                        );
+                        return KeyEventResult::EventAccepted;
+                    }
+                    // Special case: backspace breaks the grapheme and selects the previous character
+                    Some(TextShortcut::DeleteBackward) => {
+                        Some(TextCursorDirection::PreviousCharacter)
+                    }
+                    Some(TextShortcut::DeleteForward) => Some(TextCursorDirection::Forward),
+                    Some(TextShortcut::DeleteWordForward) => {
+                        Some(TextCursorDirection::ForwardByWord)
+                    }
+                    Some(TextShortcut::DeleteWordBackward) => {
+                        Some(TextCursorDirection::BackwardByWord)
+                    }
+                    Some(TextShortcut::DeleteToStartOfLine) => {
+                        Some(TextCursorDirection::StartOfLine)
+                    }
+                    None => None,
+                };
+                if let Some(direction) = delete_direction {
+                    if self.read_only() {
+                        return KeyEventResult::EventIgnored;
+                    }
+                    TextInput::select_and_delete(self, direction, window_adapter, self_rc);
+                    return KeyEventResult::EventAccepted;
+                }
+
+                if let Some(keycode) = event.key_event.text.chars().next()
+                    && keycode == key_codes::Return
+                    && !self.read_only()
+                    && self.single_line()
+                {
+                    Self::FIELD_OFFSETS.accepted().apply_pin(self).call(&());
+                    return KeyEventResult::EventAccepted;
+                }
+
+                // Only insert/interpreter non-control character strings
+                if event.key_event.text.is_empty()
+                    || event.key_event.text.as_str().chars().any(|ch| {
+                        // exclude the private use area as we encode special keys into it
+                        ('\u{f700}'..='\u{f7ff}').contains(&ch) || (ch.is_control() && ch != '\n')
+                    })
+                {
+                    return KeyEventResult::EventIgnored;
+                }
+
+                if let Some(shortcut) = event.shortcut() {
+                    match shortcut {
+                        StandardShortcut::SelectAll => {
+                            self.select_all(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Copy if !self.is_password() => {
+                            self.copy(window_adapter);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Paste if !self.read_only() => {
+                            self.paste(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Cut if !self.read_only() && !self.is_password() => {
+                            self.cut(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Copy
+                        | StandardShortcut::Paste
+                        | StandardShortcut::Cut => {
+                            return KeyEventResult::EventIgnored;
+                        }
+                        StandardShortcut::Undo if !self.read_only() => {
+                            self.undo(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Redo if !self.read_only() => {
+                            self.redo(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        _ => (),
+                    }
+                }
+
+                if self.read_only() || event.key_event.modifiers.control {
+                    return KeyEventResult::EventIgnored;
+                }
+
+                // save real anchor/cursor for undo/redo
+                let (real_cursor, real_anchor) = {
+                    let text = self.text();
+                    (self.cursor_position(&text), self.anchor_position(&text))
+                };
+
+                if !self.accept_text_input(event.key_event.text.as_str(), window_adapter) {
+                    return KeyEventResult::EventIgnored;
+                }
+
+                self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
+
+                let mut text: String = self.text().into();
+
+                // FIXME: respect grapheme boundaries
+                let insert_pos = self.selection_anchor_and_cursor().1;
+                text.insert_str(insert_pos, &event.key_event.text);
+
+                self.add_undo_item(UndoItem {
+                    pos: insert_pos,
+                    text: event.key_event.text.clone(),
+                    cursor: real_cursor,
+                    anchor: real_anchor,
+                    kind: UndoItemKind::TextInsert,
+                });
+
+                self.as_ref().set_text_internal(text.into());
+                let new_cursor_pos = (insert_pos + event.key_event.text.len()) as i32;
+                self.as_ref().anchor_position_byte_offset.set(new_cursor_pos);
+                self.set_cursor_position(
+                    new_cursor_pos,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+
+                // Keep the cursor visible when inserting text. Blinking should only occur when
+                // nothing is entered or the cursor isn't moved.
+                self.as_ref().show_cursor(window_adapter);
+
+                Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+
+                KeyEventResult::EventAccepted
+            }
+            KeyEventType::KeyReleased => {
+                match Self::FIELD_OFFSETS
+                    .key_released()
+                    .apply_pin(self)
+                    .call(&(event.key_event.clone(),))
+                {
+                    EventResult::Accept => KeyEventResult::EventAccepted,
+                    EventResult::Reject => KeyEventResult::EventIgnored,
+                }
+            }
+            KeyEventType::UpdateComposition | KeyEventType::CommitComposition => {
+                if !self.accept_text_input(&event.key_event.text, window_adapter) {
+                    return KeyEventResult::EventIgnored;
+                }
+
+                let cursor = self.cursor_position(&self.text()) as i32;
+                self.preedit_text.set(event.preedit_text.clone());
+                self.preedit_selection.set(event.preedit_selection.clone().into());
+
+                if let Some(r) = &event.replacement_range {
+                    // Set the selection so the call to insert erases it
+                    self.anchor_position_byte_offset.set(cursor.saturating_add(r.start));
+                    self.cursor_position_byte_offset.set(cursor.saturating_add(r.end));
+                    if event.key_event.text.is_empty() {
+                        self.delete_selection(
+                            window_adapter,
+                            self_rc,
+                            if event.cursor_position.is_none() {
+                                TextChangeNotify::TriggerCallbacks
+                            } else {
+                                // will be updated by the set_cursor_position later
+                                TextChangeNotify::SkipCallbacks
+                            },
+                        );
+                    }
+                }
+                self.insert(&event.key_event.text, window_adapter, self_rc);
+                if let Some(cursor) = event.cursor_position {
+                    self.anchor_position_byte_offset.set(event.anchor_position.unwrap_or(cursor));
+                    self.set_cursor_position(
+                        cursor,
+                        true,
+                        TextChangeNotify::TriggerCallbacks,
+                        window_adapter,
+                        self_rc,
+                    );
+                }
+                KeyEventResult::EventAccepted
+            }
+        }
+    }
+
+    fn focus_event(
+        self: Pin<&Self>,
+        event: &FocusEvent,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> FocusEventResult {
+        match event {
+            FocusEvent::FocusIn(_reason) => {
+                if !self.enabled() {
+                    return FocusEventResult::FocusIgnored;
+                }
+                self.has_focus.set(true);
+                self.show_cursor(window_adapter);
+                let window_inner = WindowInner::from_pub(window_adapter.window());
+                window_inner.set_text_input_focused(true);
+                // Keep the IME cursor rectangle in sync when the TextInput moves, e.g. in a Flickable
+                window_inner.track_focus_item_position(self_rc, |item, window_adapter| {
+                    if let Some(text_input) = item.downcast::<TextInput>() {
+                        text_input.as_pin_ref().update_ime(window_adapter, item);
+                    }
+                });
+                // FIXME: This should be tracked by a PropertyTracker in window and toggled when read_only() toggles.
+                if !self.read_only() {
+                    if let Some(w) = window_adapter.internal(crate::InternalToken) {
+                        w.input_method_request(InputMethodRequest::Enable(
+                            self.ime_properties(window_adapter, self_rc),
+                        ));
+                    }
+
+                    if cfg!(not(target_vendor = "apple")) && *_reason == FocusReason::TabNavigation
+                    {
+                        self.select_all(window_adapter, self_rc);
+                    }
+                }
+            }
+            FocusEvent::FocusOut(reason) => {
+                self.has_focus.set(false);
+                self.hide_cursor();
+                if !matches!(reason, FocusReason::WindowActivation | FocusReason::PopupActivation) {
+                    self.as_ref()
+                        .anchor_position_byte_offset
+                        .set(self.as_ref().cursor_position_byte_offset());
+                }
+                WindowInner::from_pub(window_adapter.window()).set_text_input_focused(false);
+                if !self.read_only() {
+                    // commit the preedit text on android
+                    #[cfg(target_os = "android")]
+                    {
+                        let preedit_text = self.preedit_text();
+                        if !preedit_text.is_empty() {
+                            let mut text = String::from(self.text());
+                            let cursor_position = self.cursor_position(&text);
+                            text.insert_str(cursor_position, &preedit_text);
+                            self.set_text_internal(text.into());
+                            let new_pos = (cursor_position + preedit_text.len()) as i32;
+                            self.anchor_position_byte_offset.set(new_pos);
+                            self.set_cursor_position(
+                                new_pos,
+                                false,
+                                TextChangeNotify::TriggerCallbacks,
+                                window_adapter,
+                                self_rc,
+                            );
+                            Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+                        }
+                    }
+                    self.preedit_text.set(Default::default());
+                }
+            }
+        }
+        FocusEventResult::FocusAccepted
+    }
+
+    fn render(
+        self: Pin<&Self>,
+        backend: &mut &mut dyn ItemRenderer,
+        self_rc: &ItemRc,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        crate::properties::evaluate_no_tracking(|| {
+            if self.has_focus() && self.text() != *backend.window().last_ime_text.borrow() {
+                let window_adapter = &backend.window().window_adapter();
+                if let Some(w) = window_adapter.internal(crate::InternalToken) {
+                    w.input_method_request(InputMethodRequest::Update(
+                        self.ime_properties(window_adapter, self_rc),
+                    ));
+                }
+            }
+        });
+        (*backend).draw_text_input(self, self_rc, size);
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    fn bounding_rect(
+        self: core::pin::Pin<&Self>,
+        _window_adapter: &Rc<dyn WindowAdapter>,
+        _self_rc: &ItemRc,
+        geometry: LogicalRect,
+    ) -> LogicalRect {
+        geometry
+    }
+
+    fn clips_children(self: core::pin::Pin<&Self>) -> bool {
+        false
+    }
+}
+
+impl ItemConsts for TextInput {
+    const cached_rendering_data_offset: const_field_offset::FieldOffset<
+        TextInput,
+        CachedRenderingData,
+    > = TextInput::FIELD_OFFSETS.cached_rendering_data().as_unpinned_projection();
+}
+
+impl HasFont for TextInput {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        crate::items::WindowItem::resolved_font_request(
+            self_rc,
+            self.font_family(),
+            self.font_weight(),
+            self.font_size(),
+            self.letter_spacing(),
+            self.font_italic(),
+        )
+    }
+}
+
+impl RenderString for TextInput {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        // Deliberately not `visual_representation`, which would size the item off the cursor and
+        // the selection too -- see `text_with_preedit`.
+        let text = self.text_with_preedit().0;
+        PlainOrStyledText::Plain(if self.is_password() { mask_password(&text) } else { text })
+    }
+    fn line_height_factor(self: Pin<&Self>) -> Option<f32> {
+        resolve_line_height_factor(Self::FIELD_OFFSETS.line_height_factor().apply_pin(self).get())
+    }
+}
+
+pub enum TextCursorDirection {
+    Forward,
+    Backward,
+    ForwardByWord,
+    BackwardByWord,
+    NextLine,
+    PreviousLine,
+    /// breaks grapheme boundaries, so only used by delete-previous-char
+    PreviousCharacter,
+    StartOfLine,
+    EndOfLine,
+    /// These don't care about wrapping
+    StartOfParagraph,
+    EndOfParagraph,
+    StartOfText,
+    EndOfText,
+    PageUp,
+    PageDown,
+}
+
+impl core::convert::TryFrom<char> for TextCursorDirection {
+    type Error = ();
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        Ok(match value {
+            key_codes::LeftArrow => Self::Backward,
+            key_codes::RightArrow => Self::Forward,
+            key_codes::UpArrow => Self::PreviousLine,
+            key_codes::DownArrow => Self::NextLine,
+            key_codes::PageUp => Self::PageUp,
+            key_codes::PageDown => Self::PageDown,
+            // On macOS and iOS this scrolls to the top or the bottom of the page
+            #[cfg(not(target_vendor = "apple"))]
+            key_codes::Home => Self::StartOfLine,
+            #[cfg(not(target_vendor = "apple"))]
+            key_codes::End => Self::EndOfLine,
+            _ => return Err(()),
+        })
+    }
+}
+
+/// Which visual position a cursor byte offset means when it sits at a soft line break: the same
+/// offset is both the end of the wrapped line and the start of the following one.
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub enum TextCursorAffinity {
+    /// The start of the line after the break. Produced by typing and horizontal movement.
+    #[default]
+    NextCharacter,
+    /// The end of the wrapped line. Produced by hit-testing past a wrapped line's end and by
+    /// vertical movement onto it.
+    PreviousCharacter,
+}
+
+#[derive(PartialEq)]
+enum AnchorMode {
+    KeepAnchor,
+    MoveAnchor,
+}
+
+impl From<KeyboardModifiers> for AnchorMode {
+    fn from(modifiers: KeyboardModifiers) -> Self {
+        if modifiers.shift { Self::KeepAnchor } else { Self::MoveAnchor }
+    }
+}
+
+/// Argument to [`TextInput::delete_selection`] that determines whether to trigger the
+/// `edited` and cursor position callbacks and issue an input method request update.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TextChangeNotify {
+    /// Trigger the callbacks.
+    TriggerCallbacks,
+    /// Skip triggering the callbacks, as a subsequent operation will trigger them.
+    SkipCallbacks,
+}
+
+fn safe_byte_offset(unsafe_byte_offset: i32, text: &str) -> usize {
+    if unsafe_byte_offset <= 0 {
+        return 0;
+    }
+    text.ceil_char_boundary(unsafe_byte_offset as usize)
+}
+
+/// Like [`safe_byte_offset`], but additionally snaps the result up to a grapheme cluster
+/// boundary. Used when realigning the cursor/anchor to text that was replaced externally, so
+/// they never land inside a multi-codepoint grapheme (e.g. an emoji with a skin-tone modifier
+/// or a base character followed by a combining mark), matching how cursor movement treats a
+/// grapheme cluster as indivisible.
+fn safe_grapheme_boundary_offset(unsafe_byte_offset: i32, text: &str) -> usize {
+    let offset = safe_byte_offset(unsafe_byte_offset, text);
+    let mut grapheme_cursor = unicode_segmentation::GraphemeCursor::new(offset, text.len(), true);
+    match grapheme_cursor.is_boundary(text, 0) {
+        Ok(true) => offset,
+        _ => grapheme_cursor.next_boundary(text, 0).ok().flatten().unwrap_or(text.len()),
+    }
+}
+
+/// This struct holds the fields needed for rendering a TextInput item after applying any
+/// on-going composition. This way the renderer's don't have to duplicate the code for extracting
+/// and applying the pre-edit text, cursor placement within, etc.
+#[derive(Debug)]
+pub struct TextInputVisualRepresentation {
+    /// The text to be rendered including any pre-edit string
+    pub text: SharedString,
+    /// If set, this field specifies the range as byte offsets within the text field where the composition
+    /// is in progress. Renderers typically provide visual feedback for the currently composed text, such as
+    /// by using underlines.
+    pub preedit_range: core::ops::Range<usize>,
+    /// If set, specifies the range as byte offsets within the text where to draw the selection.
+    pub selection_range: core::ops::Range<usize>,
+    /// The position where to draw the cursor, as byte offset within the text.
+    pub cursor_position: Option<usize>,
+    /// Which visual position to draw `cursor_position` at when it falls on a soft line break.
+    pub cursor_affinity: TextCursorAffinity,
+    /// The color of the (unselected) text
+    pub text_color: Brush,
+    /// The color of the blinking cursor
+    pub cursor_color: Color,
+    text_without_password: Option<SharedString>,
+}
+
+/// What the characters of a password field are displayed as. The same everywhere, so that
+/// measuring, hit-testing and drawing agree on the shaped text and can share it.
+pub(crate) const PASSWORD_CHARACTER: char = '\u{25cf}';
+
+/// Replaces every character of `text` with [`PASSWORD_CHARACTER`].
+pub(crate) fn mask_password(text: &str) -> SharedString {
+    core::iter::repeat_n(PASSWORD_CHARACTER, text.chars().count()).collect()
+}
+
+impl TextInputVisualRepresentation {
+    /// If the given `TextInput` renders a password, then all characters in this `TextInputVisualRepresentation` are replaced
+    /// with [`PASSWORD_CHARACTER`] and the selection/preedit-ranges/cursor position are adjusted.
+    fn apply_password_character_substitution(&mut self, text_input: Pin<&TextInput>) {
+        if !text_input.is_password() {
+            return;
+        }
+
+        let text = &mut self.text;
+        let fixup_range = |r: &mut core::ops::Range<usize>| {
+            if !core::ops::Range::is_empty(r) {
+                r.start = text[..r.start].chars().count() * PASSWORD_CHARACTER.len_utf8();
+                r.end = text[..r.end].chars().count() * PASSWORD_CHARACTER.len_utf8();
+            }
+        };
+        fixup_range(&mut self.preedit_range);
+        fixup_range(&mut self.selection_range);
+        if let Some(cursor_pos) = self.cursor_position.as_mut() {
+            *cursor_pos = text[..*cursor_pos].chars().count() * PASSWORD_CHARACTER.len_utf8();
+        }
+        self.text_without_password = Some(core::mem::replace(text, mask_password(text)));
+    }
+
+    /// Use this function to make a byte offset in the visual text (used for rendering) back to a byte offset in the
+    /// TextInput's text. The offsets might differ for example for password text input fields.
+    pub fn map_byte_offset_from_visual_text_to_actual_text(&self, byte_offset: usize) -> usize {
+        if let Some(text_without_password) = self.text_without_password.as_ref() {
+            text_without_password
+                .char_indices()
+                .nth(byte_offset / PASSWORD_CHARACTER.len_utf8())
+                .map_or(text_without_password.len(), |(r, _)| r)
+        } else {
+            byte_offset
+        }
+    }
+
+    /// Map the byte_offset inside the TextInput's text to the byte offset in the visual text.
+    /// This is the opposite of `map_byte_offset_from_byte_offset_in_visual_text`.
+    pub fn map_byte_offset_from_actual_to_visual_text(&self, byte_offset: usize) -> usize {
+        if let Some(text_without_password) = self.text_without_password.as_ref() {
+            text_without_password[..byte_offset].chars().count() * PASSWORD_CHARACTER.len_utf8()
+        } else {
+            byte_offset
+        }
+    }
+}
+
+/// Whether the text cursor is drawn in the selection color (Apple and Android platforms) rather
+/// than in the text color.
+fn cursor_uses_selection_color() -> bool {
+    matches!(
+        crate::detect_operating_system(),
+        crate::items::OperatingSystemType::Android
+            | crate::items::OperatingSystemType::Ios
+            | crate::items::OperatingSystemType::Macos
+    )
+}
+
+impl TextInput {
+    fn show_cursor(&self, window_adapter: &Rc<dyn WindowAdapter>) {
+        WindowInner::from_pub(window_adapter.window())
+            .set_cursor_blink_binding(&self.cursor_visible);
+    }
+
+    fn hide_cursor(&self) {
+        self.cursor_visible.set(false);
+    }
+
+    /// Moves the cursor (and/or anchor) and returns true if the cursor moved; false otherwise.
+    /// A change of affinity alone (same byte offset, different visual line) counts as a move.
+    fn move_cursor(
+        self: Pin<&Self>,
+        direction: TextCursorDirection,
+        anchor_mode: AnchorMode,
+        trigger_callbacks: TextChangeNotify,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> bool {
+        let text = self.text();
+        if text.is_empty() {
+            return false;
+        }
+
+        let (anchor, cursor) = self.selection_anchor_and_cursor();
+        let last_cursor_pos = self.cursor_position(&text);
+
+        let mut grapheme_cursor =
+            unicode_segmentation::GraphemeCursor::new(last_cursor_pos, text.len(), true);
+
+        let font_height = window_adapter
+            .renderer()
+            .char_size(self.font_request(self_rc), RenderString::line_height_factor(self), ' ')
+            .height;
+
+        let mut reset_preferred_x_pos = true;
+
+        let visual_move = |x: Coord, dy: Coord| {
+            let mut pos = self.cursor_rect(window_adapter, self_rc).center();
+            pos.x = x;
+            pos.y += dy;
+            self.byte_offset_for_position(pos, window_adapter, self_rc)
+        };
+        let logical_move = |offset: usize| (offset, TextCursorAffinity::NextCharacter);
+
+        let (new_cursor_pos, new_affinity) = match direction {
+            TextCursorDirection::Forward => {
+                logical_move(if anchor == cursor || anchor_mode == AnchorMode::KeepAnchor {
+                    grapheme_cursor
+                        .next_boundary(&text, 0)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| text.len())
+                } else {
+                    cursor
+                })
+            }
+            TextCursorDirection::Backward => {
+                logical_move(if anchor == cursor || anchor_mode == AnchorMode::KeepAnchor {
+                    grapheme_cursor.prev_boundary(&text, 0).ok().flatten().unwrap_or(0)
+                } else {
+                    anchor
+                })
+            }
+            TextCursorDirection::NextLine => {
+                reset_preferred_x_pos = false;
+                visual_move(self.preferred_x_pos.get(), font_height)
+            }
+            TextCursorDirection::PreviousLine => {
+                reset_preferred_x_pos = false;
+                visual_move(self.preferred_x_pos.get(), -font_height)
+            }
+            TextCursorDirection::PreviousCharacter => logical_move({
+                let mut i = last_cursor_pos;
+                loop {
+                    i = i.saturating_sub(1);
+                    if text.is_char_boundary(i) {
+                        break i;
+                    }
+                }
+            }),
+            // Currently moving by word behaves like macos: next end of word(forward) or previous beginning of word(backward)
+            TextCursorDirection::ForwardByWord => {
+                logical_move(next_word_boundary(&text, last_cursor_pos + 1))
+            }
+            TextCursorDirection::BackwardByWord => {
+                logical_move(prev_word_boundary(&text, last_cursor_pos.saturating_sub(1)))
+            }
+            TextCursorDirection::StartOfLine => visual_move(0 as Coord, 0 as Coord),
+            TextCursorDirection::EndOfLine => visual_move(Coord::MAX, 0 as Coord),
+            TextCursorDirection::StartOfParagraph => {
+                logical_move(prev_paragraph_boundary(&text, last_cursor_pos.saturating_sub(1)))
+            }
+            TextCursorDirection::EndOfParagraph => {
+                logical_move(next_paragraph_boundary(&text, last_cursor_pos + 1))
+            }
+            TextCursorDirection::StartOfText => logical_move(0),
+            TextCursorDirection::EndOfText => logical_move(text.len()),
+            TextCursorDirection::PageUp => {
+                let offset = self.page_height().get() - font_height;
+                if offset <= 0 as Coord {
+                    return false;
+                }
+                reset_preferred_x_pos = false;
+                visual_move(self.preferred_x_pos.get(), -offset)
+            }
+            TextCursorDirection::PageDown => {
+                let offset = self.page_height().get() - font_height;
+                if offset <= 0 as Coord {
+                    return false;
+                }
+                reset_preferred_x_pos = false;
+                visual_move(self.preferred_x_pos.get(), offset)
+            }
+        };
+
+        let moved = new_cursor_pos != last_cursor_pos || new_affinity != self.cursor_affinity.get();
+
+        match anchor_mode {
+            AnchorMode::KeepAnchor => {}
+            AnchorMode::MoveAnchor => {
+                self.as_ref().anchor_position_byte_offset.set(new_cursor_pos as i32);
+            }
+        }
+        self.set_cursor_position_with_affinity(
+            new_cursor_pos as i32,
+            new_affinity,
+            reset_preferred_x_pos,
+            trigger_callbacks,
+            window_adapter,
+            self_rc,
+        );
+
+        // Keep the cursor visible when moving. Blinking should only occur when
+        // nothing is entered or the cursor isn't moved.
+        self.as_ref().show_cursor(window_adapter);
+
+        moved
+    }
+
+    /// Set `text` from an internal edit, keeping the `internal_text` mirror in sync so the
+    /// change handler doesn't mistake this edit for an external assignment.
+    fn set_text_internal(self: Pin<&Self>, text: SharedString) {
+        self.internal_text.set(text.clone());
+        self.text.set(text);
+    }
+
+    /// Called by the change handler when the public `text` property changes. If the new text
+    /// differs from our `internal_text` mirror, the change came from outside (the application
+    /// assigned `text` directly), so realign all derived state to the new text: clamp the
+    /// cursor and anchor offsets to valid boundaries (issue #331) and clear the undo/redo
+    /// stacks, whose positions refer to the now-replaced text (issue #9024).
+    fn align_to_text(self: Pin<&Self>, new_text: &SharedString, self_rc: &ItemRc) {
+        let previous_text = self.internal_text.replace(new_text.clone());
+        if previous_text == *new_text {
+            // Produced by an internal edit: `set_text_internal` already kept the mirror in sync,
+            // so the offsets and undo stack are consistent with `new_text`. Nothing to realign.
+            return;
+        }
+
+        self.undo_items.set(Default::default());
+        self.redo_items.set(Default::default());
+
+        let old_cursor = self.cursor_position_byte_offset();
+        let clamped_cursor = safe_grapheme_boundary_offset(old_cursor, new_text) as i32;
+        let clamped_anchor =
+            safe_grapheme_boundary_offset(self.anchor_position_byte_offset(), new_text) as i32;
+        self.anchor_position_byte_offset.set(clamped_anchor);
+
+        if let Some(window_adapter) = self_rc.window_adapter() {
+            self.set_cursor_position(
+                clamped_cursor,
+                true,
+                TextChangeNotify::TriggerCallbacks,
+                &window_adapter,
+                self_rc,
+            );
+        } else {
+            self.cursor_position_byte_offset.set(clamped_cursor);
+            self.cursor_affinity.set(TextCursorAffinity::NextCharacter);
+        }
+    }
+
+    /// Places the cursor at a text position (next-character affinity at a soft line break). Use
+    /// [`Self::set_cursor_position_with_affinity`] for a position that came from a visual location.
+    pub fn set_cursor_position(
+        self: Pin<&Self>,
+        new_position: i32,
+        reset_preferred_x_pos: bool,
+        trigger_callbacks: TextChangeNotify,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        self.set_cursor_position_with_affinity(
+            new_position,
+            TextCursorAffinity::NextCharacter,
+            reset_preferred_x_pos,
+            trigger_callbacks,
+            window_adapter,
+            self_rc,
+        );
+    }
+
+    pub fn set_cursor_position_with_affinity(
+        self: Pin<&Self>,
+        new_position: i32,
+        affinity: TextCursorAffinity,
+        reset_preferred_x_pos: bool,
+        trigger_callbacks: TextChangeNotify,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        self.cursor_position_byte_offset.set(new_position);
+        self.cursor_affinity.set(affinity);
+        if new_position >= 0 {
+            let cursor_rect = self.cursor_rect_for_byte_offset(
+                new_position as usize,
+                affinity,
+                window_adapter,
+                self_rc,
+            );
+            let pos = cursor_rect.origin;
+            if reset_preferred_x_pos {
+                self.preferred_x_pos.set(pos.x);
+            }
+            if trigger_callbacks == TextChangeNotify::TriggerCallbacks {
+                Self::FIELD_OFFSETS
+                    .cursor_position_changed()
+                    .apply_pin(self)
+                    .call(&(crate::api::LogicalPosition::from_euclid(pos),));
+                if self.has_focus() {
+                    self_rc.try_scroll_rect_into_visible(
+                        cursor_rect.translate(self_rc.geometry().origin.to_vector()),
+                        crate::items::ScrollBehavior::Instant,
+                    );
+                }
+                self.update_ime(window_adapter, self_rc);
+            }
+        }
+    }
+
+    fn update_ime(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        if self.read_only() || !self.has_focus() {
+            return;
+        }
+        if let Some(w) = window_adapter.internal(crate::InternalToken) {
+            w.input_method_request(InputMethodRequest::Update(
+                self.ime_properties(window_adapter, self_rc),
+            ));
+        }
+    }
+
+    fn select_and_delete(
+        self: Pin<&Self>,
+        step: TextCursorDirection,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        if !self.has_selection() {
+            self.move_cursor(
+                step,
+                AnchorMode::KeepAnchor,
+                TextChangeNotify::SkipCallbacks,
+                window_adapter,
+                self_rc,
+            );
+        }
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
+    }
+
+    pub fn delete_selection(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        trigger_callbacks: TextChangeNotify,
+    ) {
+        let text: String = self.text().into();
+        if text.is_empty() {
+            return;
+        }
+
+        let (anchor, cursor) = self.selection_anchor_and_cursor();
+        if anchor == cursor {
+            return;
+        }
+
+        let removed_text: SharedString = text[anchor..cursor].into();
+        // save real anchor/cursor for undo/redo
+        let (real_cursor, real_anchor) = {
+            let text = self.text();
+            (self.cursor_position(&text), self.anchor_position(&text))
+        };
+
+        let text = [text.split_at(anchor).0, text.split_at(cursor).1].concat();
+        self.set_text_internal(text.into());
+        self.anchor_position_byte_offset.set(anchor as i32);
+
+        self.add_undo_item(UndoItem {
+            pos: anchor,
+            text: removed_text,
+            cursor: real_cursor,
+            anchor: real_anchor,
+            kind: UndoItemKind::TextRemove,
+        });
+
+        if trigger_callbacks == TextChangeNotify::TriggerCallbacks {
+            self.set_cursor_position(
+                anchor as i32,
+                true,
+                trigger_callbacks,
+                window_adapter,
+                self_rc,
+            );
+            Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+        } else {
+            self.cursor_position_byte_offset.set(anchor as i32);
+            self.cursor_affinity.set(TextCursorAffinity::NextCharacter);
+        }
+    }
+
+    pub fn anchor_position(self: Pin<&Self>, text: &str) -> usize {
+        safe_byte_offset(self.anchor_position_byte_offset(), text)
+    }
+
+    /// Whether this input masks what is typed into it.
+    pub fn is_password(self: Pin<&Self>) -> bool {
+        matches!(self.input_type(), InputType::Password)
+    }
+
+    pub fn cursor_position(self: Pin<&Self>, text: &str) -> usize {
+        safe_byte_offset(self.cursor_position_byte_offset(), text)
+    }
+
+    /// Which of the two visual positions the cursor byte offset means, for an offset that sits at a
+    /// soft line break.
+    pub fn cursor_position_affinity(self: Pin<&Self>) -> TextCursorAffinity {
+        self.cursor_affinity.get()
+    }
+
+    fn ime_properties(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> InputMethodProperties {
+        let text = self.text();
+        WindowInner::from_pub(window_adapter.window()).last_ime_text.replace(text.clone());
+        let cursor_position = self.cursor_position(&text);
+        let anchor_position = self.anchor_position(&text);
+        let cursor_relative = self.cursor_rect(window_adapter, self_rc);
+        let geometry = self_rc.geometry();
+        let origin = self_rc.map_to_native_window(geometry.origin);
+        let origin_vector = origin.to_vector();
+        let cursor_rect_origin =
+            crate::api::LogicalPosition::from_euclid(cursor_relative.origin + origin_vector);
+        let cursor_rect_size = crate::api::LogicalSize::from_euclid(cursor_relative.size);
+        let anchor_point = crate::api::LogicalPosition::from_euclid(
+            self.cursor_rect_for_byte_offset(
+                anchor_position,
+                TextCursorAffinity::NextCharacter,
+                window_adapter,
+                self_rc,
+            )
+            .origin
+                + origin_vector
+                + cursor_relative.size,
+        );
+        let maybe_parent =
+            self_rc.parent_item(crate::item_tree::ParentItemTraversalMode::StopAtPopups);
+        let clip_rect = maybe_parent.map(|parent| {
+            let geom = parent.geometry();
+            LogicalRect::new(parent.map_to_native_window(geom.origin), geom.size)
+        });
+
+        InputMethodProperties {
+            text,
+            cursor_position,
+            anchor_position: (cursor_position != anchor_position).then_some(anchor_position),
+            preedit_text: self.preedit_text(),
+            preedit_offset: cursor_position,
+            cursor_rect_origin,
+            cursor_rect_size,
+            anchor_point,
+            input_type: self.input_type(),
+            input_method_hints: self.input_method_hints(),
+            single_line: self.single_line(),
+            clip_rect,
+        }
+    }
+
+    // Avoid accessing self.cursor_position()/self.anchor_position() directly, always
+    // use this bounds-checking function.
+    pub fn selection_anchor_and_cursor(self: Pin<&Self>) -> (usize, usize) {
+        ordered_selection(
+            &self.text(),
+            self.anchor_position_byte_offset(),
+            self.cursor_position_byte_offset(),
+        )
+    }
+
+    pub fn has_selection(self: Pin<&Self>) -> bool {
+        let (anchor_pos, cursor_pos) = self.selection_anchor_and_cursor();
+        anchor_pos != cursor_pos
+    }
+
+    fn insert(
+        self: Pin<&Self>,
+        text_to_insert: &str,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        if text_to_insert.is_empty() {
+            return;
+        }
+
+        let (real_cursor, real_anchor) = {
+            let text = self.text();
+            (self.cursor_position(&text), self.anchor_position(&text))
+        };
+
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
+        let mut text: String = self.text().into();
+        let cursor_pos = self.selection_anchor_and_cursor().1;
+        let mut inserted_text: SharedString = text_to_insert.into();
+        if text_to_insert.contains('\n') && self.single_line() {
+            inserted_text = text_to_insert.replace('\n', " ").into();
+            text.insert_str(cursor_pos, &inserted_text);
+        } else {
+            text.insert_str(cursor_pos, text_to_insert);
+        }
+
+        self.add_undo_item(UndoItem {
+            pos: cursor_pos,
+            text: inserted_text,
+            cursor: real_cursor,
+            anchor: real_anchor,
+            kind: UndoItemKind::TextInsert,
+        });
+
+        let cursor_pos = cursor_pos + text_to_insert.len();
+        self.set_text_internal(text.into());
+        self.anchor_position_byte_offset.set(cursor_pos as i32);
+        self.set_cursor_position(
+            cursor_pos as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
+        Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+    }
+
+    pub fn cut(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        if self.is_password() {
+            return;
+        }
+        self.copy(window_adapter);
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
+    }
+
+    pub fn set_selection_offsets(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        anchor: i32,
+        focus: i32,
+    ) {
+        let text = self.text();
+        let safe_anchor = safe_byte_offset(anchor, &text);
+        let safe_focus = safe_byte_offset(focus, &text);
+
+        self.as_ref().anchor_position_byte_offset.set(safe_anchor as i32);
+        self.set_cursor_position(
+            safe_focus as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
+        // Keep the cursor visible while it moves, as for the arrow keys.
+        self.show_cursor(window_adapter);
+    }
+
+    pub fn select_all(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        self.move_cursor(
+            TextCursorDirection::StartOfText,
+            AnchorMode::MoveAnchor,
+            TextChangeNotify::SkipCallbacks,
+            window_adapter,
+            self_rc,
+        );
+        self.move_cursor(
+            TextCursorDirection::EndOfText,
+            AnchorMode::KeepAnchor,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
+    }
+
+    pub fn clear_selection(self: Pin<&Self>) {
+        self.as_ref().anchor_position_byte_offset.set(self.as_ref().cursor_position_byte_offset());
+    }
+
+    pub fn select_word(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        let text = self.text();
+        let (new_a, new_c) =
+            word_selection(&text, self.anchor_position(&text), self.cursor_position(&text));
+        self.as_ref().anchor_position_byte_offset.set(new_a as i32);
+        self.set_cursor_position(
+            new_c as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
+    }
+
+    /// Selects the word where a long press started; while the press is held, dragging then
+    /// extends the selection by words. A held double or triple press keeps its selection, and
+    /// nothing is selected at a line break or at the end of the text.
+    pub fn select_word_on_long_press(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        let pressed = self.pressed.get();
+        if pressed > 1 {
+            return;
+        }
+        // The anchor is where the press started; moves may have shifted the cursor.
+        let text = self.text();
+        if matches!(text.as_bytes().get(self.anchor_position(&text)), None | Some(b'\n')) {
+            return;
+        }
+        if pressed == 1 {
+            // Drag by words, as after a double click.
+            self.pressed.set(2);
+        }
+        self.select_word(window_adapter, self_rc);
+    }
+
+    fn select_paragraph(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        let text = self.text();
+        let (new_a, new_c) =
+            paragraph_selection(&text, self.anchor_position(&text), self.cursor_position(&text));
+        self.as_ref().anchor_position_byte_offset.set(new_a as i32);
+        self.set_cursor_position(
+            new_c as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
+    }
+
+    pub fn copy(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>) {
+        self.copy_clipboard(window_adapter, Clipboard::DefaultClipboard);
+    }
+
+    fn copy_clipboard(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        clipboard: Clipboard,
+    ) {
+        if self.is_password() {
+            return;
+        }
+        let (anchor, cursor) = self.selection_anchor_and_cursor();
+        if anchor == cursor {
+            return;
+        }
+        let text = self.text();
+
+        WindowInner::from_pub(window_adapter.window())
+            .context()
+            .platform()
+            .set_clipboard_text(&text[anchor..cursor], clipboard);
+    }
+
+    pub fn paste(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        self.paste_clipboard(window_adapter, self_rc, Clipboard::DefaultClipboard);
+    }
+
+    fn paste_clipboard(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        clipboard: Clipboard,
+    ) {
+        if let Some(text) = WindowInner::from_pub(window_adapter.window())
+            .context()
+            .platform()
+            .clipboard_text(clipboard)
+        {
+            self.preedit_text.set(Default::default());
+            self.insert(&text, window_adapter, self_rc);
+        }
+    }
+
+    /// Returns the `text` property with the IME composition (preedit) inserted at the cursor, and
+    /// the byte range that composition occupies within the returned string. The range is empty
+    /// when no composition is in progress, in which case the text is returned unchanged.
+    ///
+    /// Password fields are *not* masked here; callers that render or measure the text apply the
+    /// substitution themselves, because the masking character is renderer-specific.
+    ///
+    /// Deliberately reads less than [`Self::visual_representation`]: neither the cursor visibility
+    /// nor the selection nor the colors, so that callers which only need the string -- sizing above
+    /// all -- don't end up making the layout depend on the blinking cursor.
+    pub(crate) fn text_with_preedit(self: Pin<&Self>) -> (SharedString, core::ops::Range<usize>) {
+        let text = self.text();
+        let preedit_text = self.preedit_text();
+        if preedit_text.is_empty() {
+            return (text, Default::default());
+        }
+        let cursor_position = self.cursor_position(&text);
+        (
+            [&text[..cursor_position], &preedit_text, &text[cursor_position..]].concat().into(),
+            cursor_position..cursor_position + preedit_text.len(),
+        )
+    }
+
+    /// Returns a [`TextInputVisualRepresentation`] struct that contains all the fields necessary for rendering the text input,
+    /// after making adjustments such as applying a substitution of characters for password input fields, or making sure
+    /// that the selection start is always less or equal than the selection end.
+    pub fn visual_representation(self: Pin<&Self>) -> TextInputVisualRepresentation {
+        let (text, composition) = self.text_with_preedit();
+
+        let (preedit_range, selection_range, cursor_position) = if !composition.is_empty() {
+            // Where the composition was inserted, i.e. the cursor within the pre-composition text.
+            let cursor_position = composition.start;
+
+            if let Some(preedit_sel) = self.preedit_selection().as_option() {
+                let preedit_selection = cursor_position + preedit_sel.start as usize
+                    ..cursor_position + preedit_sel.end as usize;
+                (composition, preedit_selection, Some(cursor_position + preedit_sel.end as usize))
+            } else {
+                let cur = composition.end;
+                (composition, cur..cur, None)
+            }
+        } else {
+            let (selection_anchor_pos, selection_cursor_pos) = self.selection_anchor_and_cursor();
+            let selection_range = selection_anchor_pos..selection_cursor_pos;
+            let cursor_position = self.cursor_position(&text);
+            let cursor_visible = self.cursor_visible() && self.enabled();
+            let cursor_position = if cursor_visible && selection_range.is_empty() {
+                Some(cursor_position)
+            } else {
+                None
+            };
+            (composition, selection_range, cursor_position)
+        };
+
+        let text_color = self.color();
+
+        let cursor_color = if cursor_uses_selection_color() {
+            if cursor_position.is_some() {
+                self.selection_background_color().with_alpha(1.)
+            } else {
+                Default::default()
+            }
+        } else {
+            // Other platforms draw the cursor in the text color.
+            text_color.color()
+        };
+
+        let mut repr = TextInputVisualRepresentation {
+            text,
+            preedit_range,
+            selection_range,
+            cursor_position,
+            cursor_affinity: self.cursor_affinity.get(),
+            text_without_password: None,
+            text_color,
+            cursor_color,
+        };
+        repr.apply_password_character_substitution(self);
+        repr
+    }
+
+    fn cursor_rect_for_byte_offset(
+        self: Pin<&Self>,
+        byte_offset: usize,
+        affinity: TextCursorAffinity,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LogicalRect {
+        window_adapter.renderer().text_input_cursor_rect_for_byte_offset(
+            self,
+            self_rc,
+            byte_offset,
+            affinity,
+        )
+    }
+
+    /// The caret's rectangle at its current position and affinity.
+    fn cursor_rect(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> LogicalRect {
+        self.cursor_rect_for_byte_offset(
+            self.cursor_position(&self.text()),
+            self.cursor_affinity.get(),
+            window_adapter,
+            self_rc,
+        )
+    }
+
+    pub fn byte_offset_for_position(
+        self: Pin<&Self>,
+        pos: LogicalPoint,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> (usize, TextCursorAffinity) {
+        window_adapter.renderer().text_input_byte_offset_for_position(self, self_rc, pos)
+    }
+
+    /// When pressing the mouse (or releasing the finger, on android) we should take the focus if we don't have it already.
+    /// Setting the focus will show the virtual keyboard, otherwise we should make sure that the keyboard is shown if it was hidden by the user
+    fn ensure_focus_and_ime(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        if !self.has_focus() {
+            WindowInner::from_pub(window_adapter.window()).set_focus_item(
+                self_rc,
+                true,
+                FocusReason::PointerClick,
+            );
+        } else if !self.read_only()
+            && let Some(w) = window_adapter.internal(crate::InternalToken)
+        {
+            w.input_method_request(InputMethodRequest::Enable(
+                self.ime_properties(window_adapter, self_rc),
+            ));
+        }
+    }
+
+    fn add_undo_item(self: Pin<&Self>, item: UndoItem) {
+        let mut items = self.undo_items.take();
+        // try to merge with the last item
+        if let Some(last) = items.make_mut_slice().last_mut() {
+            match (&item.kind, &last.kind) {
+                (UndoItemKind::TextInsert, UndoItemKind::TextInsert) => {
+                    let is_new_line = item.text == "\n";
+                    let last_is_new_line = last.text == "\n";
+                    // if the last item or current item is a new_line
+                    // we insert it as a standalone item, no merging
+                    if item.pos == last.pos + last.text.len() && !is_new_line && !last_is_new_line {
+                        last.text += &item.text;
+                    } else {
+                        items.push(item);
+                    }
+                }
+                (UndoItemKind::TextRemove, UndoItemKind::TextRemove)
+                    if item.pos + item.text.len() == last.pos =>
+                {
+                    last.pos = item.pos;
+                    let old_text = last.text.clone();
+                    last.text = item.text;
+                    last.text += &old_text;
+                    // prepend
+                }
+                _ => {
+                    items.push(item);
+                }
+            }
+        } else {
+            items.push(item);
+        }
+
+        self.undo_items.set(items);
+    }
+
+    pub fn undo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        // The change tracker runs delayed, so `text` may have been assigned since (#13814).
+        self.align_to_text(&self.text(), self_rc);
+        let mut items = self.undo_items.take();
+        let Some(last) = items.pop() else {
+            return;
+        };
+
+        match last.kind {
+            UndoItemKind::TextInsert => {
+                let text: String = self.text().into();
+                let text = [text.split_at(last.pos).0, text.split_at(last.pos + last.text.len()).1]
+                    .concat();
+                self.set_text_internal(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+            }
+            UndoItemKind::TextRemove => {
+                let mut text: String = self.text().into();
+                text.insert_str(last.pos, &last.text);
+                self.set_text_internal(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+            }
+        }
+        self.undo_items.set(items);
+
+        let mut redo = self.redo_items.take();
+        redo.push(last);
+        self.redo_items.set(redo);
+        Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+    }
+
+    pub fn redo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        // See `undo`.
+        self.align_to_text(&self.text(), self_rc);
+        let mut items = self.redo_items.take();
+        let Some(last) = items.pop() else {
+            return;
+        };
+
+        match last.kind {
+            UndoItemKind::TextInsert => {
+                let mut text: String = self.text().into();
+                text.insert_str(last.pos, &last.text);
+                self.set_text_internal(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+            }
+            UndoItemKind::TextRemove => {
+                let text: String = self.text().into();
+                let text = [text.split_at(last.pos).0, text.split_at(last.pos + last.text.len()).1]
+                    .concat();
+                self.set_text_internal(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
+            }
+        }
+
+        self.redo_items.set(items);
+
+        let mut undo_items = self.undo_items.take();
+        undo_items.push(last);
+        self.undo_items.set(undo_items);
+        Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+    }
+
+    pub fn font_metrics(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) -> FontMetrics {
+        let font_request = self.font_request(self_rc);
+        window_adapter.renderer().font_metrics(font_request)
+    }
+
+    fn accept_text_input(
+        self: Pin<&Self>,
+        text_to_insert: &str,
+        window_adapter: &Rc<dyn WindowAdapter>,
+    ) -> bool {
+        let input_type = self.input_type();
+
+        match input_type {
+            InputType::Number => return text_to_insert.chars().all(|ch| ch.is_ascii_digit()),
+            InputType::Decimal => {
+                let (a, c) = self.selection_anchor_and_cursor();
+                let current = self.text();
+                let candidate = [&current[..a], text_to_insert, &current[c..]].concat();
+
+                let ctx = window_adapter.window().0.context();
+
+                // Allow localized ".", "-", "-." because otherwise the cannot start entering
+                if candidate.len() <= 2 {
+                    let sep = ctx.locale_decimal_separator();
+                    let mut it = candidate.chars();
+                    match (it.next(), it.next()) {
+                        (Some('-'), None) => return true,
+                        (Some('-'), Some(c)) | (Some(c), None) if c == sep => return true,
+                        _ => {}
+                    }
+                }
+                return ctx.parse_number(&candidate).is_some();
+            }
+            InputType::Password | InputType::Text | InputType::Search => (),
+        }
+
+        true
+    }
+}
+
+fn next_paragraph_boundary(text: &str, last_cursor_pos: usize) -> usize {
+    text.as_bytes()
+        .iter()
+        .enumerate()
+        .skip(last_cursor_pos)
+        .find(|(_, c)| **c == b'\n')
+        .map(|(new_pos, _)| new_pos)
+        .unwrap_or(text.len())
+}
+
+fn prev_paragraph_boundary(text: &str, last_cursor_pos: usize) -> usize {
+    text.as_bytes()
+        .iter()
+        .enumerate()
+        .rev()
+        .skip(text.len().saturating_sub(last_cursor_pos))
+        .find(|(_, c)| **c == b'\n')
+        .map(|(new_pos, _)| new_pos + 1)
+        .unwrap_or(0)
+}
+
+fn prev_word_boundary(text: &str, last_cursor_pos: usize) -> usize {
+    let mut word_offset = 0;
+
+    for (current_word_offset, _) in text.unicode_word_indices() {
+        if current_word_offset <= last_cursor_pos {
+            word_offset = current_word_offset;
+        } else {
+            break;
+        }
+    }
+
+    word_offset
+}
+
+fn next_word_boundary(text: &str, last_cursor_pos: usize) -> usize {
+    text.unicode_word_indices()
+        .find(|(offset, slice)| *offset + slice.len() >= last_cursor_pos)
+        .map_or(text.len(), |(offset, slice)| offset + slice.len())
+}
+
+/// The word at `offset`: the first one ending at or after it when that one has begun,
+/// else the stretch from the word before to the word after.
+/// Words that touch, as in a CJK run, each get their own range.
+fn word_at(text: &str, offset: usize) -> core::ops::Range<usize> {
+    let mut words = text.unicode_word_indices().map(|(start, word)| start..start + word.len());
+    match words.find(|word| word.end >= offset) {
+        Some(word) if word.start <= offset => word,
+        _ => prev_word_boundary(text, offset)..next_word_boundary(text, offset),
+    }
+}
+
+/// `anchor..cursor`, either way round, widened to whole words.
+fn word_selection(text: &str, anchor: usize, cursor: usize) -> (usize, usize) {
+    let (anchor_word, cursor_word) = (word_at(text, anchor), word_at(text, cursor));
+    if anchor <= cursor {
+        (anchor_word.start, cursor_word.end)
+    } else {
+        (anchor_word.end, cursor_word.start)
+    }
+}
+
+/// `anchor..cursor`, either way round, widened to whole paragraphs.
+fn paragraph_selection(text: &str, anchor: usize, cursor: usize) -> (usize, usize) {
+    if anchor <= cursor {
+        (prev_paragraph_boundary(text, anchor), next_paragraph_boundary(text, cursor))
+    } else {
+        (next_paragraph_boundary(text, anchor), prev_paragraph_boundary(text, cursor))
+    }
+}
+
+pub fn text_item_font_metrics(
+    window_adapter: &Rc<dyn WindowAdapter>,
+    self_rc: &ItemRc,
+) -> FontMetrics {
+    let item_ref = self_rc.borrow();
+    if let Some(simple_text) = ItemRef::downcast_pin::<SimpleText>(item_ref) {
+        simple_text.font_metrics(window_adapter, self_rc)
+    } else if let Some(complex_text) = ItemRef::downcast_pin::<ComplexText>(item_ref) {
+        complex_text.font_metrics(window_adapter, self_rc)
+    } else if let Some(text_input) = ItemRef::downcast_pin::<TextInput>(item_ref) {
+        text_input.font_metrics(window_adapter, self_rc)
+    } else {
+        Default::default()
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn words_that_touch_each_get_their_own_selection() {
+        // Each ideograph is a word; `prev`/`next` boundaries alone would meet at 3.
+        assert_eq!(word_selection("日本語", 3, 3), (0, 3));
+        assert_eq!(word_selection("日本語", 6, 6), (3, 6));
+        assert_eq!(word_selection("日本語", 0, 6), (0, 6));
+        assert_eq!(word_selection("日本語", 6, 0), (6, 0));
+    }
+
+    #[test]
+    fn word_selection_keeps_the_text_input_semantics() {
+        assert_eq!(word_selection("foo bar", 1, 1), (0, 3));
+        assert_eq!(word_selection("foo bar", 3, 3), (0, 3));
+        assert_eq!(word_selection("foo bar", 4, 4), (4, 7));
+        assert_eq!(word_selection("foo   bar", 5, 5), (0, 9));
+        assert_eq!(word_selection("foo ", 4, 4), (0, 4));
+        assert_eq!(word_selection("foo bar", 6, 1), (7, 0));
+    }
+
+    #[test]
+    fn paragraph_selection_takes_the_line() {
+        assert_eq!(paragraph_selection("one\ntwo\nthree", 5, 5), (4, 7));
+        assert_eq!(paragraph_selection("one\ntwo\nthree", 1, 9), (0, 13));
+        assert_eq!(paragraph_selection("one\ntwo", 7, 1), (7, 0));
+        // An offset past the text doesn't underflow.
+        assert_eq!(paragraph_selection("one", 9, 9), (0, 3));
+    }
+
+    #[test]
+    fn ordered_selection_clamps_and_orders() {
+        assert_eq!(ordered_selection("café", 9, -1), (0, 5));
+        assert_eq!(ordered_selection("café", 4, 4), (5, 5));
+        assert_eq!(ordered_selection("café", 2, 1), (1, 2));
+    }
+}

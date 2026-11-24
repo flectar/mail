@@ -1,0 +1,15 @@
+diff --git a/crates/i-slint-core/Cargo.toml b/crates/i-slint-core/Cargo.toml
+index 80c0de27..12816550 100644
+--- a/crates/i-slint-core/Cargo.toml
++++ b/crates/i-slint-core/Cargo.toml
+@@ -41,6 +41,10 @@ repository = "https://github.com/slint-ui/slint"
+ [package.metadata.docs.rs]
+ rustdoc-args = ["--generate-link-to-definition"]
+ 
++# Declared upstream but not imported by this release.
++[package.metadata.cargo-machete]
++ignored = ["async-compat", "tokio", "ttf-parser"]
++
+ [features]
+ 32-bit-color = []
+ accessibility-text = [
