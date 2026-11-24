@@ -1,0 +1,1708 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+/*!
+This module contains brush related types for the run-time library.
+*/
+
+use super::Color;
+use crate::SharedVector;
+use crate::lengths::{PhysicalPx, ScaleFactor};
+use crate::properties::InterpolatedPropertyValue;
+use alloc::borrow::Cow;
+use euclid::default::{Point2D, Size2D};
+
+#[cfg(not(feature = "std"))]
+use num_traits::float::Float;
+
+/// A brush is a data structure that is used to describe how
+/// a shape, such as a rectangle, path or even text, shall be filled.
+/// A brush can also be applied to the outline of a shape, that means
+/// the fill of the outline itself.
+///
+/// Clones of a Brush share the same underlying data, so cloning is cheap.
+#[derive(Clone, PartialEq, Debug, derive_more::From)]
+#[repr(C)]
+#[non_exhaustive]
+pub enum Brush {
+    /// The color variant of brush is a plain color that is to be used for the fill.
+    SolidColor(Color),
+    /// The linear gradient variant of a brush describes the gradient stops for a fill
+    /// where all color stops are along a line that's rotated by the specified angle.
+    LinearGradient(LinearGradientBrush),
+    /// The radial gradient variant of a brush describes a circular or elliptical gradient.
+    /// The center defaults to the middle of the bounding box.
+    RadialGradient(RadialGradientBrush),
+    /// The conical gradient variant of a brush describes a gradient that rotates around
+    /// a center point, like the hands of a clock
+    ConicGradient(ConicGradientBrush),
+}
+
+/// Construct a brush with transparent color
+impl Default for Brush {
+    fn default() -> Self {
+        Self::SolidColor(Color::default())
+    }
+}
+
+impl Brush {
+    /// If the brush is SolidColor, the contained color is returned.
+    /// If the brush is a LinearGradient, the color of the first stop is returned.
+    pub fn color(&self) -> Color {
+        match self {
+            Brush::SolidColor(col) => *col,
+            Brush::LinearGradient(gradient) => {
+                gradient.stops().next().map(|stop| stop.color).unwrap_or_default()
+            }
+            Brush::RadialGradient(gradient) => {
+                gradient.stops().next().map(|stop| stop.color).unwrap_or_default()
+            }
+            Brush::ConicGradient(gradient) => {
+                gradient.stops().next().map(|stop| stop.color).unwrap_or_default()
+            }
+        }
+    }
+
+    /// Returns true if this brush contains a fully transparent color (alpha value is zero)
+    ///
+    /// ```
+    /// # use i_slint_core::graphics::*;
+    /// assert!(Brush::default().is_transparent());
+    /// assert!(Brush::SolidColor(Color::from_argb_u8(0, 255, 128, 140)).is_transparent());
+    /// assert!(!Brush::SolidColor(Color::from_argb_u8(25, 128, 140, 210)).is_transparent());
+    /// ```
+    pub fn is_transparent(&self) -> bool {
+        match self {
+            Brush::SolidColor(c) => c.alpha() == 0,
+            Brush::LinearGradient(_) => false,
+            Brush::RadialGradient(_) => false,
+            Brush::ConicGradient(_) => false,
+        }
+    }
+
+    /// Returns true if this brush is fully opaque
+    ///
+    /// ```
+    /// # use i_slint_core::graphics::*;
+    /// assert!(!Brush::default().is_opaque());
+    /// assert!(!Brush::SolidColor(Color::from_argb_u8(25, 255, 128, 140)).is_opaque());
+    /// assert!(Brush::SolidColor(Color::from_rgb_u8(128, 140, 210)).is_opaque());
+    /// assert!(!Brush::LinearGradient(LinearGradientBrush::new(0., [])).is_opaque());
+    /// ```
+    pub fn is_opaque(&self) -> bool {
+        // A gradient without stops draws nothing, so it isn't opaque.
+        fn all_opaque<'a>(stops: impl Iterator<Item = &'a GradientStop>) -> bool {
+            let mut stops = stops.peekable();
+            stops.peek().is_some() && stops.all(|s| s.color.alpha() == 255)
+        }
+        match self {
+            Brush::SolidColor(c) => c.alpha() == 255,
+            Brush::LinearGradient(g) => all_opaque(g.stops()),
+            Brush::RadialGradient(g) => all_opaque(g.stops()),
+            Brush::ConicGradient(g) => all_opaque(g.stops()),
+        }
+    }
+
+    /// Returns a new version of this brush that has the brightness increased
+    /// by the specified factor. This is done by calling [`Color::brighter`] on
+    /// all the colors of this brush.
+    #[must_use]
+    pub fn brighter(&self, factor: f32) -> Self {
+        match self {
+            Brush::SolidColor(c) => Brush::SolidColor(c.brighter(factor)),
+            Brush::LinearGradient(g) => Brush::LinearGradient(LinearGradientBrush::new(
+                g.angle(),
+                g.stops().map(|s| GradientStop {
+                    color: s.color.brighter(factor),
+                    position: s.position,
+                }),
+            )),
+            Brush::RadialGradient(g) => {
+                let mut new_grad = g.clone();
+                for s in new_grad.0.make_mut_slice().iter_mut().skip(RadialGradientBrush::HEADER) {
+                    s.color = s.color.brighter(factor);
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            Brush::ConicGradient(g) => {
+                let mut new_grad = g.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(ConicGradientBrush::HEADER) {
+                    x.color = x.color.brighter(factor);
+                }
+                Brush::ConicGradient(new_grad)
+            }
+        }
+    }
+
+    /// Returns a new version of this brush that has the brightness decreased
+    /// by the specified factor. This is done by calling [`Color::darker`] on
+    /// all the color of this brush.
+    #[must_use]
+    pub fn darker(&self, factor: f32) -> Self {
+        match self {
+            Brush::SolidColor(c) => Brush::SolidColor(c.darker(factor)),
+            Brush::LinearGradient(g) => Brush::LinearGradient(LinearGradientBrush::new(
+                g.angle(),
+                g.stops()
+                    .map(|s| GradientStop { color: s.color.darker(factor), position: s.position }),
+            )),
+            Brush::RadialGradient(g) => {
+                let mut new_grad = g.clone();
+                for s in new_grad.0.make_mut_slice().iter_mut().skip(RadialGradientBrush::HEADER) {
+                    s.color = s.color.darker(factor);
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            Brush::ConicGradient(g) => {
+                let mut new_grad = g.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(ConicGradientBrush::HEADER) {
+                    x.color = x.color.darker(factor);
+                }
+                Brush::ConicGradient(new_grad)
+            }
+        }
+    }
+
+    /// Returns a new version of this brush with the opacity decreased by `factor`.
+    ///
+    /// The transparency is obtained by multiplying the alpha channel by `(1 - factor)`.
+    ///
+    /// See also [`Color::transparentize`]
+    #[must_use]
+    pub fn transparentize(&self, amount: f32) -> Self {
+        match self {
+            Brush::SolidColor(c) => Brush::SolidColor(c.transparentize(amount)),
+            Brush::LinearGradient(g) => Brush::LinearGradient(LinearGradientBrush::new(
+                g.angle(),
+                g.stops().map(|s| GradientStop {
+                    color: s.color.transparentize(amount),
+                    position: s.position,
+                }),
+            )),
+            Brush::RadialGradient(g) => {
+                let mut new_grad = g.clone();
+                for s in new_grad.0.make_mut_slice().iter_mut().skip(RadialGradientBrush::HEADER) {
+                    s.color = s.color.transparentize(amount);
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            Brush::ConicGradient(g) => {
+                let mut new_grad = g.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(ConicGradientBrush::HEADER) {
+                    x.color = x.color.transparentize(amount);
+                }
+                Brush::ConicGradient(new_grad)
+            }
+        }
+    }
+
+    /// Returns a new version of this brush with the related color's opacities
+    /// set to `alpha`.
+    #[must_use]
+    pub fn with_alpha(&self, alpha: f32) -> Self {
+        match self {
+            Brush::SolidColor(c) => Brush::SolidColor(c.with_alpha(alpha)),
+            Brush::LinearGradient(g) => Brush::LinearGradient(LinearGradientBrush::new(
+                g.angle(),
+                g.stops().map(|s| GradientStop {
+                    color: s.color.with_alpha(alpha),
+                    position: s.position,
+                }),
+            )),
+            Brush::RadialGradient(g) => {
+                let mut new_grad = g.clone();
+                for s in new_grad.0.make_mut_slice().iter_mut().skip(RadialGradientBrush::HEADER) {
+                    s.color = s.color.with_alpha(alpha);
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            Brush::ConicGradient(g) => {
+                let mut new_grad = g.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(ConicGradientBrush::HEADER) {
+                    x.color = x.color.with_alpha(alpha);
+                }
+                Brush::ConicGradient(new_grad)
+            }
+        }
+    }
+}
+
+/// The LinearGradientBrush describes a way of filling a shape with different colors, which
+/// are interpolated between different stops. The colors are aligned with a line that's rotated
+/// by the LinearGradient's angle.
+#[derive(Clone, PartialEq, Debug)]
+#[repr(transparent)]
+pub struct LinearGradientBrush(SharedVector<GradientStop>);
+
+impl LinearGradientBrush {
+    /// Creates a new linear gradient, described by the specified angle and the provided color stops.
+    ///
+    /// The angle need to be specified in degrees.
+    /// The stops don't need to be sorted as this function will sort them.
+    pub fn new(angle: f32, stops: impl IntoIterator<Item = GradientStop>) -> Self {
+        let stop_iter = stops.into_iter();
+        let mut encoded_angle_and_stops = SharedVector::with_capacity(stop_iter.size_hint().0 + 1);
+        // The gradient's first stop is a fake stop to store the angle
+        encoded_angle_and_stops.push(GradientStop { color: Default::default(), position: angle });
+        encoded_angle_and_stops.extend(stop_iter);
+        Self(encoded_angle_and_stops)
+    }
+    /// Returns the angle of the linear gradient in degrees.
+    pub fn angle(&self) -> f32 {
+        self.0[0].position
+    }
+    /// Returns the color stops of the linear gradient.
+    /// The stops are sorted by positions.
+    pub fn stops(&self) -> impl Iterator<Item = &GradientStop> {
+        // skip the first fake stop that just contains the angle
+        self.0.iter().skip(1)
+    }
+
+    /// The color stops as a slice, without the angle header stop.
+    fn stops_slice(&self) -> &[GradientStop] {
+        self.0.as_slice().get(1..).unwrap_or_default()
+    }
+}
+
+/// NaN-aware float equality: two NaNs compare equal (unlike IEEE 754).
+#[inline]
+fn nan_eq(a: f32, b: f32) -> bool {
+    a == b || (a.is_nan() && b.is_nan())
+}
+
+/// Shared center resolution for the logical and scaled radial/conic methods.
+/// When `scale_factor` is 1.0 this is identical to the unscaled case.
+#[inline]
+fn center_or_bbox(cx: f32, cy: f32, width: f32, height: f32, scale_factor: f32) -> (f32, f32) {
+    if cx.is_nan() { (width / 2.0, height / 2.0) } else { (cx * scale_factor, cy * scale_factor) }
+}
+
+/// Radius header value of a [`RadialGradientBrush`] that selects the shape's default size.
+pub const RADIAL_GRADIENT_DEFAULT_RADIUS: f32 = -1.0;
+/// Shape header value of a circle [`RadialGradientBrush`].
+pub const RADIAL_GRADIENT_SHAPE_CIRCLE: f32 = 0.0;
+/// Shape header value of an ellipse [`RadialGradientBrush`].
+pub const RADIAL_GRADIENT_SHAPE_ELLIPSE: f32 = 1.0;
+
+/// The RadialGradientBrush describes a way of filling a shape with a circular or elliptical
+/// gradient.
+///
+/// The center defaults to the middle of the bounding box.
+/// Both shapes default to CSS `farthest-corner`:
+/// they pass through the bounding box corner farthest from the center.
+/// An ellipse has the aspect ratio of the distances to the farthest sides.
+/// Use [`with_center`](Self::with_center), [`with_radius`](Self::with_radius) and
+/// [`with_radii`](Self::with_radii) to override these defaults.
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct RadialGradientBrush(SharedVector<GradientStop>);
+
+impl RadialGradientBrush {
+    const HEADER: usize = 5;
+    /// Qt and Skia treat a gradient transform with a near-zero determinant as singular,
+    /// so a zero radius is resolved to this instead.
+    const MIN_RADIUS: f32 = 1e-3;
+
+    /// Creates a new circle radial gradient centered in the element's bounding box,
+    /// described by the provided color stops.
+    pub fn new_circle(stops: impl IntoIterator<Item = GradientStop>) -> Self {
+        Self::new(RADIAL_GRADIENT_SHAPE_CIRCLE, stops)
+    }
+
+    /// Creates a new ellipse radial gradient centered in the element's bounding box,
+    /// described by the provided color stops.
+    pub fn new_ellipse(stops: impl IntoIterator<Item = GradientStop>) -> Self {
+        Self::new(RADIAL_GRADIENT_SHAPE_ELLIPSE, stops)
+    }
+
+    fn new(shape: f32, stops: impl IntoIterator<Item = GradientStop>) -> Self {
+        let stop_iter = stops.into_iter();
+        let mut v = SharedVector::with_capacity(Self::HEADER + stop_iter.size_hint().0);
+        // Header stops: center_x (NaN=bbox), center_y (NaN=bbox), radius_x, radius_y, shape
+        v.push(GradientStop { color: Default::default(), position: f32::NAN });
+        v.push(GradientStop { color: Default::default(), position: f32::NAN });
+        v.push(GradientStop {
+            color: Default::default(),
+            position: RADIAL_GRADIENT_DEFAULT_RADIUS,
+        });
+        v.push(GradientStop {
+            color: Default::default(),
+            position: RADIAL_GRADIENT_DEFAULT_RADIUS,
+        });
+        v.push(GradientStop { color: Default::default(), position: shape });
+        v.extend(stop_iter);
+        Self(v)
+    }
+
+    #[inline]
+    fn center_x(&self) -> f32 {
+        self.0[0].position
+    }
+    #[inline]
+    fn center_y(&self) -> f32 {
+        self.0[1].position
+    }
+    #[inline]
+    fn radius_x(&self) -> f32 {
+        self.0[2].position
+    }
+    #[inline]
+    fn radius_y(&self) -> f32 {
+        self.0[3].position
+    }
+    #[inline]
+    fn shape(&self) -> f32 {
+        self.0[4].position
+    }
+
+    /// Returns the color stops of the radial gradient.
+    pub fn stops(&self) -> impl Iterator<Item = &GradientStop> {
+        self.0.iter().skip(Self::HEADER)
+    }
+
+    /// The color stops as a slice, without the header stops.
+    fn stops_slice(&self) -> &[GradientStop] {
+        self.0.as_slice().get(Self::HEADER..).unwrap_or_default()
+    }
+
+    /// Returns `true` if the gradient is a circle, `false` if it's an ellipse.
+    pub fn is_circle(&self) -> bool {
+        self.shape() == RADIAL_GRADIENT_SHAPE_CIRCLE
+    }
+
+    #[doc(hidden)]
+    pub fn explicit_center(&self) -> Option<(f32, f32)> {
+        (!self.center_x().is_nan()).then(|| (self.center_x(), self.center_y()))
+    }
+
+    #[doc(hidden)]
+    pub fn explicit_radii(&self) -> Option<(f32, f32)> {
+        (self.radius_x() >= 0.0).then(|| (self.radius_x(), self.radius_y()))
+    }
+
+    /// Sets an explicit center, returning `self` for chaining. `cx` and `cy` are in the
+    /// element's local logical coordinate space.
+    pub fn with_center(mut self, cx: f32, cy: f32) -> Self {
+        let s = self.0.make_mut_slice();
+        s[0].position = cx;
+        s[1].position = cy;
+        self
+    }
+
+    /// Makes the gradient a circle with an explicit radius, returning `self` for chaining.
+    /// `r` is in the element's local logical coordinate space.
+    /// Negative values are treated as 0.
+    pub fn with_radius(self, r: f32) -> Self {
+        let mut g = self.with_radii(r, r);
+        g.0.make_mut_slice()[4].position = RADIAL_GRADIENT_SHAPE_CIRCLE;
+        g
+    }
+
+    /// Makes the gradient an ellipse with explicit horizontal and vertical radii,
+    /// returning `self` for chaining.
+    /// `rx` and `ry` are in the element's local logical coordinate space.
+    /// Negative values are treated as 0.
+    pub fn with_radii(mut self, rx: f32, ry: f32) -> Self {
+        let s = self.0.make_mut_slice();
+        s[2].position = rx.max(0.);
+        s[3].position = ry.max(0.);
+        s[4].position = RADIAL_GRADIENT_SHAPE_ELLIPSE;
+        self
+    }
+
+    /// Returns the gradient center, falling back to the bounding box center when not explicitly set.
+    ///
+    /// `width` and `height` are the element's logical dimensions.
+    pub fn center_or_default(&self, width: f32, height: f32) -> (f32, f32) {
+        debug_assert!(
+            self.center_x().is_nan() == self.center_y().is_nan(),
+            "center_x and center_y must both be NaN or both finite"
+        );
+        center_or_bbox(self.center_x(), self.center_y(), width, height, 1.0)
+    }
+
+    /// Returns the gradient center in a scaled coordinate space.
+    ///
+    /// `width` and `height` are the dimensions in the target coordinate space. Explicit center
+    /// values are local logical lengths and are multiplied by `scale_factor`; default centers are
+    /// derived from the dimensions directly.
+    pub fn center_or_default_scaled(
+        &self,
+        width: f32,
+        height: f32,
+        scale_factor: f32,
+    ) -> (f32, f32) {
+        debug_assert!(
+            self.center_x().is_nan() == self.center_y().is_nan(),
+            "center_x and center_y must both be NaN or both finite"
+        );
+        center_or_bbox(self.center_x(), self.center_y(), width, height, scale_factor)
+    }
+
+    /// Returns the horizontal and vertical gradient radii,
+    /// falling back to the shape's default when not explicitly set.
+    ///
+    /// `width` and `height` are the element's logical dimensions.
+    pub fn radii_or_default(&self, width: f32, height: f32) -> (f32, f32) {
+        self.radii_or_default_scaled(width, height, 1.0)
+    }
+
+    /// Returns the horizontal and vertical gradient radii in a scaled coordinate space.
+    ///
+    /// `width` and `height` are the dimensions in the target coordinate space. Explicit radius
+    /// values are local logical lengths and are multiplied by `scale_factor`; default radii are
+    /// derived from the dimensions directly.
+    pub fn radii_or_default_scaled(
+        &self,
+        width: f32,
+        height: f32,
+        scale_factor: f32,
+    ) -> (f32, f32) {
+        let (cx, cy) = self.center_or_default_scaled(width, height, scale_factor);
+        let farthest_x = cx.max(width - cx);
+        let farthest_y = cy.max(height - cy);
+        let farthest_corner = farthest_x.hypot(farthest_y);
+        let resolve = |r: f32, farthest: f32| {
+            let r = if r >= 0.0 {
+                r * scale_factor
+            } else if self.is_circle() {
+                farthest_corner
+            } else {
+                core::f32::consts::SQRT_2 * farthest
+            };
+            r.max(Self::MIN_RADIUS)
+        };
+        (resolve(self.radius_x(), farthest_x), resolve(self.radius_y(), farthest_y))
+    }
+
+    /// Returns the gradient radius; for an ellipse, the horizontal radius.
+    ///
+    /// `width` and `height` are the element's logical dimensions.
+    #[deprecated(
+        since = "1.19.0",
+        note = "use `radii_or_default`, which also returns an ellipse's vertical radius"
+    )]
+    pub fn radius_or_default(&self, width: f32, height: f32) -> f32 {
+        self.radii_or_default(width, height).0
+    }
+
+    /// Returns the gradient radius in a scaled coordinate space; for an ellipse, the horizontal
+    /// radius.
+    ///
+    /// `width` and `height` are the dimensions in the target coordinate space.
+    #[deprecated(
+        since = "1.19.0",
+        note = "use `radii_or_default_scaled`, which also returns an ellipse's vertical radius"
+    )]
+    pub fn radius_or_default_scaled(&self, width: f32, height: f32, scale_factor: f32) -> f32 {
+        self.radii_or_default_scaled(width, height, scale_factor).0
+    }
+}
+
+/// Equality is render-equivalence: two NaN center fields compare equal because both use the
+/// bounding box center.
+impl PartialEq for RadialGradientBrush {
+    fn eq(&self, other: &Self) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        nan_eq(self.center_x(), other.center_x())
+            && nan_eq(self.center_y(), other.center_y())
+            && self.radius_x() == other.radius_x()
+            && self.radius_y() == other.radius_y()
+            && self.shape() == other.shape()
+            && self.0.iter().skip(Self::HEADER).eq(other.0.iter().skip(Self::HEADER))
+    }
+}
+
+/// The ConicGradientBrush describes a way of filling a shape with a gradient
+/// that rotates around a center point.
+///
+/// The center defaults to the middle of the bounding box. Use
+/// [`with_center`](Self::with_center) to override.
+///
+/// Internally the first three fake [`GradientStop`] entries encode the starting angle
+/// (index 0), center_x (index 1), and center_y (index 2). Real color stops begin at index 3.
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct ConicGradientBrush(SharedVector<GradientStop>);
+
+/// Equality is render-equivalence: two NaN center fields compare equal because both use the
+/// bounding box center.
+impl PartialEq for ConicGradientBrush {
+    fn eq(&self, other: &Self) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        // angle (index 0) uses plain f32 equality (not NaN-aware)
+        self.0[0].position == other.0[0].position
+            && nan_eq(self.center_x(), other.center_x())
+            && nan_eq(self.center_y(), other.center_y())
+            && self.0.iter().skip(Self::HEADER).eq(other.0.iter().skip(Self::HEADER))
+    }
+}
+
+impl ConicGradientBrush {
+    const HEADER: usize = 3;
+
+    /// Creates a new conic gradient, described by the specified angle and the provided color stops.
+    ///
+    /// The angle need to be specified in degrees (CSS `from <angle>` syntax).
+    /// The stops don't need to be sorted as this function will normalize and process them.
+    pub fn new(angle: f32, stops: impl IntoIterator<Item = GradientStop>) -> Self {
+        let stop_iter = stops.into_iter();
+        let mut v = SharedVector::with_capacity(Self::HEADER + stop_iter.size_hint().0);
+        // Header stops: angle, center_x (NaN=bbox), center_y (NaN=bbox)
+        v.push(GradientStop { color: Default::default(), position: angle });
+        v.push(GradientStop { color: Default::default(), position: f32::NAN });
+        v.push(GradientStop { color: Default::default(), position: f32::NAN });
+        v.extend(stop_iter);
+        let mut result = Self(v);
+        result.normalize_stops();
+        if angle.abs() > f32::EPSILON {
+            result.apply_rotation(angle);
+        }
+        result
+    }
+
+    /// Normalizes the gradient stops to be within [0, 1] range with proper boundary stops.
+    fn normalize_stops(&mut self) {
+        // Check if we need to make any changes
+        let stops_slice = &self.0[Self::HEADER..];
+        let has_stop_at_0 = stops_slice.iter().any(|s| s.position.abs() < f32::EPSILON);
+        let has_stop_at_1 = stops_slice.iter().any(|s| (s.position - 1.0).abs() < f32::EPSILON);
+        let has_stops_outside = stops_slice.iter().any(|s| s.position < 0.0 || s.position > 1.0);
+        let is_empty = stops_slice.is_empty();
+
+        // If no changes needed, return early
+        if has_stop_at_0 && has_stop_at_1 && !has_stops_outside && !is_empty {
+            return;
+        }
+
+        // Need to make changes, so copy
+        let mut stops: alloc::vec::Vec<_> = stops_slice.to_vec();
+
+        // Add interpolated boundary stop at 0.0 if needed
+        if !has_stop_at_0 {
+            let stop_below_0 = stops.iter().filter(|s| s.position < 0.0).max_by(|a, b| {
+                a.position.partial_cmp(&b.position).unwrap_or(core::cmp::Ordering::Equal)
+            });
+            let stop_above_0 = stops.iter().filter(|s| s.position > 0.0).min_by(|a, b| {
+                a.position.partial_cmp(&b.position).unwrap_or(core::cmp::Ordering::Equal)
+            });
+            if let (Some(below), Some(above)) = (stop_below_0, stop_above_0) {
+                let t = (0.0 - below.position) / (above.position - below.position);
+                let color_at_0 = Self::interpolate_color(&below.color, &above.color, t);
+                stops.insert(0, GradientStop { position: 0.0, color: color_at_0 });
+            } else if let Some(above) = stop_above_0 {
+                stops.insert(0, GradientStop { position: 0.0, color: above.color });
+            } else if let Some(below) = stop_below_0 {
+                stops.insert(0, GradientStop { position: 0.0, color: below.color });
+            }
+        }
+
+        // Add interpolated boundary stop at 1.0 if needed
+        if !has_stop_at_1 {
+            let stop_below_1 = stops.iter().filter(|s| s.position < 1.0).max_by(|a, b| {
+                a.position.partial_cmp(&b.position).unwrap_or(core::cmp::Ordering::Equal)
+            });
+            let stop_above_1 = stops.iter().filter(|s| s.position > 1.0).min_by(|a, b| {
+                a.position.partial_cmp(&b.position).unwrap_or(core::cmp::Ordering::Equal)
+            });
+
+            if let (Some(below), Some(above)) = (stop_below_1, stop_above_1) {
+                let t = (1.0 - below.position) / (above.position - below.position);
+                let color_at_1 = Self::interpolate_color(&below.color, &above.color, t);
+                stops.push(GradientStop { position: 1.0, color: color_at_1 });
+            } else if let Some(below) = stop_below_1 {
+                stops.push(GradientStop { position: 1.0, color: below.color });
+            } else if let Some(above) = stop_above_1 {
+                stops.push(GradientStop { position: 1.0, color: above.color });
+            }
+        }
+
+        // Drop stops outside [0, 1] range
+        if has_stops_outside {
+            stops.retain(|s| 0.0 <= s.position && s.position <= 1.0);
+        }
+
+        // Handle empty gradients
+        if stops.is_empty() {
+            stops.push(GradientStop { position: 0.0, color: Color::default() });
+            stops.push(GradientStop { position: 1.0, color: Color::default() });
+        }
+
+        // Rebuild internal storage, preserving the full header (angle, center_x, center_y)
+        let angle = self.angle();
+        let cx = self.center_x();
+        let cy = self.center_y();
+        self.0 = SharedVector::with_capacity(stops.len() + Self::HEADER);
+        self.0.push(GradientStop { color: Default::default(), position: angle });
+        self.0.push(GradientStop { color: Default::default(), position: cx });
+        self.0.push(GradientStop { color: Default::default(), position: cy });
+        self.0.extend(stops);
+    }
+
+    /// Apply rotation to the gradient (CSS `from <angle>` syntax).
+    ///
+    /// The `from_angle` parameter is specified in degrees and rotates the entire gradient clockwise.
+    fn apply_rotation(&mut self, from_angle: f32) {
+        // Convert degrees to normalized 0-1 range
+        let normalized_from_angle = (from_angle / 360.0) - (from_angle / 360.0).floor();
+
+        // If no rotation needed, just update the stored angle
+        if normalized_from_angle.abs() < f32::EPSILON {
+            self.0.make_mut_slice()[0].position = from_angle;
+            return;
+        }
+
+        // Update the stored angle
+        self.0.make_mut_slice()[0].position = from_angle;
+
+        // Need to rotate, so copy
+        let mut stops: alloc::vec::Vec<_> = self.0.iter().skip(Self::HEADER).copied().collect();
+
+        // Adjust first stop (at 0.0) to avoid duplicate with stop at 1.0
+        if let Some(first) = stops.first_mut()
+            && first.position.abs() < f32::EPSILON
+        {
+            first.position = f32::EPSILON;
+        }
+
+        // Step 1: Apply rotation by adding from_angle and wrapping to [0, 1) range
+        stops = stops
+            .iter()
+            .map(|stop| {
+                // f32::rem_euclid is not always available, and when it is it has a
+                // different signature than num_traits::Euclid::rem_euclid (issue #11333).
+                let rotated_position =
+                    num_traits::Euclid::rem_euclid(&(stop.position + normalized_from_angle), &1.0);
+                GradientStop { position: rotated_position, color: stop.color }
+            })
+            .collect();
+
+        // Step 2: Separate duplicate positions with different colors to avoid flickering
+        for i in 0..stops.len() {
+            let j = (i + 1) % stops.len();
+            if (stops[i].position - stops[j].position).abs() < f32::EPSILON
+                && stops[i].color != stops[j].color
+            {
+                stops[i].position = (stops[i].position - f32::EPSILON).max(0.0);
+                stops[j].position = (stops[j].position + f32::EPSILON).min(1.0);
+            }
+        }
+
+        // Step 3: Sort by rotated position
+        stops.sort_by(|a, b| {
+            a.position.partial_cmp(&b.position).unwrap_or(core::cmp::Ordering::Equal)
+        });
+
+        // Step 4: Add boundary stops at 0.0 and 1.0 if missing
+        let has_stop_at_0 = stops.iter().any(|s| s.position.abs() < f32::EPSILON);
+        if !has_stop_at_0 && let (Some(last), Some(first)) = (stops.last(), stops.first()) {
+            let gap = 1.0 - last.position + first.position;
+            let color_at_0 = if gap > f32::EPSILON {
+                let t = (1.0 - last.position) / gap;
+                Self::interpolate_color(&last.color, &first.color, t)
+            } else {
+                last.color
+            };
+            stops.insert(0, GradientStop { position: 0.0, color: color_at_0 });
+        }
+
+        let has_stop_at_1 = stops.iter().any(|s| (s.position - 1.0).abs() < f32::EPSILON);
+        if !has_stop_at_1 && let Some(first) = stops.first() {
+            stops.push(GradientStop { position: 1.0, color: first.color });
+        }
+
+        // Rebuild internal storage, preserving the full header (angle, center_x, center_y)
+        let cx = self.center_x();
+        let cy = self.center_y();
+        self.0 = SharedVector::with_capacity(stops.len() + Self::HEADER);
+        self.0.push(GradientStop { color: Default::default(), position: from_angle });
+        self.0.push(GradientStop { color: Default::default(), position: cx });
+        self.0.push(GradientStop { color: Default::default(), position: cy });
+        self.0.extend(stops);
+    }
+
+    /// Returns the starting angle (rotation) of the conic gradient in degrees.
+    fn angle(&self) -> f32 {
+        self.0[0].position
+    }
+
+    #[inline]
+    fn center_x(&self) -> f32 {
+        self.0[1].position
+    }
+    #[inline]
+    fn center_y(&self) -> f32 {
+        self.0[2].position
+    }
+
+    /// Returns the color stops of the conic gradient.
+    /// The stops are already rotated according to the `from_angle` specified in `new()`.
+    pub fn stops(&self) -> impl Iterator<Item = &GradientStop> {
+        self.0.iter().skip(Self::HEADER)
+    }
+
+    /// The color stops as a slice, without the header stops.
+    fn stops_slice(&self) -> &[GradientStop] {
+        self.0.as_slice().get(Self::HEADER..).unwrap_or_default()
+    }
+
+    /// Sets an explicit center, returning `self` for chaining. `cx` and `cy` are in the
+    /// element's local logical coordinate space.
+    pub fn with_center(mut self, cx: f32, cy: f32) -> Self {
+        let s = self.0.make_mut_slice();
+        s[1].position = cx;
+        s[2].position = cy;
+        self
+    }
+
+    /// Returns the gradient center, falling back to the bounding box center when not explicitly set.
+    ///
+    /// `width` and `height` are the element's logical dimensions.
+    pub fn center_or_default(&self, width: f32, height: f32) -> (f32, f32) {
+        debug_assert!(
+            self.center_x().is_nan() == self.center_y().is_nan(),
+            "center_x and center_y must both be NaN or both finite"
+        );
+        center_or_bbox(self.center_x(), self.center_y(), width, height, 1.0)
+    }
+
+    /// Returns the gradient center in a scaled coordinate space.
+    ///
+    /// `width` and `height` are the dimensions in the target coordinate space. Explicit center
+    /// values are local logical lengths and are multiplied by `scale_factor`; default centers are
+    /// derived from the dimensions directly.
+    pub fn center_or_default_scaled(
+        &self,
+        width: f32,
+        height: f32,
+        scale_factor: f32,
+    ) -> (f32, f32) {
+        debug_assert!(
+            self.center_x().is_nan() == self.center_y().is_nan(),
+            "center_x and center_y must both be NaN or both finite"
+        );
+        center_or_bbox(self.center_x(), self.center_y(), width, height, scale_factor)
+    }
+
+    /// Helper: Linearly interpolate between two colors using premultiplied alpha.
+    ///
+    /// This is used for interpolating gradient boundary colors in CSS-style gradients.
+    /// We cannot use Color::mix() here because it implements Sass color mixing algorithm,
+    /// which is different from CSS gradient color interpolation.
+    ///
+    /// CSS gradients interpolate in premultiplied RGBA space:
+    /// https://www.w3.org/TR/css-color-4/#interpolation-alpha
+    fn interpolate_color(c1: &Color, c2: &Color, factor: f32) -> Color {
+        let argb1 = c1.to_argb_u8();
+        let argb2 = c2.to_argb_u8();
+
+        // Convert to premultiplied alpha
+        let a1 = argb1.alpha as f32 / 255.0;
+        let a2 = argb2.alpha as f32 / 255.0;
+        let r1 = argb1.red as f32 * a1;
+        let g1 = argb1.green as f32 * a1;
+        let b1 = argb1.blue as f32 * a1;
+        let r2 = argb2.red as f32 * a2;
+        let g2 = argb2.green as f32 * a2;
+        let b2 = argb2.blue as f32 * a2;
+
+        // Interpolate in premultiplied space
+        let alpha = (1.0 - factor) * a1 + factor * a2;
+        let red = (1.0 - factor) * r1 + factor * r2;
+        let green = (1.0 - factor) * g1 + factor * g2;
+        let blue = (1.0 - factor) * b1 + factor * b2;
+
+        // Convert back from premultiplied alpha
+        if alpha > 0.0 {
+            Color::from_argb_u8(
+                (alpha * 255.0) as u8,
+                (red / alpha).min(255.0) as u8,
+                (green / alpha).min(255.0) as u8,
+                (blue / alpha).min(255.0) as u8,
+            )
+        } else {
+            Color::from_argb_u8(0, 0, 0, 0)
+        }
+    }
+}
+
+/// C FFI function to normalize the gradient stops to be within [0, 1] range
+#[cfg(feature = "ffi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_conic_gradient_normalize_stops(gradient: &mut ConicGradientBrush) {
+    gradient.normalize_stops();
+}
+
+/// C FFI function to apply rotation to a ConicGradientBrush
+#[cfg(feature = "ffi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_conic_gradient_apply_rotation(
+    gradient: &mut ConicGradientBrush,
+    angle_degrees: f32,
+) {
+    gradient.apply_rotation(angle_degrees);
+}
+
+/// Compare two brushes using Rust's render-equivalent equality.
+#[cfg(feature = "ffi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_brush_compare_equal(brush1: &Brush, brush2: &Brush) -> bool {
+    brush1.eq(brush2)
+}
+
+/// GradientStop describes a single color stop in a gradient. The colors between multiple
+/// stops are interpolated.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct GradientStop {
+    /// The color to draw at this stop.
+    pub color: Color,
+    /// The position of this stop on the entire shape, as a normalized value between 0 and 1.
+    pub position: f32,
+}
+
+/// Returns the start / end points of a gradient within a rectangle of the given size, based on the angle (in degree).
+pub fn line_for_angle(angle: f32, size: Size2D<f32>) -> (Point2D<f32>, Point2D<f32>) {
+    let angle = (angle + 90.).to_radians();
+    let (s, c) = angle.sin_cos();
+
+    let (a, b) = if s.abs() < f32::EPSILON {
+        let y = size.height / 2.;
+        return if c < 0. {
+            (Point2D::new(0., y), Point2D::new(size.width, y))
+        } else {
+            (Point2D::new(size.width, y), Point2D::new(0., y))
+        };
+    } else if c * s < 0. {
+        // Intersection between the gradient line, and an orthogonal line that goes through (height, 0)
+        let x = (s * size.width + c * size.height) * s / 2.;
+        let y = -c * x / s + size.height;
+        (Point2D::new(x, y), Point2D::new(size.width - x, size.height - y))
+    } else {
+        // Intersection between the gradient line, and an orthogonal line that goes through (0, 0)
+        let x = (s * size.width - c * size.height) * s / 2.;
+        let y = -c * x / s;
+        (Point2D::new(size.width - x, size.height - y), Point2D::new(x, y))
+    };
+
+    if s > 0. { (a, b) } else { (b, a) }
+}
+
+impl InterpolatedPropertyValue for Brush {
+    fn interpolate(&self, target_value: &Self, t: f32) -> Self {
+        match (self, target_value) {
+            (Brush::SolidColor(source_col), Brush::SolidColor(target_col)) => {
+                Brush::SolidColor(source_col.interpolate(target_col, t))
+            }
+            (Brush::SolidColor(col), Brush::LinearGradient(grad)) => {
+                let mut new_grad = grad.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(1) {
+                    x.color = col.interpolate(&x.color, t);
+                }
+                Brush::LinearGradient(new_grad)
+            }
+            (a @ Brush::LinearGradient(_), b @ Brush::SolidColor(_)) => {
+                Self::interpolate(b, a, 1. - t)
+            }
+            (Brush::LinearGradient(lhs), Brush::LinearGradient(rhs)) => {
+                if lhs.0.len() < rhs.0.len() {
+                    Self::interpolate(target_value, self, 1. - t)
+                } else {
+                    let mut new_grad = lhs.clone();
+                    let mut iter = new_grad.0.make_mut_slice().iter_mut();
+                    {
+                        let angle = &mut iter.next().unwrap().position;
+                        *angle = angle.interpolate(&rhs.angle(), t);
+                    }
+                    for s2 in rhs.stops() {
+                        let s1 = iter.next().unwrap();
+                        s1.color = s1.color.interpolate(&s2.color, t);
+                        s1.position = s1.position.interpolate(&s2.position, t);
+                    }
+                    for x in iter {
+                        x.position = x.position.interpolate(&1.0, t);
+                    }
+                    Brush::LinearGradient(new_grad)
+                }
+            }
+            (Brush::SolidColor(col), Brush::RadialGradient(grad)) => {
+                let mut new_grad = grad.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(RadialGradientBrush::HEADER) {
+                    x.color = col.interpolate(&x.color, t);
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            (a @ Brush::RadialGradient(_), b @ Brush::SolidColor(_)) => {
+                Self::interpolate(b, a, 1. - t)
+            }
+            (Brush::RadialGradient(lhs), Brush::RadialGradient(rhs)) => {
+                // The stops interpolate from the gradient with more stops, so it may be swapped.
+                // The header always goes from lhs to rhs.
+                let (long, short, stops_t) =
+                    if lhs.0.len() < rhs.0.len() { (rhs, lhs, 1. - t) } else { (lhs, rhs, t) };
+                let mut new_grad = long.clone();
+                {
+                    let s = new_grad.0.make_mut_slice();
+                    let snap = |l: f32, r: f32| if t >= 1.0 { r } else { l };
+                    // Center: interpolate when both sides are explicit. When one side is the
+                    // default (NaN), lhs wins for t < 1 and snaps to rhs at t == 1.
+                    if !lhs.center_x().is_nan() && !rhs.center_x().is_nan() {
+                        s[0].position = lhs.center_x().interpolate(&rhs.center_x(), t);
+                        s[1].position = lhs.center_y().interpolate(&rhs.center_y(), t);
+                    } else {
+                        s[0].position = snap(lhs.center_x(), rhs.center_x());
+                        s[1].position = snap(lhs.center_y(), rhs.center_y());
+                    }
+                    // Radii: same snap behavior when one side is a default (negative).
+                    for (i, l, r) in
+                        [(2, lhs.radius_x(), rhs.radius_x()), (3, lhs.radius_y(), rhs.radius_y())]
+                    {
+                        s[i].position =
+                            if l >= 0.0 && r >= 0.0 { l.interpolate(&r, t) } else { snap(l, r) };
+                    }
+                    let both_radii_explicit =
+                        lhs.explicit_radii().is_some() && rhs.explicit_radii().is_some();
+                    s[4].position = if both_radii_explicit && t < 1.0 {
+                        if lhs.is_circle() && rhs.is_circle() {
+                            RADIAL_GRADIENT_SHAPE_CIRCLE
+                        } else {
+                            RADIAL_GRADIENT_SHAPE_ELLIPSE
+                        }
+                    } else {
+                        snap(lhs.shape(), rhs.shape())
+                    };
+                    let mut iter = s.iter_mut().skip(RadialGradientBrush::HEADER);
+                    let mut last_color = Color::default();
+                    for s2 in short.stops() {
+                        let s1 = iter.next().unwrap();
+                        last_color = s2.color;
+                        s1.color = s1.color.interpolate(&s2.color, stops_t);
+                        s1.position = s1.position.interpolate(&s2.position, stops_t);
+                    }
+                    for x in iter {
+                        x.position = x.position.interpolate(&1.0, stops_t);
+                        x.color = x.color.interpolate(&last_color, stops_t);
+                    }
+                }
+                Brush::RadialGradient(new_grad)
+            }
+            (Brush::SolidColor(col), Brush::ConicGradient(grad)) => {
+                let mut new_grad = grad.clone();
+                for x in new_grad.0.make_mut_slice().iter_mut().skip(ConicGradientBrush::HEADER) {
+                    x.color = col.interpolate(&x.color, t);
+                }
+                Brush::ConicGradient(new_grad)
+            }
+            (a @ Brush::ConicGradient(_), b @ Brush::SolidColor(_)) => {
+                Self::interpolate(b, a, 1. - t)
+            }
+            (Brush::ConicGradient(lhs), Brush::ConicGradient(rhs)) => {
+                if lhs.0.len() < rhs.0.len() {
+                    Self::interpolate(target_value, self, 1. - t)
+                } else {
+                    let mut new_grad = lhs.clone();
+                    {
+                        let s = new_grad.0.make_mut_slice();
+                        // angle (s[0])
+                        s[0].position = lhs.angle().interpolate(&rhs.angle(), t);
+                        // Center: interpolate when both sides are explicit. When one side is the
+                        // default (NaN), lhs wins for t < 1 and snaps to rhs at t == 1.
+                        if !lhs.center_x().is_nan() && !rhs.center_x().is_nan() {
+                            s[1].position = lhs.center_x().interpolate(&rhs.center_x(), t);
+                            s[2].position = lhs.center_y().interpolate(&rhs.center_y(), t);
+                        } else if t >= 1.0 {
+                            s[1].position = rhs.center_x();
+                            s[2].position = rhs.center_y();
+                        }
+                        let mut rhs_stops = rhs.stops();
+                        let mut iter = s.iter_mut().skip(ConicGradientBrush::HEADER);
+                        for s2 in &mut rhs_stops {
+                            let s1 = iter.next().unwrap();
+                            s1.color = s1.color.interpolate(&s2.color, t);
+                            s1.position = s1.position.interpolate(&s2.position, t);
+                        }
+                        for x in iter {
+                            x.position = x.position.interpolate(&1.0, t);
+                        }
+                    }
+                    Brush::ConicGradient(new_grad)
+                }
+            }
+            (a @ Brush::LinearGradient(_), b @ Brush::RadialGradient(_))
+            | (a @ Brush::RadialGradient(_), b @ Brush::LinearGradient(_))
+            | (a @ Brush::LinearGradient(_), b @ Brush::ConicGradient(_))
+            | (a @ Brush::ConicGradient(_), b @ Brush::LinearGradient(_))
+            | (a @ Brush::RadialGradient(_), b @ Brush::ConicGradient(_))
+            | (a @ Brush::ConicGradient(_), b @ Brush::RadialGradient(_)) => {
+                // Just go to an intermediate color.
+                let color = Color::interpolate(&b.color(), &a.color(), t);
+                if t < 0.5 {
+                    Self::interpolate(a, &Brush::SolidColor(color), t * 2.)
+                } else {
+                    Self::interpolate(&Brush::SolidColor(color), b, (t - 0.5) * 2.)
+                }
+            }
+        }
+    }
+}
+
+/// A [`Brush`] resolved by [`resolve_brush`]: gradient geometry in physical pixels
+/// plus sanitized color stops, so that all renderers share one interpretation of
+/// the brush model.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ResolvedBrush<'a> {
+    /// A plain color fill.
+    SolidColor(Color),
+    /// See [`ResolvedLinearGradient`].
+    LinearGradient(ResolvedLinearGradient<'a>),
+    /// See [`ResolvedRadialGradient`].
+    RadialGradient(ResolvedRadialGradient<'a>),
+    /// See [`ResolvedConicGradient`].
+    ConicGradient(ResolvedConicGradient<'a>),
+}
+
+/// A linear gradient whose stops span the line from `start` to `end`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedLinearGradient<'a> {
+    /// The point stop position 0 lies on.
+    pub start: euclid::Point2D<f32, PhysicalPx>,
+    /// The point stop position 1 lies on.
+    pub end: euclid::Point2D<f32, PhysicalPx>,
+    /// The sanitized color stops.
+    pub stops: Cow<'a, [GradientStop]>,
+}
+
+/// A radial (or elliptical) gradient whose stops span from `center` to `(radius_x, radius_y)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedRadialGradient<'a> {
+    /// The center of the gradient.
+    pub center: euclid::Point2D<f32, PhysicalPx>,
+    /// The x-radius stop position 1 lies on.
+    pub radius_x: euclid::Length<f32, PhysicalPx>,
+    /// The y-radius stop position 1 lies on.
+    pub radius_y: euclid::Length<f32, PhysicalPx>,
+    /// The sanitized color stops.
+    pub stops: Cow<'a, [GradientStop]>,
+}
+
+/// A conic gradient whose stops run one full clockwise turn around `center`,
+/// starting at 12 o'clock (Slint's 0°).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedConicGradient<'a> {
+    /// The center of the gradient.
+    pub center: euclid::Point2D<f32, PhysicalPx>,
+    /// The sanitized color stops.
+    pub stops: Cow<'a, [GradientStop]>,
+}
+
+/// Resolves a brush against the shape it fills: `size` is the shape's size in
+/// physical pixels; explicit gradient center and radius values are local logical
+/// lengths converted through `scale_factor`. Returns `None` for a fully
+/// transparent brush.
+///
+/// The returned stops are canonical - sorted, strictly increasing, within [0, 1] -
+/// with out-of-range linear/radial stops folded into the gradient geometry and
+/// conic stops clamped (a conic gradient cannot extend past a full turn), so they
+/// are directly usable by backends that render non-canonical stops incorrectly
+/// (vello draws them as a solid fill of the first color). Already-canonical stops,
+/// which is all the compiler produces, are borrowed rather than copied.
+///
+/// A free function rather than a `Brush` method so that it stays out of the public
+/// API that `Brush` is re-exported into.
+pub fn resolve_brush<'a>(
+    brush: &'a Brush,
+    size: euclid::Size2D<f32, PhysicalPx>,
+    scale_factor: ScaleFactor,
+) -> Option<ResolvedBrush<'a>> {
+    if brush.is_transparent() {
+        return None;
+    }
+    Some(match brush {
+        Brush::SolidColor(color) => ResolvedBrush::SolidColor(*color),
+        Brush::LinearGradient(gradient) => {
+            let (stops, extent) = sanitize_color_stops(gradient.stops_slice(), true);
+            let (start, mut end) = line_for_angle(gradient.angle(), size.to_untyped());
+            if extent != 1.0 {
+                // sanitize_color_stops scaled the offsets down into [0, 1]; scale
+                // the gradient line to match, or the ramp comes out compressed.
+                end = start + (end - start) * extent;
+            }
+            ResolvedBrush::LinearGradient(ResolvedLinearGradient {
+                start: start.cast_unit(),
+                end: end.cast_unit(),
+                stops,
+            })
+        }
+        Brush::RadialGradient(gradient) => {
+            let (stops, extent) = sanitize_color_stops(gradient.stops_slice(), true);
+            let (center_x, center_y) =
+                gradient.center_or_default_scaled(size.width, size.height, scale_factor.get());
+            let (radius_x, radius_y) =
+                gradient.radii_or_default_scaled(size.width, size.height, scale_factor.get());
+            ResolvedBrush::RadialGradient(ResolvedRadialGradient {
+                center: euclid::point2(center_x, center_y),
+                radius_x: euclid::Length::new(radius_x * extent),
+                radius_y: euclid::Length::new(radius_y * extent),
+                stops,
+            })
+        }
+        Brush::ConicGradient(gradient) => {
+            let (stops, _) = sanitize_color_stops(gradient.stops_slice(), false);
+            let (center_x, center_y) =
+                gradient.center_or_default_scaled(size.width, size.height, scale_factor.get());
+            ResolvedBrush::ConicGradient(ResolvedConicGradient {
+                center: euclid::point2(center_x, center_y),
+                stops,
+            })
+        }
+    })
+}
+
+/// Massage gradient color stops into a canonical form (see [`resolve_brush`]).
+/// Stops below 0 are replaced by the interpolated color at 0 (the CSS behavior).
+/// For stops beyond 1: with `can_extend`, all positions are divided by the maximum
+/// and that maximum is returned as the second tuple element, so the caller can grow
+/// the gradient geometry by the same factor; without it, they are clamped to the
+/// interpolated color at 1. Duplicate positions (hard color steps) are separated by
+/// the smallest representable amount.
+fn sanitize_color_stops(
+    stops: &[GradientStop],
+    can_extend: bool,
+) -> (Cow<'_, [GradientStop]>, f32) {
+    /// Plain per-channel interpolation, matching how the gradient ramp itself blends.
+    fn color_at(position: f32, a: &GradientStop, b: &GradientStop) -> Color {
+        let t = if b.position > a.position {
+            ((position - a.position) / (b.position - a.position)).clamp(0., 1.)
+        } else {
+            0.
+        };
+        let (ca, cb) = (a.color.to_argb_u8(), b.color.to_argb_u8());
+        let lerp = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
+        Color::from_argb_u8(
+            lerp(ca.alpha, cb.alpha),
+            lerp(ca.red, cb.red),
+            lerp(ca.green, cb.green),
+            lerp(ca.blue, cb.blue),
+        )
+    }
+
+    // The compiler always produces canonical stop lists, so this fast path is the
+    // common case. A NaN position fails these comparisons: slow path.
+    if stops.first().is_none_or(|first| first.position >= 0.)
+        && stops.last().is_none_or(|last| last.position <= 1.)
+        && stops.array_windows().all(|[a, b]| a.position < b.position)
+    {
+        return (Cow::Borrowed(stops), 1.0);
+    }
+
+    let mut stops: alloc::vec::Vec<GradientStop> = stops.to_vec();
+    stops.sort_by(|a, b| a.position.total_cmp(&b.position));
+
+    // Replace everything below 0 with the interpolated color at 0.
+    while stops.len() >= 2 && stops[1].position <= 0. {
+        stops.remove(0);
+    }
+    if let [first, second, ..] = stops.as_slice()
+        && first.position < 0.
+    {
+        stops[0] = GradientStop { color: color_at(0., first, second), position: 0. };
+    } else if let [only] = stops.as_slice()
+        && only.position < 0.
+    {
+        stops[0].position = 0.;
+    }
+
+    // Handle stops beyond 1: normalize (the caller extends the geometry) or clamp to
+    // the interpolated color at 1.
+    let mut extent = 1.0f32;
+    if stops.last().is_some_and(|last| last.position > 1.) {
+        if can_extend {
+            extent = stops.last().unwrap().position;
+            for stop in &mut stops {
+                stop.position /= extent;
+            }
+        } else {
+            while stops.len() >= 2 && stops[stops.len() - 2].position >= 1. {
+                stops.pop();
+            }
+            let clamped_last = match stops.as_slice() {
+                [.., second_to_last, last] if last.position > 1. => {
+                    Some(GradientStop { color: color_at(1., second_to_last, last), position: 1. })
+                }
+                [only] if only.position > 1. => {
+                    Some(GradientStop { color: only.color, position: 1. })
+                }
+                _ => None,
+            };
+            if let Some(stop) = clamped_last {
+                *stops.last_mut().unwrap() = stop;
+            }
+        }
+    }
+
+    // Make positions strictly increasing: separate duplicates (hard color steps) by the
+    // smallest representable amount, then push back anything that got nudged past 1.
+    let mut previous = f32::NEG_INFINITY;
+    for stop in &mut stops {
+        if stop.position <= previous {
+            stop.position = previous.next_up();
+        }
+        previous = stop.position;
+    }
+    let mut next = 1.0f32.next_up();
+    for stop in stops.iter_mut().rev() {
+        if stop.position >= next {
+            stop.position = next.next_down();
+        }
+        next = stop.position;
+    }
+
+    (Cow::Owned(stops), extent)
+}
+
+#[test]
+fn test_resolve_sanitizes_out_of_range_stops() {
+    // Stops beyond 1 extend the gradient line instead of being clamped.
+    let brush = Brush::LinearGradient(LinearGradientBrush::new(
+        180.,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 2.0, color: Color::from_rgb_u8(0, 0, 255) },
+        ],
+    ));
+    let Some(ResolvedBrush::LinearGradient(gradient)) =
+        resolve_brush(&brush, [100., 50.].into(), ScaleFactor::new(1.0))
+    else {
+        panic!("expected a resolved linear gradient");
+    };
+    assert_eq!(gradient.stops.last().unwrap().position, 1.0);
+    // A 180° gradient runs from the top edge down; the end extends past the shape.
+    assert_eq!(gradient.start.y, 0.);
+    assert_eq!(gradient.end.y, 100.);
+
+    // A conic gradient cannot extend, so out-of-range stops are clamped to the
+    // interpolated color at position 1 instead. Note that ConicGradientBrush::new
+    // already normalizes, so resolving keeps its stops within [0, 1].
+    let brush = Brush::ConicGradient(ConicGradientBrush::new(
+        0.,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 2.0, color: Color::from_rgb_u8(0, 0, 255) },
+        ],
+    ));
+    let Some(ResolvedBrush::ConicGradient(gradient)) =
+        resolve_brush(&brush, [100., 50.].into(), ScaleFactor::new(1.0))
+    else {
+        panic!("expected a resolved conic gradient");
+    };
+    assert!(gradient.stops.iter().all(|stop| (0. ..=1.).contains(&stop.position)));
+    assert_eq!(gradient.center, euclid::point2(50., 25.));
+}
+
+#[test]
+fn test_resolve_makes_stops_strictly_increasing() {
+    let brush = Brush::LinearGradient(LinearGradientBrush::new(
+        0.,
+        [
+            GradientStop { position: 0.5, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 0.5, color: Color::from_rgb_u8(0, 255, 0) },
+            GradientStop { position: 0.2, color: Color::from_rgb_u8(0, 0, 255) },
+        ],
+    ));
+    let Some(ResolvedBrush::LinearGradient(gradient)) =
+        resolve_brush(&brush, [100., 100.].into(), ScaleFactor::new(1.0))
+    else {
+        panic!("expected a resolved linear gradient");
+    };
+    // Sorted and strictly increasing: the duplicate hard step is separated minimally.
+    assert!(gradient.stops.array_windows().all(|[a, b]| a.position < b.position));
+    assert_eq!(gradient.stops[0].color, Color::from_rgb_u8(0, 0, 255));
+}
+
+#[test]
+fn test_resolve_replaces_stops_below_zero() {
+    let brush = Brush::LinearGradient(LinearGradientBrush::new(
+        0.,
+        [
+            GradientStop { position: -1.0, color: Color::from_rgb_u8(0, 0, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(200, 200, 200) },
+        ],
+    ));
+    let Some(ResolvedBrush::LinearGradient(gradient)) =
+        resolve_brush(&brush, [100., 100.].into(), ScaleFactor::new(1.0))
+    else {
+        panic!("expected a resolved linear gradient");
+    };
+    // The first stop is replaced by the interpolated color at position 0.
+    assert_eq!(gradient.stops[0].position, 0.0);
+    assert_eq!(gradient.stops[0].color, Color::from_rgb_u8(100, 100, 100));
+}
+
+#[test]
+fn test_resolve_transparent_brush() {
+    assert_eq!(resolve_brush(&Brush::default(), [100., 100.].into(), ScaleFactor::new(1.0)), None);
+}
+
+#[test]
+fn test_resolve_borrows_canonical_stops() {
+    // Already canonical stops are borrowed from the brush, not copied.
+    let brush = Brush::LinearGradient(LinearGradientBrush::new(
+        90.,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(0, 0, 255) },
+        ],
+    ));
+    let Some(ResolvedBrush::LinearGradient(gradient)) =
+        resolve_brush(&brush, [100., 100.].into(), ScaleFactor::new(1.0))
+    else {
+        panic!("expected a resolved linear gradient");
+    };
+    assert!(matches!(gradient.stops, Cow::Borrowed(_)));
+    assert_eq!(gradient.stops.len(), 2);
+}
+
+#[test]
+#[allow(clippy::float_cmp)] // We want bit-wise equality here
+fn test_linear_gradient_encoding() {
+    let stops: SharedVector<GradientStop> = [
+        GradientStop { position: 0.0, color: Color::from_argb_u8(255, 255, 0, 0) },
+        GradientStop { position: 0.5, color: Color::from_argb_u8(255, 0, 255, 0) },
+        GradientStop { position: 1.0, color: Color::from_argb_u8(255, 0, 0, 255) },
+    ]
+    .into();
+    let grad = LinearGradientBrush::new(256., stops.clone());
+    assert_eq!(grad.angle(), 256.);
+    assert!(grad.stops().eq(stops.iter()));
+}
+
+#[test]
+fn test_conic_gradient_basic() {
+    // Test basic conic gradient with no rotation
+    let grad = ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 0.5, color: Color::from_rgb_u8(0, 255, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 0, 0) },
+        ],
+    );
+    assert_eq!(grad.angle(), 0.0);
+    assert_eq!(grad.stops().count(), 3);
+}
+
+#[test]
+fn test_conic_gradient_with_rotation() {
+    // Test conic gradient with 90 degree rotation
+    let grad = ConicGradientBrush::new(
+        90.0,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 0, 0) },
+        ],
+    );
+    assert_eq!(grad.angle(), 90.0);
+    // After rotation, stops should still be present and sorted
+    assert!(grad.stops().count() >= 2);
+}
+
+#[test]
+fn test_conic_gradient_negative_angle() {
+    // Test with negative angle - should be normalized
+    let grad = ConicGradientBrush::new(
+        -90.0,
+        [GradientStop { position: 0.5, color: Color::from_rgb_u8(255, 0, 0) }],
+    );
+    assert_eq!(grad.angle(), -90.0); // Angle is stored as-is
+    assert!(grad.stops().count() >= 2); // Should have boundary stops added
+}
+
+#[test]
+fn test_conic_gradient_stops_outside_range() {
+    // Test with stops outside [0, 1] range
+    let grad = ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: -0.2, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 0.5, color: Color::from_rgb_u8(0, 255, 0) },
+            GradientStop { position: 1.2, color: Color::from_rgb_u8(0, 0, 255) },
+        ],
+    );
+    // All stops should be within [0, 1] after processing
+    for stop in grad.stops() {
+        assert!(stop.position >= 0.0 && stop.position <= 1.0);
+    }
+}
+
+#[test]
+fn test_conic_gradient_all_stops_below_zero() {
+    // Test edge case: all stops are below 0
+    let grad = ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: -0.5, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: -0.3, color: Color::from_rgb_u8(0, 255, 0) },
+        ],
+    );
+    // Should create valid boundary stops
+    assert!(grad.stops().count() >= 2);
+    // First stop should be at or near 0.0
+    let first = grad.stops().next().unwrap();
+    assert!(first.position >= 0.0 && first.position < 0.1);
+}
+
+#[test]
+fn test_conic_gradient_all_stops_above_one() {
+    // Test edge case: all stops are above 1
+    let grad = ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: 1.2, color: Color::from_rgb_u8(255, 0, 0) },
+            GradientStop { position: 1.5, color: Color::from_rgb_u8(0, 255, 0) },
+        ],
+    );
+    // Should create valid boundary stops
+    assert!(grad.stops().count() >= 2);
+    // Last stop should be at or near 1.0
+    let last = grad.stops().last().unwrap();
+    assert!(last.position > 0.9 && last.position <= 1.0);
+}
+
+#[test]
+fn test_conic_gradient_empty() {
+    // Test edge case: no stops provided
+    let grad = ConicGradientBrush::new(0.0, []);
+    // Should create default transparent stops
+    assert_eq!(grad.stops().count(), 2);
+}
+
+#[test]
+fn test_radial_gradient_preserves_center_on_brighter() {
+    let grad = RadialGradientBrush::new_circle([
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(200, 100, 50) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(50, 200, 100) },
+    ])
+    .with_center(10.0, 20.0)
+    .with_radii(30.0, 15.0);
+    let brighter = Brush::RadialGradient(grad.clone()).brighter(0.5);
+    if let Brush::RadialGradient(b) = brighter {
+        assert_eq!(b.center_x(), 10.0);
+        assert_eq!(b.center_y(), 20.0);
+        assert_eq!(b.radius_x(), 30.0);
+        assert_eq!(b.radius_y(), 15.0);
+    } else {
+        panic!("Expected RadialGradient");
+    }
+}
+
+#[test]
+fn test_radial_gradient_default_center() {
+    let grad = RadialGradientBrush::new_circle([]);
+    assert!(grad.center_x().is_nan());
+    assert!(grad.center_y().is_nan());
+    assert!(grad.is_circle());
+    assert_eq!(grad.center_or_default(100.0, 80.0), (50.0, 40.0));
+    let (rx, ry) = grad.radii_or_default(60.0, 80.0);
+    assert!((rx - 50.0).abs() < 0.01);
+    assert!((ry - 50.0).abs() < 0.01);
+}
+
+#[test]
+fn test_radial_gradient_scaled_explicit_values() {
+    let grad = RadialGradientBrush::new_circle([]).with_center(10.0, 20.0).with_radius(30.0);
+
+    assert_eq!(grad.center_or_default_scaled(200.0, 160.0, 2.0), (20.0, 40.0));
+    assert_eq!(grad.radii_or_default_scaled(200.0, 160.0, 2.0), (60.0, 60.0));
+
+    let grad = RadialGradientBrush::new_circle([]).with_radii(30.0, 15.0);
+    assert_eq!(grad.radii_or_default(60.0, 80.0), (30.0, 15.0));
+    assert_eq!(grad.radii_or_default_scaled(60.0, 80.0, 2.0), (60.0, 30.0));
+}
+
+#[test]
+fn test_radial_gradient_scaled_defaults_use_physical_frame() {
+    let grad = RadialGradientBrush::new_circle([]);
+
+    assert_eq!(grad.center_or_default_scaled(200.0, 160.0, 2.0), (100.0, 80.0));
+    let (rx, ry) = grad.radii_or_default_scaled(120.0, 160.0, 2.0);
+    assert!((rx - 100.0).abs() < 0.01);
+    assert!((ry - 100.0).abs() < 0.01);
+}
+
+#[test]
+fn test_radial_gradient_default_circle_is_farthest_corner() {
+    let grad = RadialGradientBrush::new_circle([]).with_center(0.0, 0.0);
+    let (rx, ry) = grad.radii_or_default(100.0, 100.0);
+    assert!((rx - 100.0 * core::f32::consts::SQRT_2).abs() < 0.01);
+    assert_eq!(rx, ry);
+
+    let grad = RadialGradientBrush::new_circle([]).with_center(50.0, 10.0);
+    let (rx, ry) = grad.radii_or_default_scaled(400.0, 100.0, 2.0);
+    assert!((rx - 300.0f32.hypot(80.0)).abs() < 0.01);
+    assert_eq!(rx, ry);
+}
+
+#[test]
+fn test_radial_gradient_default_ellipse_is_farthest_corner() {
+    let grad = RadialGradientBrush::new_ellipse([]);
+    assert!(!grad.is_circle());
+
+    let (rx, ry) = grad.radii_or_default(200.0, 50.0);
+    assert!((rx - 200.0 / core::f32::consts::SQRT_2).abs() < 0.01);
+    assert!((ry - 50.0 / core::f32::consts::SQRT_2).abs() < 0.01);
+
+    // The farthest sides of an off-center gradient are at 150 and 40.
+    let (rx, ry) = grad.clone().with_center(50.0, 10.0).radii_or_default(200.0, 50.0);
+    assert!((rx - 150.0 * core::f32::consts::SQRT_2).abs() < 0.01);
+    assert!((ry - 40.0 * core::f32::consts::SQRT_2).abs() < 0.01);
+
+    let (rx, ry) = grad.with_center(50.0, 10.0).radii_or_default_scaled(400.0, 100.0, 2.0);
+    assert!((rx - 300.0 * core::f32::consts::SQRT_2).abs() < 0.01);
+    assert!((ry - 80.0 * core::f32::consts::SQRT_2).abs() < 0.01);
+}
+
+#[test]
+fn test_radial_gradient_explicit_radii() {
+    let grad = RadialGradientBrush::new_ellipse([]).with_radius(20.0);
+    assert!(grad.is_circle());
+    assert_eq!(grad.radii_or_default(60.0, 80.0), (20.0, 20.0));
+
+    let grad = RadialGradientBrush::new_circle([]).with_radii(-10.0, 20.0);
+    assert!(!grad.is_circle());
+    assert_eq!(grad.radii_or_default(60.0, 80.0), (RadialGradientBrush::MIN_RADIUS, 20.0));
+
+    assert!(!RadialGradientBrush::new_circle([]).with_radii(20.0, 20.0).is_circle());
+}
+
+#[test]
+fn test_radial_gradient_equality() {
+    let circle = RadialGradientBrush::new_circle([]);
+    let ellipse = RadialGradientBrush::new_ellipse([]);
+    assert_ne!(circle, ellipse);
+    assert_ne!(circle.clone().with_radius(80.0), ellipse.clone().with_radii(80.0, 80.0));
+    assert_ne!(circle.clone().with_radii(80.0, 40.0), circle.with_radii(40.0, 80.0));
+    assert_eq!(ellipse.clone().with_radii(80.0, 40.0), ellipse.with_radii(80.0, 40.0));
+}
+
+#[test]
+fn test_radial_gradient_interpolation_reaches_explicit_metadata() {
+    let source = Brush::RadialGradient(RadialGradientBrush::new_circle([
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+    ]));
+    let target_grad = RadialGradientBrush::new_circle([
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+    ])
+    .with_center(10.0, 20.0)
+    .with_radii(30.0, 15.0);
+    let target = Brush::RadialGradient(target_grad.clone());
+
+    if let Brush::RadialGradient(result) = source.interpolate(&target, 1.0) {
+        assert_eq!(result, target_grad);
+    } else {
+        panic!("Expected RadialGradient");
+    }
+}
+
+#[test]
+fn test_radial_gradient_interpolation_reaches_default_metadata() {
+    let source_grad = RadialGradientBrush::new_circle([
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+    ])
+    .with_center(10.0, 20.0)
+    .with_radii(30.0, 15.0);
+    let source = Brush::RadialGradient(source_grad);
+    let target_grad = RadialGradientBrush::new_ellipse([
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+    ]);
+    let target = Brush::RadialGradient(target_grad.clone());
+
+    if let Brush::RadialGradient(result) = source.interpolate(&target, 1.0) {
+        assert_eq!(result, target_grad);
+    } else {
+        panic!("Expected RadialGradient");
+    }
+}
+
+#[test]
+fn test_radial_gradient_interpolation_keeps_source_metadata_with_fewer_stops() {
+    let stop = |position, v| GradientStop { position, color: Color::from_rgb_u8(v, v, v) };
+    let source = RadialGradientBrush::new_circle([stop(0.0, 0), stop(1.0, 255)])
+        .with_center(10.0, 20.0)
+        .with_radius(30.0);
+    let target = RadialGradientBrush::new_ellipse([stop(0.0, 0), stop(0.5, 128), stop(1.0, 255)]);
+    let interpolate = |t| {
+        let Brush::RadialGradient(result) = Brush::RadialGradient(source.clone())
+            .interpolate(&Brush::RadialGradient(target.clone()), t)
+        else {
+            panic!("Expected RadialGradient");
+        };
+        result
+    };
+
+    let result = interpolate(0.5);
+    assert_eq!((result.center_x(), result.center_y()), (10.0, 20.0));
+    assert_eq!((result.radius_x(), result.radius_y()), (30.0, 30.0));
+    assert!(result.is_circle());
+    assert_eq!(interpolate(1.0), target);
+}
+
+#[test]
+fn test_radial_gradient_interpolates_explicit_radii() {
+    let stops = [
+        GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+        GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+    ];
+    let source = Brush::RadialGradient(RadialGradientBrush::new_circle(stops).with_radius(10.0));
+    let target =
+        Brush::RadialGradient(RadialGradientBrush::new_circle(stops).with_radii(30.0, 50.0));
+
+    let Brush::RadialGradient(result) = source.interpolate(&target, 0.5) else {
+        panic!("Expected RadialGradient");
+    };
+    assert_eq!((result.radius_x(), result.radius_y()), (20.0, 30.0));
+    assert!(!result.is_circle());
+
+    let Brush::RadialGradient(result) = target.interpolate(&source, 0.5) else {
+        panic!("Expected RadialGradient");
+    };
+    assert!(!result.is_circle());
+    let Brush::RadialGradient(result) = target.interpolate(&source, 1.0) else {
+        panic!("Expected RadialGradient");
+    };
+    assert!(result.is_circle());
+}
+
+#[test]
+fn test_conic_gradient_interpolation_reaches_explicit_center() {
+    let source = Brush::ConicGradient(ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+        ],
+    ));
+    let target_grad = ConicGradientBrush::new(
+        0.0,
+        [
+            GradientStop { position: 0.0, color: Color::from_rgb_u8(0, 0, 0) },
+            GradientStop { position: 1.0, color: Color::from_rgb_u8(255, 255, 255) },
+        ],
+    )
+    .with_center(40.0, 50.0);
+    let target = Brush::ConicGradient(target_grad.clone());
+
+    if let Brush::ConicGradient(result) = source.interpolate(&target, 1.0) {
+        assert_eq!(result.center_x(), target_grad.center_x());
+        assert_eq!(result.center_y(), target_grad.center_y());
+    } else {
+        panic!("Expected ConicGradient");
+    }
+}
