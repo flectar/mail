@@ -2511,6 +2511,19 @@ pub struct ScheduledSend {
     pub error: Option<String>,
 }
 
+/// What stopping a draft's scheduled send did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelledSend {
+    /// No send waited.
+    NotScheduled,
+    /// The send is cancelled.
+    Cancelled,
+    /// The send is cancelled here, but another of the user's devices may
+    /// still send it: it holds the send, may be sending it right now, or
+    /// can't hear of the cancel yet.
+    MayStillGoOut,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSendResult {

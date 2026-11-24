@@ -23,7 +23,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
@@ -49,14 +49,21 @@ pub(crate) const MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// point where the send can still stop without delivering anything.
 const PART_BYTES: usize = 64 * 1024;
 
+/// What a send does just before the end of its message goes out, such as
+/// noting that from there the server may take it (see [`send_raw_before`]).
+/// The end waits for it, and if it fails the end never goes out, so the
+/// server discards the unfinished message.
+pub type BeforeEnd = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+
 /// The send's limits, shared with the stream it writes through.
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Gate {
     /// When the whole message must have gone out by. Past it the stream
     /// writes nothing more, so a message not yet finished never is, and the
     /// server discards it (RFC 5321 section 4.1.1.4).
     deadline: Option<Instant>,
-    /// A write was turned away at the deadline.
+    /// A write was turned away: at the deadline, or once `before_end`
+    /// failed.
     refused: AtomicBool,
     /// The whole message went out and only its end-of-data marker follows:
     /// from here the server may take it, and its reply may take as long as
@@ -64,13 +71,22 @@ struct Gate {
     ended: AtomicBool,
     /// The account's server timeout, which stretches the idle wait (#252).
     timeout: Duration,
+    /// Runs before the end-of-data marker goes out; taken once it ran.
+    before_end: std::sync::Mutex<Option<BeforeEnd>>,
+    /// Why `before_end` failed, which stopped the message before its end.
+    stopped: std::sync::Mutex<Option<CoreError>>,
 }
 
 impl Gate {
-    fn until(deadline: Option<Instant>, timeout: Duration) -> Arc<Self> {
+    fn until(
+        deadline: Option<Instant>,
+        timeout: Duration,
+        before_end: Option<BeforeEnd>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             deadline,
             timeout,
+            before_end: std::sync::Mutex::new(before_end),
             ..Self::default()
         })
     }
@@ -82,6 +98,30 @@ impl Gate {
         } else {
             idle
         }
+    }
+
+    /// Run `before_end`, once, as the end-of-data marker is about to go
+    /// out. Ready with false when it failed: then nothing more goes out.
+    fn poll_before_end(&self, context: &mut Context<'_>) -> Poll<bool> {
+        let mut before_end = self
+            .before_end
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(note) = before_end.as_mut() {
+            let result = ready!(note.as_mut().poll(context));
+            *before_end = None;
+            if let Err(error) = result {
+                *self.stopped() = Some(error);
+                self.refused.store(true, Ordering::Release);
+            }
+        }
+        Poll::Ready(self.stopped().is_none())
+    }
+
+    fn stopped(&self) -> std::sync::MutexGuard<'_, Option<CoreError>> {
+        self.stopped
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -216,6 +256,12 @@ impl AsyncWrite for SmtpStream {
             this.gate.refused.store(true, Ordering::Release);
             return Poll::Ready(Err(std::io::Error::other(
                 "the time to send this message ended before it was complete",
+            )));
+        }
+        // The end-of-data marker is next: what comes before it runs first.
+        if this.gate.ended.load(Ordering::Acquire) && !ready!(this.gate.poll_before_end(context)) {
+            return Poll::Ready(Err(std::io::Error::other(
+                "the message was stopped before its end",
             )));
         }
         let poll = Pin::new(&mut this.inner).poll_write(context, buffer);
@@ -502,6 +548,8 @@ pub async fn send_raw(
 /// milliseconds since the epoch on this device's clock. A message not
 /// complete by then is never finished, so it doesn't go out: another of the
 /// user's devices may then send it without delivering a second copy.
+/// `before_end` runs just before the end of the message goes out, from
+/// where the server may take it.
 pub async fn send_raw_before(
     cfg: &AccountConfig,
     auth: &SmtpAuth,
@@ -509,20 +557,15 @@ pub async fn send_raw_before(
     recipients: &[String],
     raw: &[u8],
     deadline: Option<i64>,
+    before_end: BeforeEnd,
 ) -> Result<()> {
     let deadline = deadline.map(|deadline| {
         let left = deadline.saturating_sub(crate::models::now_ms()).max(0);
         Instant::now() + Duration::from_millis(u64::try_from(left).unwrap_or(0))
     });
-    send_message(
-        cfg,
-        auth,
-        Some(from),
-        recipients,
-        raw,
-        Gate::until(deadline, cfg.settings.connection.server_timeout()),
-    )
-    .await
+    let timeout = cfg.settings.connection.server_timeout();
+    let gate = Gate::until(deadline, timeout, Some(before_end));
+    send_message(cfg, auth, Some(from), recipients, raw, gate).await
 }
 
 /// Send a fully built message with `from` as the envelope sender, or the
@@ -535,7 +578,7 @@ pub async fn send_raw_from(
     recipients: &[String],
     raw: &[u8],
 ) -> Result<()> {
-    let gate = Gate::until(None, cfg.settings.connection.server_timeout());
+    let gate = Gate::until(None, cfg.settings.connection.server_timeout(), None);
     send_message(cfg, auth, from, recipients, raw, gate).await
 }
 
@@ -610,7 +653,7 @@ impl<'a> Iterator for Parts<'a> {
 /// does a refusing reply at the end. Only a reply that never comes after the
 /// marker leaves it open (RFC 5321 section 4.5.3.2.6); that is
 /// [`CoreError::SendUncertain`], which must not be retried as if nothing went
-/// out.
+/// out. The marker goes out only once the gate's `before_end` ran.
 async fn submit(
     cfg: &AccountConfig,
     connection: &mut AsyncSmtpConnection,
@@ -698,12 +741,12 @@ async fn submit(
     match connection.message_iter(parts).await {
         Ok(reply) if reply.code().severity == Severity::PositiveCompletion => Ok(()),
         Ok(reply) => Err(uncertain(format!("it answered with {}", reply.code()))),
-        // The message never went out whole.
+        // The message never went out whole, or its end never did.
         Err(error)
             if !gate.ended.load(Ordering::Acquire) || gate.refused.load(Ordering::Acquire) =>
         {
             connection.abort().await;
-            Err(not_sent(error))
+            Err(gate.stopped().take().unwrap_or_else(|| not_sent(error)))
         }
         // The server refused the finished message.
         Err(error) if error.is_transient() || error.is_permanent() => Err(not_sent(error)),
@@ -713,7 +756,7 @@ async fn submit(
 
 /// Cheap connectivity/auth probe used by test_connection.
 pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()> {
-    let gate = Gate::until(None, cfg.settings.connection.server_timeout());
+    let gate = Gate::until(None, cfg.settings.connection.server_timeout(), None);
     let mut connection = connect(cfg, auth, gate).await?;
     connection
         .command(Noop)
