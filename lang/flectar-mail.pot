@@ -12,32 +12,38 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: ui/account-discovery.slint:31
+#: ui/account-discovery.slint:34
 msgid "Looking up the server settings for {}…"
 msgstr ""
 
-#: ui/account-discovery.slint:32
+#: ui/account-discovery.slint:35
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
 
-#: ui/account-discovery.slint:33
+#: ui/account-discovery.slint:36
+msgid ""
+"{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
+"can be forged, so check the server names before connecting."
+msgstr ""
+
+#: ui/account-discovery.slint:37
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
 
-#: ui/account-discovery.slint:34
+#: ui/account-discovery.slint:38
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
 
-#: ui/account-discovery.slint:35
+#: ui/account-discovery.slint:39
 msgid "Server settings are filled in from {}'s own configuration."
 msgstr ""
 
-#: ui/account-discovery.slint:43
+#: ui/account-discovery.slint:47
 msgid "I checked these servers and trust them"
 msgstr ""
 

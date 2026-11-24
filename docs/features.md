@@ -235,12 +235,15 @@ mail.
 When you type the address of a new IMAP, POP3 or JMAP account, Flectar Mail
 looks up its servers. It asks the address's domain for its own configuration
 file, over HTTPS first and then over plain HTTP, and otherwise looks the domain
-up in the public provider database at autoconfig.thunderbird.net. Only the
-domain is sent, never the whole address. Servers it finds fill in the form as
-long as you haven't changed them, and the form says where they came from.
-Settings that came over plain HTTP could have been changed on the way, so
-**Connect account** waits until you check the server names and tick **I checked
-these servers and trust them**. Your other accounts on the same domain, and
+up in the public provider database at autoconfig.thunderbird.net. When neither
+knows the domain, it asks your device's DNS which server takes the domain's
+mail, and looks up the provider of that server the same way. That step is
+skipped while a proxy is set, because DNS questions can't go through one. Only
+the domain is sent, never the whole address. Servers it finds fill in the form
+as long as you haven't changed them, and the form says where they came from.
+Settings that came over plain HTTP or through DNS could have been changed on
+the way, so **Connect account** waits until you check the server names and tick
+**I checked these servers and trust them**. Your other accounts on the same domain, and
 Gmail's servers for a Gmail address, fill in the form without a lookup.
 
 ## Advanced account settings

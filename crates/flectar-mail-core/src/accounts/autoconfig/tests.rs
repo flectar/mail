@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use super::{
-    DavServer, Discovery, Fetch, Lookup, MailServer, Source, discover_with, lookups, parse,
-    split_address,
+    DavServer, Discovery, Fetch, Lookup, MailHostOf, MailServer, Source, discover_with, lookups,
+    mail_host_domains, mail_host_lookups, parse, split_address,
 };
 use crate::models::{ConnectionSecurity, MailProtocol};
 
@@ -257,7 +257,9 @@ async fn a_higher_priority_file_wins_even_when_it_answers_later() {
             DRAFT_FILE,
         ),
     ]);
-    let found = discover_with("ada@example.com", &fetch).await.unwrap();
+    let found = discover_with("ada@example.com", &fetch, &no_mail_host())
+        .await
+        .unwrap();
     assert_eq!(found.source, Source::Provider);
     assert!(found.trusted);
     assert_eq!(found.imap.unwrap().host, "imap.example.com");
@@ -270,7 +272,9 @@ async fn files_over_plain_http_are_untrusted_and_rank_below_https() {
         10,
         PROVIDER_FILE,
     )]);
-    let found = discover_with("ada@example.com", &fetch).await.unwrap();
+    let found = discover_with("ada@example.com", &fetch, &no_mail_host())
+        .await
+        .unwrap();
     assert_eq!(found.source, Source::Provider);
     assert!(!found.trusted, "HTTP can be altered on the way");
 
@@ -286,7 +290,9 @@ async fn files_over_plain_http_are_untrusted_and_rank_below_https() {
             DRAFT_FILE,
         ),
     ]);
-    let found = discover_with("ada@example.com", &fetch).await.unwrap();
+    let found = discover_with("ada@example.com", &fetch, &no_mail_host())
+        .await
+        .unwrap();
     assert!(found.trusted);
     assert!(found.jmap.is_some());
 }
@@ -305,11 +311,134 @@ async fn the_database_is_used_when_the_provider_has_no_file() {
             PROVIDER_FILE,
         ),
     ]);
-    let found = discover_with("ada@example.com", &fetch).await.unwrap();
+    let found = discover_with("ada@example.com", &fetch, &no_mail_host())
+        .await
+        .unwrap();
     assert_eq!(found.source, Source::Database);
     assert!(found.trusted);
 
     let fetch = fake(Vec::new());
-    assert_eq!(discover_with("ada@example.com", &fetch).await, None);
-    assert_eq!(discover_with("not an address", &fetch).await, None);
+    assert_eq!(
+        discover_with("ada@example.com", &fetch, &no_mail_host()).await,
+        None
+    );
+    assert_eq!(
+        discover_with("not an address", &fetch, &no_mail_host()).await,
+        None
+    );
+}
+
+fn no_mail_host() -> MailHostOf<'static> {
+    Box::new(|_| Box::pin(async { None }))
+}
+
+/// A resolver that names `host` as every domain's mail server, and counts
+/// the questions.
+fn mail_host(
+    host: &'static str,
+    asked: Arc<std::sync::atomic::AtomicUsize>,
+) -> MailHostOf<'static> {
+    Box::new(move |_| {
+        asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move { Some(host.to_owned()) })
+    })
+}
+
+#[test]
+fn mail_servers_are_looked_up_by_their_registrable_domain() {
+    let domains = |host| mail_host_domains(host).unwrap();
+    assert_eq!(
+        domains("aspmx.l.google.com"),
+        ("l.google.com".into(), "google.com".into())
+    );
+    assert_eq!(
+        domains("mx.example.co.uk"),
+        ("example.co.uk".into(), "example.co.uk".into())
+    );
+    assert_eq!(
+        domains("mx.example.com"),
+        ("example.com".into(), "example.com".into())
+    );
+    // A host that is itself a public suffix has no registrable domain.
+    assert_eq!(mail_host_domains("co.uk"), None);
+
+    let urls = mail_host_lookups("premium.europe.example.com", "example.com")
+        .into_iter()
+        .map(|lookup| {
+            assert_eq!(lookup.source, Source::MailHost);
+            assert!(!lookup.trusted(), "DNS answers can be forged");
+            lookup.url
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        urls,
+        [
+            "https://autoconfig.premium.europe.example.com/.well-known/client-autoconfig.xml",
+            "https://autoconfig.example.com/.well-known/client-autoconfig.xml",
+            "https://autoconfig.premium.europe.example.com/mail/config-v1.1.xml",
+            "https://autoconfig.example.com/mail/config-v1.1.xml",
+            "https://autoconfig.thunderbird.net/v1.1/premium.europe.example.com",
+            "https://autoconfig.thunderbird.net/v1.1/example.com",
+        ]
+    );
+    assert_eq!(mail_host_lookups("example.com", "example.com").len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_domain_hosted_elsewhere_gets_its_host_s_settings_untrusted() {
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let fetch = fake(vec![(
+        "https://autoconfig.thunderbird.net/v1.1/google.com",
+        10,
+        PROVIDER_FILE,
+    )]);
+    let found = discover_with(
+        "ada@family.example",
+        &fetch,
+        &mail_host("aspmx.l.google.com", asked.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.source, Source::MailHost);
+    assert!(!found.trusted);
+    assert_eq!(found.mail_host.as_deref(), Some("google.com"));
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn dns_is_asked_only_when_the_domain_itself_has_nothing() {
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let fetch = fake(vec![
+        (
+            "https://autoconfig.example.com/mail/config-v1.1.xml",
+            10,
+            PROVIDER_FILE,
+        ),
+        (
+            "https://autoconfig.thunderbird.net/v1.1/hoster.example",
+            10,
+            DRAFT_FILE,
+        ),
+    ]);
+    let found = discover_with(
+        "ada@example.com",
+        &fetch,
+        &mail_host("mx.hoster.example", asked.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.source, Source::Provider);
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // A mail server under the address's own domain adds nothing to look up:
+    // the domain's own lookups already asked there.
+    let fetch = fake(Vec::new());
+    let found = discover_with(
+        "ada@example.net",
+        &fetch,
+        &mail_host("mx.example.net", asked.clone()),
+    )
+    .await;
+    assert_eq!(found, None);
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

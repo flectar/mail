@@ -5,9 +5,14 @@
 //! once, and a result is used only when every lookup ranked above it has
 //! failed, as Thunderbird and Thunderbird for Android do.
 //!
-//! A file fetched over plain HTTP could have been altered on the way, so its
-//! result is marked untrusted and the user confirms it before connecting
-//! (the draft's sections 5.1 and 7.3).
+//! When neither has the domain, the domain's mail server (MX) points to the
+//! provider that hosts its mail, and that provider's configuration is looked
+//! up the same way (the draft's section 4.3).
+//!
+//! A file fetched over plain HTTP could have been altered on the way, and a
+//! DNS answer could be forged, so such results are marked untrusted and the
+//! user confirms them before connecting (the draft's sections 5.1, 7.2 and
+//! 7.3).
 
 mod parse;
 #[cfg(test)]
@@ -18,7 +23,8 @@ use std::{future::Future, pin::Pin, time::Duration};
 use futures::{StreamExt, stream::FuturesUnordered};
 
 use crate::models::{ConnectionSecurity, MailProtocol};
-use crate::net::proxy::{self, Owner};
+use crate::net::dns;
+use crate::net::proxy::{self, Owner, Route};
 
 /// Thunderbird's public provider database, as Thunderbird for Android, KMail
 /// and Evolution query it.
@@ -62,15 +68,22 @@ pub enum Source {
     Provider,
     /// Thunderbird's provider database.
     Database,
+    /// The configuration of the provider whose server takes the domain's
+    /// mail, found through the domain's MX record.
+    MailHost,
 }
 
 /// The settings found for an email address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Discovery {
     pub source: Source,
-    /// False when the file came over plain HTTP, so it could have been
-    /// altered on the way. The user confirms such settings first.
+    /// False when the file came over plain HTTP or was found through DNS,
+    /// so it could have been altered on the way. The user confirms such
+    /// settings first.
     pub trusted: bool,
+    /// For `Source::MailHost`, the registrable domain of the server that
+    /// takes the address's mail.
+    pub mail_host: Option<String>,
     pub provider_name: Option<String>,
     pub imap: Option<MailServer>,
     pub pop3: Option<MailServer>,
@@ -94,6 +107,7 @@ impl Discovery {
         let discovery = Self {
             source,
             trusted,
+            mail_host: None,
             provider_name: config.provider_name,
             imap: preferred(config.imap),
             pop3: preferred(config.pop3),
@@ -127,7 +141,7 @@ pub(crate) struct Lookup {
 
 impl Lookup {
     fn trusted(&self) -> bool {
-        self.url.starts_with("https://")
+        self.source != Source::MailHost && self.url.starts_with("https://")
     }
 }
 
@@ -162,9 +176,66 @@ pub(crate) fn lookups(domain: &str) -> Vec<Lookup> {
     ]
 }
 
+/// Where to look for the configuration of the provider whose mail server is
+/// under `full` (the server's name without its first label) and `base` (its
+/// registrable domain): the draft's URLs 3.1 to 3.6, all over HTTPS.
+pub(crate) fn mail_host_lookups(full: &str, base: &str) -> Vec<Lookup> {
+    let lookup = |url: String, timeout| Lookup {
+        url,
+        source: Source::MailHost,
+        timeout,
+    };
+    let mut lookups = Vec::new();
+    for path in [".well-known/client-autoconfig.xml", "mail/config-v1.1.xml"] {
+        for domain in [full, base] {
+            lookups.push(lookup(
+                format!("https://autoconfig.{domain}/{path}"),
+                PROVIDER_TIMEOUT,
+            ));
+        }
+    }
+    for domain in [full, base] {
+        lookups.push(lookup(format!("{ISPDB}{domain}"), DATABASE_TIMEOUT));
+    }
+    lookups.dedup();
+    lookups
+}
+
+/// The domains to look up for the mail server `host`: the host without its
+/// first label, when that is longer than the registrable domain, and the
+/// registrable domain, which the Public Suffix List gives, so a lookup
+/// never goes to a name under a public suffix such as `co.uk`.
+pub(crate) fn mail_host_domains(host: &str) -> Option<(String, String)> {
+    let base = psl::domain_str(host)?.to_owned();
+    let full = host
+        .split_once('.')
+        .map(|(_, rest)| rest)
+        .filter(|rest| rest.len() > base.len())
+        .unwrap_or(&base)
+        .to_owned();
+    Some((full, base))
+}
+
+/// Whether the domain's mail server may be asked of the device's DNS. A
+/// proxy can't answer MX questions, so with one in the way the lookup would
+/// reveal the domain outside it, and the step is skipped.
+fn dns_allowed(domain: &str) -> bool {
+    let direct_mail = proxy::mail_routes(Owner::App, "imaps", domain, 993)
+        .iter()
+        .all(|route| matches!(route, Route::Direct));
+    let direct_web = url::Url::parse(&format!("https://autoconfig.{domain}/"))
+        .is_ok_and(|url| proxy::http_proxy(Owner::App, &url).is_none());
+    direct_mail && direct_web
+}
+
 /// Fetches one configuration file, or `None` when there isn't one there.
 pub(crate) type Fetch<'a> = Box<
     dyn Fn(Lookup) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> + Send + Sync + 'a,
+>;
+
+/// The mail server a domain names in DNS, or `None`.
+pub(crate) type MailHostOf<'a> = Box<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> + Send + Sync + 'a,
 >;
 
 /// The settings for `address`, or `None` when no lookup finds a usable file.
@@ -174,17 +245,51 @@ pub async fn discover(address: &str) -> Option<Discovery> {
         let client = client.clone();
         Box::pin(async move { fetch_file(&client, &lookup).await })
     });
-    discover_with(address, &fetch).await
+    let mail_host: MailHostOf<'_> = Box::new(|domain| {
+        Box::pin(async move {
+            if dns_allowed(&domain) {
+                dns::mail_host(&domain).await
+            } else {
+                None
+            }
+        })
+    });
+    discover_with(address, &fetch, &mail_host).await
 }
 
-pub(crate) async fn discover_with(address: &str, fetch: &Fetch<'_>) -> Option<Discovery> {
+pub(crate) async fn discover_with(
+    address: &str,
+    fetch: &Fetch<'_>,
+    mail_host: &MailHostOf<'_>,
+) -> Option<Discovery> {
     let (local_part, domain) = split_address(address)?;
     let placeholders = parse::Placeholders {
         address: address.trim(),
         local_part: &local_part,
         domain: &domain,
     };
-    let lookups = lookups(&domain);
+    if let Some(found) = first_found(&lookups(&domain), fetch, &placeholders).await {
+        return Some(found);
+    }
+    // Only when nothing above was found (the draft's section 4.3).
+    let host = mail_host(domain.clone()).await?;
+    let (full, base) = mail_host_domains(&host)?;
+    // The domain's own lookups already covered a server under it.
+    if base == domain {
+        return None;
+    }
+    let mut found = first_found(&mail_host_lookups(&full, &base), fetch, &placeholders).await?;
+    found.mail_host = Some(base);
+    Some(found)
+}
+
+/// The best file `lookups` find: a result counts once every lookup ranked
+/// above it has failed.
+async fn first_found(
+    lookups: &[Lookup],
+    fetch: &Fetch<'_>,
+    placeholders: &parse::Placeholders<'_>,
+) -> Option<Discovery> {
     let mut results: Vec<Option<Option<Discovery>>> = vec![None; lookups.len()];
     let mut pending = lookups
         .iter()
@@ -193,7 +298,6 @@ pub(crate) async fn discover_with(address: &str, fetch: &Fetch<'_>) -> Option<Di
         .map(|(index, lookup)| {
             let trusted = lookup.trusted();
             let source = lookup.source;
-            let placeholders = &placeholders;
             async move {
                 let found = fetch(lookup)
                     .await

@@ -91,6 +91,9 @@ tempfile = "3"
 ring = "0.17"
 # Reads settings from Thunderbird profile exports; flate2 is already linked.
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The registrable domain of a mail server, for autoconfig's MX step: the
+# Public Suffix List keeps it from looking under a suffix such as co.uk.
+psl = "2"
 
 # Used only by build.rs, which cargo-machete does not scan.
 [package.metadata.cargo-machete]
@@ -128,7 +131,12 @@ dbus-secret-service = "4"
 # connect_tcp turns off SYN resends for loopback connections and checks the
 # Windows build first.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Networking_WinSock", "Win32_System_IO", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_NetworkManagement_Dns", "Win32_Networking_WinSock", "Win32_System_IO", "Win32_System_SystemInformation"] }
+
+# net::dns asks the system resolver through the C library (res_query,
+# android_res_nquery, DNS-SD) and needs poll and dlsym.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(all(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")))'.dev-dependencies]
 dbus = "0.9"
