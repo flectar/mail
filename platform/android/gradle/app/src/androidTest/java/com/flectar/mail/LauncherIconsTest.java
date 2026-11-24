@@ -1,6 +1,7 @@
 package com.flectar.mail;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.NativeActivity;
@@ -47,6 +48,26 @@ public final class LauncherIconsTest {
     @After
     public void restoreDefault() {
         LauncherIcons.choose(context, "orange");
+    }
+
+    /**
+     * A screen the app opens over itself, such as the document picker, isn't
+     * leaving it. Android closes the task opened from a launcher entry that
+     * is turned off, picker and all, so the icon changes once the user leaves.
+     */
+    @Test
+    public void theChosenIconWaitsUntilTheUserLeavesTheApp() {
+        LauncherIconChoice.inFront();
+        LauncherIconChoice.takeOnStop(true);
+        LauncherIconChoice.choose("graphite");
+        LauncherIconChoice.openingOwnScreen();
+        assertNull("not under the app's own screen", LauncherIconChoice.takeOnStop(true));
+        LauncherIconChoice.inFront();
+        assertNull("not as the screen goes off", LauncherIconChoice.takeOnStop(false));
+        assertEquals("graphite", LauncherIconChoice.takeOnStop(true));
+        assertNull("only once", LauncherIconChoice.takeOnStop(true));
+        LauncherIconChoice.choose("future");
+        assertNull("not for icons without an entry", LauncherIconChoice.takeOnStop(true));
     }
 
     @Test

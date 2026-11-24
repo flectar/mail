@@ -2,7 +2,7 @@
 
 Every published APK uses `com.flectar.mail` and the certificate pinned in
 `platform/android/app-signing-certificate.sha256`. This includes alpha, beta,
-release-candidate, and stable versions, starting with alpha 8. Keep the original
+release-candidate, and stable versions, starting with beta 1. Keep the original
 private key **and certificate** for the lifetime of this update path. Alpha 6
 and alpha 7 used different identities and cannot update to this one.
 
@@ -110,7 +110,7 @@ major × 100,000,000 + minor × 1,000,000 + patch × 10,000 + channel
 channel: alpha.N = N; beta.N = 1,000 + N; rc.N = 2,000 + N; stable = 9,999
 ```
 
-For example, `0.1.0-alpha.8` is `1000008` and `0.1.0` is `1009999`.
+For example, `0.1.0-beta.1` is `1001001` and `0.1.0` is `1009999`.
 The supported ranges are major 0–20, minor and patch 0–99, and prerelease
 number 1–999; values outside these ranges fail rather than collide. Every
 released version must be greater than the previous release on the update path.

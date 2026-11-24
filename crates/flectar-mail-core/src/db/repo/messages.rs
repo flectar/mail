@@ -503,6 +503,27 @@ pub fn mark_receipt_handled(conn: &Connection, id: i64) -> Result<bool> {
 
 /// A message given a UID is linked to the server and no longer waits to be
 /// matched with its copy there.
+/// Of `ids`, each message's From address, and whether the receiving server
+/// confirmed it (its Authentication-Results), which calendar changes the
+/// message carries need.
+pub fn senders(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, (String, bool)>> {
+    let mut statement =
+        conn.prepare("SELECT from_addr, sender_verification != '' FROM messages WHERE id = ?1")?;
+    let mut senders = std::collections::HashMap::new();
+    for &id in ids {
+        if let Some(sender) = statement
+            .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?
+        {
+            senders.insert(id, sender);
+        }
+    }
+    Ok(senders)
+}
+
 /// Of `ids`, the messages from people the user knows: someone they have
 /// written to or keep in their address book, when the receiving server
 /// confirmed the sender (its Authentication-Results), since a From address
@@ -1081,6 +1102,83 @@ pub fn fill_list_headers(
     Ok(())
 }
 
+/// How many incoming messages an account must have before its server's own
+/// Authentication-Results can be told apart from a sender's.
+const STAMPING_SAMPLE: i64 = 20;
+
+/// Count an incoming message of the account toward whether its server
+/// stamps the mail it receives with its own Authentication-Results.
+pub fn note_authentication_results(
+    conn: &Connection,
+    account_id: i64,
+    stamped: bool,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO account_authentication (account_id, messages, stamped) VALUES (?1, 1, ?2)
+         ON CONFLICT(account_id) DO UPDATE SET
+            messages = messages + 1,
+            stamped = stamped + excluded.stamped",
+        params![account_id, i64::from(stamped)],
+    )?;
+    Ok(())
+}
+
+/// Whether the account's server stamps the mail it receives with its own
+/// Authentication-Results, as nearly every incoming message shows. Its field
+/// then sits on top, above any the sender wrote. A server that adds none
+/// leaves the sender's on top, so nothing in it can be trusted: RFC 8601
+/// wants a reader to trust only the results of servers it knows (sections 5
+/// and 7.1).
+pub fn trusts_authentication_results(conn: &Connection, account_id: i64) -> Result<bool> {
+    let counts: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT messages, stamped FROM account_authentication WHERE account_id = ?1",
+            [account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(counts.is_some_and(|(messages, stamped)| {
+        messages >= STAMPING_SAMPLE && stamped * 5 >= messages * 4
+    }))
+}
+
+/// `verification` as far as the account's server vouches for it.
+pub fn vouched(
+    conn: &Connection,
+    account_id: i64,
+    verification: SenderVerification,
+) -> Result<SenderVerification> {
+    Ok(
+        if verification == SenderVerification::None
+            || trusts_authentication_results(conn, account_id)?
+        {
+            verification
+        } else {
+            SenderVerification::None
+        },
+    )
+}
+
+/// `verification` as far as the server of message `id`'s account vouches
+/// for it.
+pub fn vouched_for_message(
+    conn: &Connection,
+    id: i64,
+    verification: SenderVerification,
+) -> Result<SenderVerification> {
+    let account_id: Option<i64> = conn
+        .query_row(
+            "SELECT account_id FROM messages WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match account_id {
+        Some(account_id) => vouched(conn, account_id, verification),
+        None => Ok(SenderVerification::None),
+    }
+}
+
 pub fn set_sender_verification(
     conn: &Connection,
     id: i64,
@@ -1415,6 +1513,10 @@ fn receipt_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<Rece
         && row.get::<_, i64>("is_outgoing")? == 0
         && row.get::<_, i64>("is_draft")? == 0
         && !row.get::<_, bool>("in_spam")?
+        // Mail the user deleted, or from someone they blocked, tells its
+        // sender nothing.
+        && !row.get::<_, bool>("in_trash")?
+        && !row.get::<_, bool>("sender_blocked")?
         // Lists, newsletters, robots and reports: a receipt would only tell a
         // mass sender, or no one, that the address reads its mail.
         && row.get::<_, i64>("is_automated")? == 0;
@@ -1469,6 +1571,18 @@ fn drop_unanswerable_receipt_requests(
                 .any(|address| addresses.contains(&address.email))
         }) {
             detail.receipt_request = None;
+            continue;
+        }
+        // A copy the user got without being in To or Cc, as a Bcc copy is,
+        // asks first. A receipt would tell the sender they received it, which
+        // the other recipients weren't meant to know.
+        let addressed = detail.to.iter().chain(&detail.cc).any(|address| {
+            addresses
+                .as_ref()
+                .is_some_and(|mine| mine.contains(&address.email))
+        });
+        if !addressed && let Some(request) = &mut detail.receipt_request {
+            request.needs_confirmation = true;
         }
     }
     Ok(())
@@ -1513,6 +1627,9 @@ const DETAIL_MESSAGE_COLS: &str = "
     EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'spam')
         OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
                    WHERE mf.message_id = m.id AND f.role = 'spam') AS in_spam,
+    EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = 'trash')
+        OR EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+                   WHERE mf.message_id = m.id AND f.role = 'trash') AS in_trash,
     EXISTS (SELECT 1 FROM blocked_senders b WHERE b.address = LOWER(m.from_addr))
         AS sender_blocked";
 
@@ -1522,12 +1639,11 @@ fn attachment_meta_from_row(
 ) -> rusqlite::Result<AttachmentMeta> {
     Ok(AttachmentMeta {
         id: row.get(first_col)?,
-        // Decode RFC 2047 encoded-words at read time so rows synced before the
-        // BODYSTRUCTURE decode fix still display a readable name (idempotent for
-        // already-clean values).
+        // Cleaned at read time, so rows stored by older versions show the
+        // same name as new ones.
         filename: row
             .get::<_, Option<String>>(first_col + 1)?
-            .map(|name| crate::mime::decode_encoded_words(&name)),
+            .map(|name| crate::mime::shown_attachment_name(&name)),
         mime_type: row.get(first_col + 2)?,
         size: row.get(first_col + 3)?,
         is_inline: row.get::<_, i64>(first_col + 4)? != 0,
@@ -1617,17 +1733,27 @@ pub fn latest_in_thread(conn: &Connection, thread_id: i64) -> Result<Option<i64>
         .optional()?)
 }
 
-/// The folders `message_id` is in, as mail lists show it: its folder, and for
-/// Gmail any of its labels.
-pub fn folder_ids(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT folder_id FROM messages WHERE id = ?1 AND folder_id IS NOT NULL
+/// Whether folder `f` decides what an AI agent may read of message `m`. Every
+/// folder does except Gmail's All Mail: every Gmail message is in it, Spam
+/// and Trash included, so it can neither show a message nor hide one.
+pub(crate) const DECIDES_FOR_AGENTS: &str = "NOT (COALESCE(f.role, '') = 'all'
+     AND EXISTS (SELECT 1 FROM accounts fa
+                 WHERE fa.id = m.account_id AND fa.provider = 'gmail'))";
+
+/// The folders that decide whether an AI agent may read `message_id`: its
+/// folder and every other folder or label it's in, Gmail's All Mail aside.
+/// An agent may read the message only when it may read each of them.
+pub fn agent_folder_ids(conn: &Connection, message_id: i64) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT f.id FROM messages m JOIN folders f ON f.id = m.folder_id
+         WHERE m.id = ?1 AND {DECIDES_FOR_AGENTS}
          UNION
-         SELECT mf.folder_id FROM message_folders mf
-         JOIN messages m ON m.id = mf.message_id
-         JOIN accounts a ON a.id = m.account_id AND a.provider = 'gmail'
-         WHERE mf.message_id = ?1",
-    )?;
+         SELECT f.id FROM messages m
+         JOIN message_folders mf ON mf.message_id = m.id
+         JOIN folders f ON f.id = mf.folder_id
+         WHERE m.id = ?1 AND {DECIDES_FOR_AGENTS}
+         ORDER BY 1"
+    ))?;
     let ids = stmt
         .query_map(params![message_id], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
@@ -1884,6 +2010,34 @@ fn missing_bodies_at(
 mod tests {
     use super::*;
     use crate::db::{repo::sync_failures, testutil};
+
+    #[test]
+    fn a_server_vouches_for_senders_once_it_stamps_its_mail() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let domain = SenderVerification::Domain;
+        assert_eq!(vouched(&c, 1, domain).unwrap(), SenderVerification::None);
+        for _ in 0..19 {
+            note_authentication_results(&c, 1, true).unwrap();
+        }
+        assert_eq!(
+            vouched(&c, 1, domain).unwrap(),
+            SenderVerification::None,
+            "too little mail to tell"
+        );
+        note_authentication_results(&c, 1, true).unwrap();
+        assert_eq!(vouched(&c, 1, domain).unwrap(), domain);
+        // On a server that leaves much of its mail without results of its
+        // own, the topmost field may be the sender's.
+        for _ in 0..10 {
+            note_authentication_results(&c, 1, false).unwrap();
+        }
+        assert_eq!(vouched(&c, 1, domain).unwrap(), SenderVerification::None);
+        assert_eq!(
+            vouched(&c, 1, SenderVerification::None).unwrap(),
+            SenderVerification::None
+        );
+    }
 
     /// The attachment to download ahead of time is the newest mail's that
     /// hasn't downloaded, inside the history, not too large, and not one

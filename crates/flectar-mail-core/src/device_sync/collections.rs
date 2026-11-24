@@ -5,7 +5,8 @@
 //! (their record ids derive from their key, so two devices that block the
 //! same sender write the same record), templates, snoozes, scheduled sends
 //! and reply reminders are records under their own sync id, and each device
-//! describes itself in a `device` record under its own device id.
+//! describes itself in a `device` record under its own device id. Passwords,
+//! sign-ins and app keys travel sealed (`sign_ins`, `app_keys`).
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -30,6 +31,7 @@ pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
 pub(crate) const SIGN_IN: &str = "signin";
 pub(crate) const BLOCK: &str = "block";
+pub(crate) const APP_KEYS: &str = "appkeys";
 
 /// The largest template body that syncs.
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
@@ -48,7 +50,7 @@ const MAX_BODY_BYTES: usize = 250 * 1024;
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
-        | REMINDER | SIGN_IN | BLOCK => Some(1),
+        | REMINDER | SIGN_IN | BLOCK | APP_KEYS => Some(1),
         _ => None,
     }
 }
@@ -505,6 +507,16 @@ pub(crate) fn snapshot(
                 records.insert(id, entry(SIGN_IN, body));
             }
         }
+        // App keys, for this kind of device only (app_keys.rs).
+        let family = super::sign_ins::this_family();
+        for share in repo::app_keys::all(conn)? {
+            if share.family != family {
+                continue;
+            }
+            if let (Some(id), Some(body)) = (share.record_id, super::app_keys::body(&share)) {
+                records.insert(id, entry(APP_KEYS, body));
+            }
+        }
     }
 
     for (id, record) in &mut records {
@@ -913,6 +925,7 @@ fn apply_put(
         REMINDER => apply_reminder(conn, id, &entry.body, applied),
         SIGN_IN => apply_sign_in(conn, id, &entry.body),
         BLOCK => apply_block(conn, &entry.body, applied),
+        APP_KEYS => apply_app_keys(conn, id, &entry.body),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -1359,6 +1372,25 @@ fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outco
     })
 }
 
+/// App keys another device shared: only devices of the kind they're for
+/// take them on, and never upload or delete the others.
+fn apply_app_keys(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
+    let Some(record) = super::app_keys::parse(body) else {
+        return Ok(Outcome::Ignored);
+    };
+    if record.family != super::sign_ins::this_family() {
+        return Ok(Outcome::Ignored);
+    }
+    repo::app_keys::arrive(
+        conn,
+        record.provider.as_str(),
+        record.family,
+        id,
+        &record.sealed,
+    )?;
+    Ok(Outcome::Applied)
+}
+
 fn apply_reminder(
     conn: &Connection,
     id: &RecordId,
@@ -1650,6 +1682,8 @@ fn apply_delete(
             repo::sign_ins::drop_arrivals_of_record(conn, id)?;
             repo::sign_ins::forget_record(conn, id)?;
         }
+        // The keys already in this device's settings stay.
+        APP_KEYS => repo::app_keys::forget_record(conn, id)?,
         // Preferences are never deleted, and device records go with their
         // device.
         _ => {}
@@ -2806,6 +2840,89 @@ mod tests {
             0
         );
         assert_eq!(repo::sign_ins::arrivals(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn app_keys_for_another_kind_of_device_are_left_alone() {
+        let conn = testutil::conn();
+        let body = json!({
+            "provider": "gmail",
+            "family": "elsewhere",
+            "sealed": {"epoch": 1, "data": "AAAA"},
+        });
+        let mut waiting = BTreeMap::new();
+        waiting.insert([7; 16], entry(APP_KEYS, body));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::app_keys::all(&conn).unwrap().is_empty());
+        // Nor does this device delete them for having none.
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &BTreeMap::new(), &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn app_keys_of_this_kind_arrive_and_are_followed() {
+        let conn = testutil::conn();
+        let id = [8; 16];
+        let names = Names::default();
+        let mirror = BTreeMap::new();
+        let local = |conn: &Connection| {
+            snapshot(conn, &names, &mirror, ([1; 16], json!({})))
+                .unwrap()
+                .remove(&id)
+        };
+        assert_eq!(local(&conn), None, "nothing to share yet");
+
+        let next = entry(
+            APP_KEYS,
+            json!({
+                "provider": "microsoft",
+                "family": super::super::sign_ins::this_family(),
+                "sealed": {"epoch": 1, "data": "BBBB"},
+            }),
+        );
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: None,
+                next: Some(next.clone()),
+            },
+        );
+        apply(
+            &conn,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let share = repo::app_keys::all(&conn).unwrap().remove(0);
+        assert_eq!(
+            share.arrived.as_deref(),
+            Some(r#"{"epoch":1,"data":"BBBB"}"#)
+        );
+        // This device has what the group has, so it sends nothing back.
+        assert_eq!(local(&conn), Some(next.clone()));
+        mirror_row(&conn, &id, Some(&next));
+        let clock = Clock::new([1; 16], None);
+        let ours = local(&conn).map(|entry| (id, entry)).into_iter().collect();
+        assert_eq!(super::super::store::track(&conn, &ours, &clock).unwrap(), 0);
+
+        // With sign-ins no longer syncing, it goes from the group.
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings.sync_sign_ins = false;
+        repo::settings::set(&conn, &settings).unwrap();
+        assert_eq!(local(&conn), None);
     }
 
     #[test]

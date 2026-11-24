@@ -9,13 +9,33 @@ staged_output="$build_dir/.flectar-mail.AppImage.new"
 tools_dir="$build_dir/tools"
 executable="$project_dir/target/release/flectar-mail"
 
-download_tool() {
+# The deployment tools and the runtime that starts every AppImage come from
+# these releases, checked against the SHA-256 checksums below, as PDFium is
+# (scripts/stage-pdfium.py). Update a release and its checksums together.
+# LINUXDEPLOY, PATCHELF, APPIMAGETOOL and APPIMAGE_RUNTIME can name local
+# files to use instead, unchecked, to try other versions.
+linuxdeploy_release=1-alpha-20251107-1
+patchelf_release=0.19.3
+appimagetool_release=1.9.1
+runtime_release=20251108
+
+sha256_of() {
+  local sum
+  sum="$(sha256sum <"$1")"
+  printf '%s' "${sum%% *}"
+}
+
+# Downloads a pinned file once and checks it every time it is used, so a
+# changed or damaged file is never run or embedded.
+fetch_pinned() {
   local url="$1"
-  local destination="$2"
-  if [[ -x "$destination" ]]; then
+  local checksum="$2"
+  local destination="$3"
+  if [[ -f "$destination" && "$(sha256_of "$destination")" == "$checksum" ]]; then
     return
   fi
   mkdir -p "$(dirname "$destination")"
+  rm -f "$destination.new"
   if command -v curl >/dev/null 2>&1; then
     curl --fail --location --silent --show-error "$url" --output "$destination.new"
   elif command -v wget >/dev/null 2>&1; then
@@ -24,7 +44,11 @@ download_tool() {
     printf 'curl or wget is required to obtain the AppImage deployment tools.\n' >&2
     exit 1
   fi
-  chmod +x "$destination.new"
+  if [[ "$(sha256_of "$destination.new")" != "$checksum" ]]; then
+    rm -f "$destination.new"
+    printf '%s does not match its pinned SHA-256 checksum.\n' "$url" >&2
+    exit 1
+  fi
   mv -f "$destination.new" "$destination"
 }
 
@@ -77,14 +101,62 @@ cp "$project_dir/resources/fonts/google-sans-flex/README.md" \
 cp "$project_dir/resources/AppRun" "$app_dir/AppRun"
 chmod +x "$app_dir/AppRun" "$app_dir/usr/bin/flectar-mail"
 
-linuxdeploy="${LINUXDEPLOY:-$tools_dir/linuxdeploy-$machine.AppImage}"
-download_tool \
-  "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$machine.AppImage" \
-  "$linuxdeploy"
-appimagetool="${APPIMAGETOOL:-$tools_dir/appimagetool-$machine.AppImage}"
-download_tool \
-  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$machine.AppImage" \
-  "$appimagetool"
+case "$machine" in
+  x86_64)
+    linuxdeploy_sha256=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+    patchelf_sha256=38861b171079e440b25ac86483284f690d0ee7921dba98b0c8fe04a9b0a11667
+    appimagetool_sha256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    runtime_sha256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+    ;;
+  aarch64)
+    linuxdeploy_sha256=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+    patchelf_sha256=2281dd071995b449b9ce7c53c71d6d56ec3a280ae1cc66b779442abf624f7c10
+    appimagetool_sha256=f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+    runtime_sha256=00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
+    ;;
+  *)
+    printf 'No AppImage tools are pinned for %s.\n' "$machine" >&2
+    exit 1
+    ;;
+esac
+linuxdeploy="${LINUXDEPLOY:-}"
+if [[ -z "$linuxdeploy" ]]; then
+  linuxdeploy="$tools_dir/linuxdeploy-$machine.AppImage"
+  fetch_pinned \
+    "https://github.com/linuxdeploy/linuxdeploy/releases/download/$linuxdeploy_release/linuxdeploy-$machine.AppImage" \
+    "$linuxdeploy_sha256" "$linuxdeploy"
+  chmod +x "$linuxdeploy"
+fi
+# The linuxdeploy release bundles patchelf 0.15.0, which linuxdeploy has
+# since replaced because it can corrupt GNU hash tables. PATCHELF hands
+# linuxdeploy this release instead.
+patchelf="${PATCHELF:-}"
+if [[ -z "$patchelf" ]]; then
+  fetch_pinned \
+    "https://github.com/NixOS/patchelf/releases/download/$patchelf_release/patchelf-$patchelf_release-$machine.tar.gz" \
+    "$patchelf_sha256" "$tools_dir/patchelf-$machine.tar.gz"
+  rm -rf "$tools_dir/patchelf-$machine"
+  mkdir -p "$tools_dir/patchelf-$machine"
+  tar -xzf "$tools_dir/patchelf-$machine.tar.gz" -C "$tools_dir/patchelf-$machine" ./bin/patchelf
+  patchelf="$tools_dir/patchelf-$machine/bin/patchelf"
+fi
+appimagetool="${APPIMAGETOOL:-}"
+if [[ -z "$appimagetool" ]]; then
+  appimagetool="$tools_dir/appimagetool-$machine.AppImage"
+  fetch_pinned \
+    "https://github.com/AppImage/appimagetool/releases/download/$appimagetool_release/appimagetool-$machine.AppImage" \
+    "$appimagetool_sha256" "$appimagetool"
+  chmod +x "$appimagetool"
+fi
+# Without --runtime-file, appimagetool would download and embed whatever
+# runtime is newest.
+runtime="${APPIMAGE_RUNTIME:-}"
+if [[ -z "$runtime" ]]; then
+  runtime="$tools_dir/runtime-$machine"
+  fetch_pinned \
+    "https://github.com/AppImage/type2-runtime/releases/download/$runtime_release/runtime-$machine" \
+    "$runtime_sha256" "$runtime"
+fi
 
 # Winit opens libxkbcommon-x11 with dlopen(), so linuxdeploy cannot discover
 # it from the executable. Hosts without it (Ubuntu without Qt, minimal X11
@@ -100,7 +172,12 @@ fi
 
 # Deploy ordinary ELF dependencies. Winit uses the host Wayland/X11 client
 # libraries through its normal backend discovery rather than a toolkit plugin.
+# NO_STRIP keeps linuxdeploy's own strip, from binutils 2.35, away from every
+# file. The release profile strips the executable, and the libraries it
+# bundles come stripped from the distribution, so strip would only rewrite
+# them before patchelf does.
 VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
+  NO_STRIP=1 PATCHELF="$patchelf" \
   "$linuxdeploy" \
   --appdir "$app_dir" \
   --executable "$app_dir/usr/bin/flectar-mail" \
@@ -146,7 +223,7 @@ ln -sfn flectar-mail.png "$app_dir/.DirIcon"
 mkdir -p "$(dirname "$output_path")"
 rm -f "$staged_output"
 VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
-  "$appimagetool" "$app_dir" "$staged_output"
+  "$appimagetool" --runtime-file "$runtime" "$app_dir" "$staged_output"
 # The AppImage starts with appimagetool's runtime, which is an ELF executable.
 python3 "$project_dir/scripts/linux-elf.py" verify "$staged_output"
 # Renaming over an executing AppImage is atomic on Linux; the running process

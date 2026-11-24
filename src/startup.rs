@@ -898,7 +898,7 @@ pub(crate) fn spawn_core_event_listener(
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .device_sync
-                        .status = Some(status);
+                        .status = Some(*status);
                     true
                 }
                 Ok(CoreEvent::DeviceSyncPairing { pairing, event }) => {

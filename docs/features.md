@@ -6,6 +6,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Tabs](#tabs)
 - [Search](#search)
 - [Checking for mail](#checking-for-mail)
+- [Server settings for new accounts](#server-settings-for-new-accounts)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
 - [Sender addresses](#sender-addresses)
@@ -228,6 +229,33 @@ turns down a connection for having too many open, Flectar Mail opens one fewer
 for downloading in the background from then on. When many accounts start
 together, they take turns connecting, and a few at a time download their older
 mail.
+
+## Server settings for new accounts
+
+When you type the address of a new IMAP, POP3 or JMAP account, Flectar Mail
+looks up its servers. It asks the address's domain for its own configuration
+file, over HTTPS first and then over plain HTTP, and otherwise looks the domain
+up in the public provider database at autoconfig.thunderbird.net. When neither
+knows the domain, it asks your device's DNS which server takes the domain's
+mail, and looks up the provider of that server the same way. That step is
+skipped while a proxy is set, because DNS questions can't go through one. Only
+the domain is sent, never the whole address. Servers it finds fill in the form
+as long as you haven't changed them, and the form says where they came from.
+Settings that came over plain HTTP or through DNS could have been changed on
+the way, so **Connect account** waits until you check the server names and tick
+**I checked these servers and trust them**. Your other accounts on the same domain, and
+Gmail's servers for a Gmail address, fill in the form without a lookup.
+
+Adding a CalDAV calendar or connecting CardDAV contacts to one of these accounts
+fills in the server address the same way. The provider's configuration file
+comes first, then the domain's CalDAV or CardDAV records in DNS (RFC 6764), and
+then the domain's own `/.well-known/caldav` or `/.well-known/carddav` address
+over HTTPS. Only servers that use TLS are filled in, and the DNS step is skipped
+while a proxy is set. A DNS record that points to a server outside the
+address's domain could have been forged, so **Connect** waits until you tick
+**I checked this server and trust it**. Google and Microsoft accounts reach
+their own calendars and contacts through their sign-in, so their dialogs stay
+empty.
 
 ## Advanced account settings
 
@@ -971,8 +999,10 @@ read messages and conversations as plain text, search contacts and list
 calendar events, and nothing more unless you allow it. You choose which
 accounts they can read, mail imported to this device among them, and for each
 account which folders. Spam and Trash stay out until you add them, since junk
-mail is where hostile instructions are most likely to hide. Encrypted messages
-are withheld, and passwords, sign-in tokens and keys never reach an agent.
+mail is where hostile instructions are most likely to hide. A message stays
+out when any folder or label it's in is hidden from agents, even if it's also
+in one they can read, such as Gmail's All Mail. Encrypted messages are
+withheld, and passwords, sign-in tokens and keys never reach an agent.
 
 With Write drafts on, agents can also save plain-text drafts, new messages or
 replies, in Drafts for you to check and send yourself. An agent can change its
@@ -980,8 +1010,10 @@ own draft until you edit it, and never anyone else's.
 
 Three more switches let agents mark messages read or flagged, move them to the
 archive, to Trash or to another folder, and add or take off your labels. They
-can change messages only in folders they can read, and never delete anything
-for good. Together they can change 100 messages a minute.
+can change messages only in folders they can read, move them only between an
+account's own folders, never into or out of one other people may share, and
+never delete anything for good. Together they can change 100 messages a
+minute.
 
 With Ask to send on, an agent can ask to send a draft. It opens in a window of
 its own, with a note naming the agent, and it's sent only if you send it. One
@@ -999,9 +1031,9 @@ is immune to instructions hidden in mail, so give agents only what they need.
 
 ## Flectar Mail Sync
 
-Flectar Mail Sync keeps your accounts and their sign-ins, preferences,
-signatures, profiles, templates, blocked senders, snoozes, reply reminders
-and scheduled messages the same on all your devices. Everything is end-to-end
+Flectar Mail Sync keeps your accounts, preferences, signatures, profiles,
+templates, blocked senders, snoozes, reply reminders and scheduled messages
+the same on all your devices. Everything is end-to-end
 encrypted before it leaves a device, so not even Flectar Mail can read it, and
 there is no account to create: a 24-word recovery code brings sync back on a
 new device. Your mail, contacts and calendars keep syncing with your mail
@@ -1014,6 +1046,15 @@ with your recovery code. Each device keeps its own mail checking, how much mail
 history it downloads and what it downloads ahead of time, its proxy and server
 timeout, and settings that belong to the device itself, such as reduced motion
 and text size.
+
+Accounts arrive with their passwords, so they work on a new device at once.
+Google and Microsoft sign-ins go only to devices of the same kind. A
+computer's sign-in reaches your other computers, and an Outlook sign-in made
+on a phone reaches your other phones, so a new phone signs in to Gmail and
+Outlook once. Every Android phone signs in to Gmail itself. App keys entered in
+Sign-in settings go to your devices of the same kind too, so you type them once
+for each kind of device. **Passwords and sign-ins** in Settings → Sync turns
+all of this on or off for every device.
 
 Flectar Mail Sync is a paid service, with a free trial, that pays for the
 servers it runs on. Each contribution to Flectar Mail earns a free year of it,

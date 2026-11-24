@@ -207,14 +207,10 @@ fn media_type(attachment: &flectar_mail_core::models::AttachmentMeta) -> String 
 }
 
 fn previewable(name: &str, media: &str) -> bool {
-    media == "application/pdf"
+    crate::document_preview::declared_pdf(media, name)
         || media.starts_with("image/")
         || media.starts_with("text/")
         || matches!(media, "application/json" | "application/xml")
-        || name
-            .as_bytes()
-            .get(name.len().saturating_sub(4)..)
-            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"))
 }
 
 /// A name and its extension, such as "Report" and ".pdf". Only a short
@@ -748,6 +744,7 @@ pub(crate) fn register(
                             .mime_type
                             .as_deref()
                             .unwrap_or("application/octet-stream"),
+                        selected.filename.as_deref().unwrap_or(""),
                     )
                     .await
                     .map(Some)

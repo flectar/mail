@@ -1305,7 +1305,7 @@ fn addresses(values: Option<&[jmap_client::email::EmailAddress]>) -> Vec<Address
         .unwrap_or_default()
         .iter()
         .map(|value| Address {
-            name: value.name().map(str::to_owned),
+            name: value.name().and_then(crate::mime::display_name),
             email: value.email().to_owned(),
         })
         .collect()
@@ -2426,10 +2426,25 @@ async fn persist_bodies(ctx: &SyncCtx, account_id: i64, bodies: Vec<DownloadedBo
                 // First, as a code in the body is offered only from a
                 // confirmed sender.
                 if let Some(headers) = &body.headers {
+                    // Mail the account received tells whether its server
+                    // stamps what it receives, and so whether the sender's
+                    // verification can be trusted.
+                    let (account_id, outgoing): (i64, bool) = tx.query_row(
+                        "SELECT account_id, is_outgoing FROM messages WHERE id = ?1",
+                        [message_id],
+                        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+                    )?;
+                    if !outgoing {
+                        repo::messages::note_authentication_results(
+                            &tx,
+                            account_id,
+                            headers.authentication_results,
+                        )?;
+                    }
                     repo::messages::set_sender_verification(
                         &tx,
                         message_id,
-                        headers.sender_verification,
+                        repo::messages::vouched(&tx, account_id, headers.sender_verification)?,
                     )?;
                 }
                 // The paperclip stays the server's call (RFC 8621 hasAttachment).

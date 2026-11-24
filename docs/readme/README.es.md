@@ -44,7 +44,7 @@ una fracción de la memoria de un cliente de correo típico basado en tecnologí
 | Ventaja | Detalles |
 | --- | --- |
 | **Rápido desde el primer clic** | Una interfaz nativa y un acceso a los datos que prioriza el almacenamiento local te llevan a tu bandeja de entrada sin esperar a que se cargue un entorno de navegador. |
-| **Unos 20 MB de memoria privada en reposo** | Unos 85 MB contando su código y bibliotecas, y la doceava parte de la memoria privada que usa Thunderbird con el mismo buzón. Consulta [Rendimiento](#-rendimiento). |
+| **Unos 20 MB de memoria privada en reposo** | Unos 105 MB contando su código y bibliotecas, y la doceava parte de la memoria privada que usa Thunderbird con el mismo buzón. Consulta [Rendimiento](#-rendimiento). |
 | **Todo en un mismo lugar** | Pasa del correo a los calendarios y contactos sin tener que combinar varias aplicaciones independientes. |
 | **Sin conexión por diseño** | Tu buzón y tu calendario se guardan localmente, así que los datos sincronizados siguen siendo útiles sin conexión. |
 | **Compatible con tus cuentas** | Conecta Gmail, Outlook y Microsoft 365, o servicios basados en los estándares IMAP, POP3, SMTP, JMAP, CalDAV y CardDAV. |
@@ -58,13 +58,13 @@ una fracción de la memoria de un cliente de correo típico basado en tecnologí
 
 | En reposo, mismo buzón | Memoria privada | Con código y bibliotecas (PSS) | Renderiza el correo con |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **17,2 – 17,4 MiB** | **79,1 – 80,0 MiB** | Blitz |
-| Geary 46 | 126,1 – 126,2 MiB (+629 %) | 309,6 – 311,4 MiB (+290 %) | WebKitGTK |
-| Evolution 3.56 | 191,0 – 192,2 MiB (+1008 %) | 395,0 – 395,9 MiB (+397 %) | WebKitGTK |
-| Thunderbird 159 | 244,1 – 248,1 MiB (+1323 %) | 424,4 – 427,1 MiB (+435 %) | Gecko |
-| Betterbird 153 | 243,9 – 247,8 MiB (+1321 %) | 411,9 – 419,7 MiB (+423 %) | Gecko |
-| Mailspring 1.26 | 311,4 – 314,9 MiB (+1710 %) | 551,1 – 551,7 MiB (+593 %) | Chromium |
-| Aerion 0.3.6 | 421,9 – 437,3 MiB (+2383 %) | 660,4 – 678,0 MiB (+741 %) | WebKitGTK |
+| **Flectar Mail** | **19,6 – 19,8 MiB** | **101,6 – 101,8 MiB** | Blitz |
+| Geary 46 | 126,1 – 126,2 MiB (+540 %) | 309,6 – 311,4 MiB (+205 %) | WebKitGTK |
+| Evolution 3.56 | 191,0 – 192,2 MiB (+873 %) | 395,0 – 395,9 MiB (+289 %) | WebKitGTK |
+| Thunderbird 159 | 244,1 – 248,1 MiB (+1149 %) | 424,4 – 427,1 MiB (+318 %) | Gecko |
+| Betterbird 153 | 243,9 – 247,8 MiB (+1148 %) | 411,9 – 419,7 MiB (+309 %) | Gecko |
+| Mailspring 1.26 | 311,4 – 314,9 MiB (+1490 %) | 551,1 – 551,7 MiB (+442 %) | Chromium |
+| Aerion 0.3.6 | 421,9 – 437,3 MiB (+2081 %) | 660,4 – 678,0 MiB (+558 %) | WebKitGTK |
 
 Mediciones realizadas en Linux con una cuenta IMAP (860 mensajes), la bandeja de
 entrada abierta y un boletín HTML en pantalla, 60 segundos después de abrir la
