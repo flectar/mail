@@ -157,6 +157,36 @@ pub fn recheck_all(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// This device joined a group: the passwords and sign-ins of the accounts
+/// it has stay here until the user shares them.
+pub fn hold_existing(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO sign_in_holds (account_id)
+         SELECT id FROM accounts
+         WHERE mail_protocol <> 'local'
+           AND (auth_kind = 'password' OR provider IN ('gmail', 'microsoft'))",
+        [],
+    )?;
+    Ok(())
+}
+
+/// The accounts whose sign-ins stay here until the user shares them.
+pub fn held(conn: &Connection) -> Result<std::collections::HashSet<i64>> {
+    let mut statement = conn.prepare("SELECT account_id FROM sign_in_holds")?;
+    let held = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(held)
+}
+
+/// The user shares them: their passwords and sign-ins go to the group like
+/// those of accounts added since.
+pub fn release_holds(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM sign_in_holds", [])?;
+    conn.execute("UPDATE sign_in_shares SET checked_at = 0", [])?;
+    Ok(())
+}
+
 /// The record went: what this device shared with it is shared no more,
 /// until it reads the credential store again.
 pub fn forget_record(conn: &Connection, record_id: &[u8; 16]) -> Result<()> {
@@ -288,5 +318,28 @@ mod tests {
         assert_eq!(arrivals(&conn).unwrap(), std::slice::from_ref(&newer));
         drop_arrivals_of_record(&conn, &[9; 16]).unwrap();
         assert!(arrivals(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn accounts_from_before_a_join_hold_their_sign_ins_until_released() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        hold_existing(&conn).unwrap();
+        assert_eq!(held(&conn).unwrap(), std::collections::HashSet::from([1]));
+        put_share(
+            &conn,
+            &Share {
+                account_id: 1,
+                kind: "password".into(),
+                family: "any".into(),
+                checked_at: 10,
+                ..Share::default()
+            },
+        )
+        .unwrap();
+        release_holds(&conn).unwrap();
+        assert!(held(&conn).unwrap().is_empty());
+        let share = share(&conn, 1, "password", "any").unwrap().unwrap();
+        assert_eq!(share.checked_at, 0, "read again at once");
     }
 }
