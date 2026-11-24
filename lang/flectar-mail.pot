@@ -5190,33 +5190,33 @@ msgstr ""
 msgid "Account"
 msgstr ""
 
-#: ui/components/composer-fields.slint:365
-#: ui/components/composer-fields.slint:365 ui/views/mail-reading-pane.slint:385
+#: ui/components/composer-fields.slint:372
+#: ui/components/composer-fields.slint:372 ui/views/mail-reading-pane.slint:385
 msgid "To"
 msgstr ""
 
-#: ui/components/composer-fields.slint:366
+#: ui/components/composer-fields.slint:373
 msgid "name@example.com · separate with commas"
 msgstr ""
 
-#: ui/components/composer-fields.slint:393
+#: ui/components/composer-fields.slint:400
 msgid "Carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:404
+#: ui/components/composer-fields.slint:411
 msgid "Blind carbon copy"
 msgstr ""
 
-#: ui/components/composer-fields.slint:498
+#: ui/components/composer-fields.slint:500
 msgctxt "signature"
 msgid "Name"
 msgstr ""
 
-#: ui/components/composer-fields.slint:510
+#: ui/components/composer-fields.slint:512
 msgid "Signature name, for example Work"
 msgstr ""
 
-#: ui/components/composer-fields.slint:510
+#: ui/components/composer-fields.slint:512
 msgid "What is this email about?"
 msgstr ""
 
