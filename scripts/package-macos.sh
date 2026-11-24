@@ -75,7 +75,24 @@ sed \
 # Sign nested code before the containing app. Distribution signing and
 # notarization replace these ad-hoc identities when Apple credentials exist.
 codesign --force --sign - "$app_dir/Contents/Frameworks/libpdfium.dylib"
-codesign --force --sign - "$app_dir"
+# The hardened runtime ignores DYLD_ variables, so other programs can't load
+# code into the app to read its keychain items. Its library validation would
+# refuse the PDFium library that the PDF worker loads with dlopen()
+# (src/pdf_preview.rs), because ad-hoc signatures have no Team ID, so the
+# entitlements turn that one check off. Drop them once one Developer ID signs
+# both. With library validation off, Gatekeeper rejects any library or rpath
+# load command that points outside the app and the system.
+entitlements="$project_dir/platform/macos/flectar-mail.entitlements"
+plutil -lint "$entitlements"
+codesign --force --options runtime --entitlements "$entitlements" --sign - "$app_dir"
+signature="$(codesign --display --verbose=2 "$app_dir" 2>&1)"
+runtime_flag='flags=0x[0-9a-f]+\([a-z,-]*runtime'
+if [[ ! "$signature" =~ $runtime_flag ]]; then
+  printf 'The app is not signed with the hardened runtime:\n%s\n' "$signature" >&2
+  exit 1
+fi
+# The PDF preview test runs the signed app, so it also shows that the
+# hardened runtime still lets the worker load PDFium.
 python3 "$project_dir/scripts/test-pdf-preview.py" "$app_dir/Contents/MacOS/flectar-mail"
 
 mkdir -p "$output_dir"

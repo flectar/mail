@@ -176,6 +176,7 @@ class PackagingTests(unittest.TestCase):
                 "scripts/package-macos.sh",
                 "platform/macos/Info.plist.in",
                 "platform/macos/com.flectar.mail.login.plist",
+                "platform/macos/flectar-mail.entitlements",
                 "LICENSE",
                 "THIRD_PARTY_NOTICES.md",
                 "resources/fonts/google-sans-flex/OFL.txt",
@@ -226,7 +227,10 @@ class PackagingTests(unittest.TestCase):
             executable(
                 "codesign",
                 'target="${@: -1}"\nprintf "%s\\n" "$*" >> "$CODESIGN_LOG"\n'
-                'if [[ "$target" == *.dylib ]]; then : > "$target.signed"; '
+                'if [[ "$1" == "--display" ]]; then '
+                'printf "Executable=%s\\nCodeDirectory v=20500 size=1 flags=%s hashes=1+0\\n" '
+                '"$target" "${CODESIGN_FLAGS:-0x10002(adhoc,runtime)}" >&2; '
+                'elif [[ "$target" == *.dylib ]]; then : > "$target.signed"; '
                 'elif [[ "$*" == *"--sign"* ]]; then test -f "$target/Contents/Frameworks/libpdfium.dylib.signed"; fi\n',
             )
             executable(
@@ -274,7 +278,33 @@ class PackagingTests(unittest.TestCase):
                     signatures = codesign_log.read_text().splitlines()
                     self.assertIn("Contents/Frameworks/libpdfium.dylib", signatures[0])
                     self.assertTrue(signatures[1].endswith("Flectar Mail.app"))
-                    self.assertIn("--verify --deep --strict", signatures[2])
+                    self.assertIn("--options runtime", signatures[1])
+                    self.assertIn("--entitlements", signatures[1])
+                    self.assertTrue(signatures[2].startswith("--display"))
+                    self.assertIn("--verify --deep --strict", signatures[3])
+
+            # An app signed without the hardened runtime stops the packaging.
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(root / "scripts/package-macos.sh"),
+                    str(root / "target/release/flectar-mail"),
+                    str(root / "target/macos-unhardened"),
+                    "arm64",
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "PATH": f"{tools}:{os.environ['PATH']}",
+                    "CODESIGN_LOG": str(root / "codesign-unhardened.log"),
+                    "CODESIGN_FLAGS": "0x2(adhoc)",
+                    "EXPECTED_PDFIUM_TARGET": "mac-arm64",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not signed with the hardened runtime", result.stderr)
 
     def test_apk_requires_pdfium_notices_and_aligned_native_libraries(self):
         with tempfile.TemporaryDirectory() as directory:
