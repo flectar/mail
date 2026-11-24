@@ -1,0 +1,492 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore bidi
+
+use super::shaping::paragraph_ranges;
+use super::*;
+
+fn paragraphs(text: &str) -> Vec<&str> {
+    paragraph_ranges(text).map(|r| &text[r]).collect()
+}
+
+fn layout_text_with_options(text: &str, options: LayoutOptions) -> Layout {
+    layout_text_with_builder(text, super::shaping::plain_builder_for_tests(), options)
+}
+
+// Don't load system fonts: that goes through fontconfig FFI, which Miri
+// can't execute. Use the bundled Inter font instead.
+pub(super) fn test_font_context() -> FontContext {
+    let mut font_ctx = parley::FontContext {
+        collection: fontique::Collection::new(fontique::CollectionOptions {
+            system_fonts: false,
+            ..Default::default()
+        }),
+        source_cache: Default::default(),
+    };
+    let data = include_bytes!("../../../common/sharedfontique/Inter-VariableFont.ttf");
+    let families = font_ctx.collection.register_fonts(fontique::Blob::new(Arc::new(data)), None);
+    font_ctx.collection.set_generic_families(
+        fontique::GenericFamily::SansSerif,
+        families.iter().map(|(id, _)| *id),
+    );
+    FontContext::new(font_ctx)
+}
+
+fn layout_text_with_builder(
+    text: &str,
+    builder: super::shaping::LayoutWithoutLineBreaksBuilder,
+    options: LayoutOptions,
+) -> Layout {
+    let mut font_ctx = test_font_context();
+    let paragraphs = create_text_paragraphs(
+        &builder,
+        &mut font_ctx,
+        PlainOrStyledText::Plain(text.into()),
+        Color::default(),
+    );
+    layout(&builder, &mut font_ctx, paragraphs, ScaleFactor::new(1.0), options, None)
+}
+
+fn layout_text(text: &str) -> Layout {
+    layout_text_with_options(text, LayoutOptions::default())
+}
+
+fn visual_line_count(text: &str) -> usize {
+    layout_text(text).paragraphs.iter().map(|p| p.layout.lines().len()).sum()
+}
+
+#[test]
+fn styled_text_across_a_line_break_shapes() {
+    // The shaper slices the text with the spans it is given, so a span that starts inside a
+    // character panics there (#13548). The style opens at byte 5 of the first paragraph, which
+    // in the second one falls inside its third character.
+    let text = crate::styled_text::StyledText::from_markdown(
+        "\u{44f}\u{44f} **a\n\u{44f}\u{44f}\u{44f}**",
+    )
+    .unwrap();
+    let paragraphs = create_text_paragraphs(
+        &super::shaping::plain_builder_for_tests(),
+        &mut test_font_context(),
+        PlainOrStyledText::Styled(text),
+        Color::default(),
+    );
+    assert_eq!(paragraphs.len(), 2);
+}
+
+#[test]
+fn bidi_selection_spans_are_ascending_in_x() {
+    // The segment walk in `draw_glyph_run_with_selection` steps through a line's spans left to
+    // right, so they have to arrive ascending in x. A bidi line is where that could plausibly
+    // break: a logically contiguous selection reaching into an RTL run maps to several
+    // disjoint visual rects, and the second one can be the *leftmost* on screen.
+    let text = "abc\u{5d0}\u{5d1}\u{5d2}def";
+    let layout = layout_text(text);
+    let mut saw_line_with_several_spans = false;
+    for start in [0, 2, 3, 4] {
+        for end in [4, 6, 8, text.len()] {
+            if start >= end {
+                continue;
+            }
+            let spans = layout.selection_geometry(
+                start..end,
+                &(PhysicalLength::new(f32::NEG_INFINITY)..PhysicalLength::new(f32::INFINITY)),
+                f32::round,
+            );
+            saw_line_with_several_spans |= spans.0.len() > 1;
+            for [left, right] in spans.0.array_windows() {
+                if (left.paragraph, left.line) != (right.paragraph, right.line) {
+                    continue;
+                }
+                assert!(
+                    left.x().start <= right.x().start,
+                    "spans of {start}..{end} are out of order: {:?} before {:?}",
+                    left.x(),
+                    right.x()
+                );
+            }
+        }
+    }
+    // Otherwise the ranges above stopped producing a split line and this proves nothing.
+    assert!(saw_line_with_several_spans, "expected a bidi selection to split into spans");
+}
+
+#[test]
+fn test_text_line_height_matches_shaped_single_line() {
+    for (pixel_size, line_height_factor) in [(12.0, None), (25.5, None), (12.0, Some(1.5))] {
+        let font_request =
+            FontRequest { pixel_size: Some(LogicalLength::new(pixel_size)), ..Default::default() };
+        let builder = super::shaping::LayoutWithoutLineBreaksBuilder::new(
+            Some(font_request.clone()),
+            line_height_factor,
+            TextWrap::NoWrap,
+            None,
+            ScaleFactor::new(1.0),
+        );
+        let shaped = layout_text_with_builder("Hello world", builder, LayoutOptions::default());
+        let fast =
+            text_line_height(&mut test_font_context(), &font_request, line_height_factor).unwrap();
+        assert!(
+            (shaped.height.get() - fast.get()).abs() < 0.01,
+            "shaped {} != estimated {} (size {pixel_size}, factor {line_height_factor:?})",
+            shaped.height.get(),
+            fast.get(),
+        );
+    }
+}
+
+#[test]
+fn test_crlf_line_count() {
+    assert_eq!(visual_line_count("hello\r\nworld"), visual_line_count("hello\nworld"));
+    assert_eq!(visual_line_count("hello\r\nworld"), 2);
+}
+
+#[test]
+fn test_cursor_between_cr_and_lf() {
+    // The cursor can land between the '\r' and the '\n' (e.g. moving left from the start of
+    // the next line); it draws at the end of the preceding paragraph, like on the '\r'.
+    let layout = layout_text("hello\r\nworld");
+    let cursor_width = PhysicalLength::new(1.0);
+    let downstream = crate::items::TextCursorAffinity::NextCharacter;
+    assert_eq!(
+        layout.cursor_rect_for_byte_offset(6, downstream, cursor_width),
+        layout.cursor_rect_for_byte_offset(5, downstream, cursor_width)
+    );
+    assert_ne!(
+        layout.cursor_rect_for_byte_offset(6, downstream, cursor_width),
+        layout.cursor_rect_for_byte_offset(0, downstream, cursor_width)
+    );
+}
+
+#[test]
+fn test_cursor_affinity_at_soft_line_break() {
+    use crate::items::TextCursorAffinity;
+
+    // Wraps before "wrapping", whose offset is both the end of line 1 and the start of line 2.
+    let text = "When the amount of lines - due to wrapping and number of paragraphs";
+    let layout = layout_text_with_builder(
+        text,
+        super::shaping::wrap_builder_for_tests(),
+        LayoutOptions { max_width: Some(LogicalLength::new(200.)), ..Default::default() },
+    );
+    let break_offset = text.find("wrapping").unwrap();
+    let line_of = |y: f32| {
+        (y / layout.paragraphs[0].layout.lines().next().unwrap().metrics().line_height) as i32
+    };
+
+    // Hit-testing past the end of line 1 reports the break offset, upstream.
+    let (offset, affinity) = layout.byte_offset_from_point(PhysicalPoint::new(1000., 1.));
+    assert_eq!(offset, break_offset);
+    assert_eq!(affinity, TextCursorAffinity::PreviousCharacter);
+
+    // The two affinities of that offset resolve to its two visual positions.
+    let cursor_width = PhysicalLength::new(1.0);
+    let upstream = layout.cursor_rect_for_byte_offset(
+        break_offset,
+        TextCursorAffinity::PreviousCharacter,
+        cursor_width,
+    );
+    let downstream = layout.cursor_rect_for_byte_offset(
+        break_offset,
+        TextCursorAffinity::NextCharacter,
+        cursor_width,
+    );
+    assert_eq!(line_of(upstream.origin.y), 0);
+    assert_eq!(line_of(downstream.origin.y), 1);
+    assert!(upstream.origin.x > downstream.origin.x);
+}
+
+#[test]
+fn test_paragraph_ranges() {
+    assert_eq!(paragraphs(""), [""]);
+    assert_eq!(paragraphs("hello"), ["hello"]);
+    assert_eq!(paragraphs("hello\nworld"), ["hello", "world"]);
+    assert_eq!(paragraphs("hello\n"), ["hello", ""]);
+    assert_eq!(paragraphs("\n\n"), ["", "", ""]);
+}
+
+#[test]
+fn test_paragraph_ranges_crlf() {
+    assert_eq!(paragraphs("hello\r\nworld"), ["hello", "world"]);
+    assert_eq!(paragraphs("hello\r\n"), ["hello", ""]);
+    assert_eq!(paragraphs("\r\n\r\n"), ["", "", ""]);
+    assert_eq!(paragraphs("a\r\n\nb"), ["a", "", "b"]);
+    // A lone CR stays in the paragraph; parley breaks the line there.
+    assert_eq!(paragraphs("hello\rworld"), ["hello\rworld"]);
+}
+
+fn layout_with_max_lines(text: &str, max_lines: usize) -> Layout {
+    layout_text_with_options(
+        text,
+        LayoutOptions { max_lines: Some(max_lines), ..LayoutOptions::default() },
+    )
+}
+
+#[test]
+fn test_max_lines_cut_across_paragraphs() {
+    // Three paragraphs with one line each; the limit lands on the paragraph boundary.
+    let layout = layout_with_max_lines("a\nb\nc", 2);
+    assert_eq!(layout.line_limit_cut, Some((1, 0)));
+    assert_eq!(layout.visible_paragraphs().len(), 2);
+
+    // Empty paragraphs still synthesize a line that counts towards the limit.
+    let layout = layout_with_max_lines("a\n\nb", 2);
+    assert_eq!(layout.line_limit_cut, Some((1, 0)));
+}
+
+#[test]
+fn test_max_lines_cut_within_paragraph() {
+    // A lone CR breaks lines within a single paragraph, so the limit lands mid-paragraph.
+    let layout = layout_with_max_lines("a\rb\rc", 2);
+    assert_eq!(layout.line_limit_cut, Some((0, 1)));
+    assert_eq!(layout.visible_paragraphs().len(), 1);
+}
+
+#[test]
+fn test_max_lines_no_cut_when_all_lines_fit() {
+    // The limit only cuts when lines are actually dropped, and layout results (notably the
+    // height) are unchanged when it doesn't.
+    let unlimited = layout_text("a\nb\nc");
+    for max_lines in [3, 4] {
+        let layout = layout_with_max_lines("a\nb\nc", max_lines);
+        assert_eq!(layout.line_limit_cut, None);
+        assert_eq!(layout.visible_paragraphs().len(), 3);
+        assert_eq!(layout.height, unlimited.height);
+    }
+}
+
+#[test]
+fn test_max_lines_caps_preferred_width() {
+    // The cut lands mid-paragraph (a lone CR breaks lines within one paragraph); the
+    // dropped, longer line must not count towards the preferred width, so the layout is
+    // exactly as wide as the kept line alone.
+    let limited = layout_with_max_lines("ab\rlonger", 1);
+    assert_eq!(limited.line_limit_cut, Some((0, 0)));
+    assert!(limited.max_width < layout_text("ab\rlonger").max_width);
+    assert_eq!(limited.max_width, layout_text("ab").max_width);
+
+    // The per-line width formula used for the cut paragraph mirrors parley's `full_width`;
+    // pin the equivalence so a change in parley's formula doesn't silently diverge.
+    let unlimited = layout_text("ab\rlonger");
+    let per_line_max = unlimited.paragraphs[0]
+        .layout
+        .lines()
+        .map(|line| {
+            let metrics = line.metrics();
+            metrics.inline_min_coord + metrics.advance
+        })
+        .fold(0.0f32, f32::max);
+    assert_eq!(per_line_max, unlimited.paragraphs[0].layout.full_width());
+}
+
+#[test]
+fn test_max_lines_below_line_limit() {
+    let limited = layout_with_max_lines("a\nb\nc", 2);
+    // Within the visible text: hit-testing stays active.
+    assert!(!limited.below_line_limit(PhysicalLength::zero()));
+    assert!(!limited.below_line_limit(limited.height - PhysicalLength::new(1.0)));
+    // At and below the bottom of the last kept line: dropped-line territory.
+    assert!(limited.below_line_limit(limited.height));
+    assert!(limited.below_line_limit(limited.height + PhysicalLength::new(100.0)));
+
+    // Without an active cut nothing is below the limit, no matter the y.
+    let unlimited = layout_text("a\nb\nc");
+    assert!(!unlimited.below_line_limit(unlimited.height + PhysicalLength::new(100.0)));
+
+    // paragraph_by_y honors the guard, so no hit-testing consumer sees dropped lines.
+    assert!(limited.paragraph_by_y(limited.height).is_none());
+    assert!(limited.paragraph_by_y(PhysicalLength::zero()).is_some());
+}
+
+#[test]
+fn test_max_lines_caps_height() {
+    let unlimited = layout_text("a\nb\nc");
+    let limited = layout_with_max_lines("a\nb\nc", 1);
+    assert!(limited.height < unlimited.height);
+    assert!(limited.height > PhysicalLength::zero());
+    // The capped height matches the bottom of the last kept line.
+    let first_line_bottom = PhysicalLength::new(
+        limited.paragraphs[0].layout.lines().next().unwrap().metrics().block_max_coord,
+    );
+    assert_eq!(limited.height, first_line_bottom);
+}
+
+type XRange = (f32, f32);
+
+/// Lays out `text` on one line, elided to `width`, and returns the kept glyph x ranges and
+/// the ellipsis x range of each run on that line.
+fn elided_line(text: &str, width: f32, force_elision: bool) -> Vec<(Vec<XRange>, Option<XRange>)> {
+    let layout = layout_text_with_options(
+        text,
+        LayoutOptions {
+            max_width: Some(LogicalLength::new(width)),
+            text_overflow: TextOverflow::Elide,
+            ..Default::default()
+        },
+    );
+    let paragraph = &layout.paragraphs[0];
+    let line = paragraph.layout.lines().next().unwrap();
+    let elision = layout.line_elision(&line, paragraph.layout.is_rtl(), force_elision);
+    let x_range = |glyph: parley::layout::Glyph| (glyph.x, glyph.x + glyph.advance);
+    line.items()
+        .filter_map(|item| match item {
+            parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(index, run)| match &elision {
+            Some(elision) => (
+                elision.glyphs(&run).map(x_range).collect(),
+                elision.ellipsis_for_run(index).map(|(glyph, ..)| x_range(glyph)),
+            ),
+            None => (run.positioned_glyphs().map(x_range).collect(), None),
+        })
+        .collect()
+}
+
+/// Asserts that the line of `runs` has one ellipsis, within `width`, and no kept glyph under it.
+fn assert_one_ellipsis_in_box(runs: &[(Vec<XRange>, Option<XRange>)], width: f32, context: &str) {
+    let ellipses: Vec<_> = runs.iter().filter_map(|(_, ellipsis)| *ellipsis).collect();
+    assert_eq!(ellipses.len(), 1, "expected one ellipsis, {context}");
+    let (ellipsis_start, ellipsis_end) = ellipses[0];
+    assert!(
+        ellipsis_start >= -0.01 && ellipsis_end <= width + 0.01,
+        "ellipsis at {ellipsis_start}..{ellipsis_end} outside the box, {context}"
+    );
+    let glyphs: Vec<_> = runs.iter().flat_map(|(glyphs, _)| glyphs).collect();
+    assert!(
+        glyphs
+            .iter()
+            .all(|&&(start, end)| end <= ellipsis_start + 0.01 || start >= ellipsis_end - 0.01),
+        "glyphs under the ellipsis at {ellipsis_start}..{ellipsis_end}, {context}: {glyphs:?}"
+    );
+}
+
+#[test]
+fn test_elide_left_to_right_line() {
+    let runs = elided_line(&"abc ".repeat(20), 100., false);
+    let (glyphs, ellipsis) = &runs[0];
+    let (ellipsis_start, ellipsis_end) = ellipsis.expect("the line overflows");
+    assert!(ellipsis_end <= 100.);
+    assert!(!glyphs.is_empty());
+    assert!(glyphs.iter().all(|&(start, end)| start >= 0. && end <= ellipsis_start));
+}
+
+#[test]
+fn test_elide_right_to_left_line() {
+    // An overflowing right-to-left line spills out on the left, so it's cut off there (#14434).
+    // The right-to-left mark makes a paragraph of Latin text right-to-left, like a file name that
+    // starts with Arabic and ends in ".docx". The test font has no Hebrew, so those glyphs are
+    // missing-glyph boxes, which still have an advance.
+    for text in
+        ["\u{5d0}\u{5d1}\u{5d2} ".repeat(20), alloc::format!("\u{200f}{}", "abc ".repeat(20))]
+    {
+        let runs = elided_line(&text, 100., false);
+        let ellipses: Vec<_> = runs.iter().filter_map(|(_, ellipsis)| *ellipsis).collect();
+        assert_eq!(ellipses.len(), 1, "expected one ellipsis on the line of {text:?}");
+        let (ellipsis_start, ellipsis_end) = ellipses[0];
+        assert!(ellipsis_start >= 0.);
+        let glyphs: Vec<_> = runs.iter().flat_map(|(glyphs, _)| glyphs).collect();
+        assert!(!glyphs.is_empty());
+        assert!(
+            glyphs.iter().all(|&&(start, end)| start >= ellipsis_end - 0.01 && end <= 100.01),
+            "glyphs outside the box or under the ellipsis: {glyphs:?}"
+        );
+        let left = glyphs.iter().map(|&&(start, _)| start).fold(f32::MAX, f32::min);
+        assert!(
+            left - ellipsis_end < 0.01,
+            "the ellipsis ends at {ellipsis_end}, not at the first kept glyph at {left}"
+        );
+        let max_advance = glyphs.iter().map(|&&(start, end)| end - start).fold(0., f32::max);
+        assert!(
+            ellipsis_start < max_advance + 0.01,
+            "more than one glyph was cut before the ellipsis at {ellipsis_start}"
+        );
+        let right = glyphs.iter().map(|&&(_, end)| end).fold(f32::MIN, f32::max);
+        assert!(right > 99., "the kept text of {text:?} ends at {right}, not at the right edge");
+    }
+}
+
+#[test]
+fn test_elide_right_to_left_line_that_fits() {
+    // parley hangs the trailing space past the left edge, which isn't an overflow.
+    let runs = elided_line("\u{5d0}\u{5d1}\u{5d2} ", 100., false);
+    assert!(runs.iter().all(|(_, ellipsis)| ellipsis.is_none()));
+    assert_eq!(runs.iter().map(|(glyphs, _)| glyphs.len()).sum::<usize>(), 4);
+}
+
+#[test]
+fn test_elide_line_of_several_runs() {
+    // Uppercase words stand in for right-to-left text: right-to-left marks lay them out from
+    // right to left, one glyph run per word, and an isolate holds them in a left-to-right
+    // paragraph. The line is cut once, wherever that falls, even when the overflowing run ends
+    // closer to the box edge than the ellipsis is wide, which put the ellipsis partly outside the
+    // box.
+    for text in [
+        "\u{200f}ALPHA\u{200f} BETA\u{200f} gamma delta\u{200f} EPSILON\u{200f} ZETA",
+        "alpha beta \u{2067}GAMMA\u{200f} DELTA\u{2069} epsilon zeta",
+    ] {
+        assert!(elided_line(text, 1000., false).len() > 1, "{text:?} lays out as one run");
+        for width in 30..120 {
+            let width = width as f32;
+            assert_one_ellipsis_in_box(
+                &elided_line(text, width, false),
+                width,
+                &alloc::format!("{text:?} at {width}px"),
+            );
+        }
+    }
+}
+
+#[test]
+fn test_elide_vertically_truncated_line_of_several_runs() {
+    // A line that fits but whose lines below were dropped gets one ellipsis, not one per run.
+    for (text, is_rtl) in [
+        ("\u{200f}ONE\u{200f} TWO\u{200f} three four", true),
+        ("one two \u{2067}THREE\u{200f} FOUR\u{2069}", false),
+    ] {
+        let runs = elided_line(text, 200., true);
+        assert!(runs.len() > 1, "{text:?} lays out as one run");
+        assert_one_ellipsis_in_box(&runs, 200., &alloc::format!("{text:?}"));
+        let (ellipsis_start, ellipsis_end) =
+            runs.iter().find_map(|(_, ellipsis)| *ellipsis).unwrap();
+        let glyphs: Vec<_> = runs.iter().flat_map(|(glyphs, _)| glyphs).copied().collect();
+        if is_rtl {
+            let left = glyphs.iter().map(|&(start, _)| start).fold(f32::MAX, f32::min);
+            assert!((left - ellipsis_end).abs() < 0.01, "ellipsis not next to the text");
+        } else {
+            let right = glyphs.iter().map(|&(_, end)| end).fold(f32::MIN, f32::max);
+            assert!((right - ellipsis_start).abs() < 0.01, "ellipsis not next to the text");
+        }
+    }
+}
+
+#[test]
+fn test_control_glyphs() {
+    // Fonts have no glyph for a tab, which rendered as a missing-glyph box (#10177)
+    let cases: [(&str, &[bool]); 3] = [
+        ("ab", &[]),
+        ("ab\tc\u{7}", &[false, false, true, false, true]),
+        // A right-to-left paragraph is laid out in reverse.
+        ("\u{5d0}\t\u{5d1}\u{5d2}", &[false, false, true, false]),
+    ];
+    for (text, expected) in cases {
+        let layout = layout_text(text);
+        let paragraph = &layout.paragraphs[0];
+        let line = paragraph.layout.lines().next().unwrap();
+        assert_eq!(paragraph.control_glyphs(&line), expected, "{text:?}");
+    }
+
+    let layout = layout_text("ab\tc\u{7}");
+    let paragraph = &layout.paragraphs[0];
+    let line = paragraph.layout.lines().next().unwrap();
+    let missing_glyphs = line
+        .items()
+        .filter_map(|item| match item {
+            parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+            _ => None,
+        })
+        .flat_map(|run| run.glyphs().map(|glyph| glyph.id == 0).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    assert_eq!(missing_glyphs, paragraph.control_glyphs(&line));
+}
