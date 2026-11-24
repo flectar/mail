@@ -1,11 +1,13 @@
 //! The application icon chosen in Settings.
 //!
 //! The window icon and the in-app logos bind to the `AppIcon` Slint global,
-//! which is all Windows and X11 window managers need. The other places that
-//! show the icon are outside Slint's reach:
+//! which is all X11 window managers need. The other places that show the
+//! icon are outside Slint's reach:
 //!
 //! - the tray is a separate Slint compilation unit, whose picture
 //!   src/tray.rs draws from the chosen icon's;
+//! - the Windows taskbar draws buttons and pins from shortcuts, which name
+//!   the chosen icon among those the executable embeds (src/app_icon/taskbar.rs);
 //! - macOS draws the Dock and app switcher icon from the application, not the
 //!   window;
 //! - Linux launchers, and Wayland taskbars, look the icon up in the icon
@@ -14,13 +16,17 @@
 //! - mobile home screens switch to icons bundled with the app, through the
 //!   platform layer.
 //!
-//! Flatpak can neither show a tray nor write to the host's icon theme, and
-//! some mobile platforms reserve switching the home screen icon for system
-//! apps, so the choice is not offered there.
+//! Flatpak can neither show a tray nor write to the host's icon theme, the
+//! Microsoft Store package's manifest names its taskbar icon, and some mobile
+//! platforms reserve switching the home screen icon for system apps, so the
+//! choice is not offered there.
 
 use crate::{AppIconVariant, AppWindow};
 use flectar_mail_core::models;
 use slint::ComponentHandle;
+
+#[cfg(any(target_os = "windows", test))]
+mod taskbar;
 
 #[cfg(desktop)]
 pub(crate) const AVAILABLE: bool = cfg!(not(feature = "flatpak"));
@@ -55,16 +61,33 @@ pub(crate) fn choice(variant: AppIconVariant) -> models::AppIcon {
     }
 }
 
+#[cfg(target_os = "windows")]
+thread_local! {
+    /// The icon in use, which a main window created later takes.
+    static CHOSEN: std::cell::Cell<models::AppIcon> =
+        const { std::cell::Cell::new(models::AppIcon::Orange) };
+}
+
+/// Whether Settings offers the choice in this copy.
+fn available() -> bool {
+    #[cfg(target_os = "windows")]
+    let offered = taskbar::offered();
+    #[cfg(not(target_os = "windows"))]
+    let offered = true;
+    AVAILABLE && offered
+}
+
 /// Show `icon` everywhere the platform displays it. Call it before the window
 /// is first shown so the first frame already carries the chosen icon.
 pub(crate) fn apply(app: &AppWindow, icon: models::AppIcon) {
-    let icon = if AVAILABLE {
+    let available = available();
+    let icon = if available {
         icon
     } else {
         models::AppIcon::default()
     };
     let global = app.global::<crate::AppIcon>();
-    global.set_available(AVAILABLE);
+    global.set_available(available);
     global.set_platform(PLATFORM.into());
     global.set_variant(variant(icon));
     crate::tray::set_icon(global.invoke_tray_image(variant(icon)));
@@ -74,6 +97,26 @@ pub(crate) fn apply(app: &AppWindow, icon: models::AppIcon) {
     launcher::request(icon);
     #[cfg(mobile)]
     crate::platform::show_app_icon(icon);
+    #[cfg(target_os = "windows")]
+    {
+        CHOSEN.set(icon);
+        taskbar::show(icon);
+        if let Some(window) = crate::window_chrome::main_window() {
+            taskbar::describe_window(window, icon);
+        }
+    }
+}
+
+/// Tell the taskbar about the main window as it is created.
+#[cfg(target_os = "windows")]
+pub(crate) fn window_created(window: windows_sys::Win32::Foundation::HWND) {
+    taskbar::describe_window(window, CHOSEN.get());
+}
+
+/// Take that back as the main window is destroyed.
+#[cfg(target_os = "windows")]
+pub(crate) fn window_destroyed(window: windows_sys::Win32::Foundation::HWND) {
+    taskbar::forget_window(window);
 }
 
 /// The 512 px rendering of a non-default icon, for the Linux icon theme. The

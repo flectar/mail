@@ -419,7 +419,8 @@ three-pane layout, switch to a streamlined minimal view, choose a light or dark
 theme, select a built-in color palette or create a custom one, and show or hide
 sender avatars. You can also give the app icon a different color: on the
 taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
-and iOS home screens.
+and iOS home screens. On Windows, Flectar Mail's Start menu shortcut, taskbar
+pins and desktop shortcuts change color with it.
 
 The full workspace keeps your folders, message list, and selected email visible
 together. The minimal layout reduces visual noise and gives each part of your
