@@ -2271,3 +2271,24 @@ fn a_line_with_only_an_atomic_inline_without_height_keeps_its_strut() {
     close(node(&doc, "#a").final_layout().size.height, 50.0);
     close(node(&doc, "#b").final_layout().size.height, 50.0);
 }
+
+#[test]
+fn lang_matches_the_nearest_language_by_extended_filtering() {
+    // An element's language is its own `lang` or its nearest ancestor's, which
+    // `:lang()` matches by RFC 4647 extended filtering (Selectors 4 section
+    // 7.2), so a regional German matches `:lang(de)`, and an empty language
+    // matches nothing, as in browsers.
+    let doc = document(
+        "<style>div{height:10px} :lang(de){width:100px} p:lang(fr){width:200px}</style>
+         <div id=a lang=de-CH></div>
+         <div id=b lang=en></div>
+         <div lang=fr><p id=c></p></div>
+         <div lang=de style='width:300px'><div id=d lang=''></div></div>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 100.0);
+    close(width("#b"), 400.0);
+    close(width("#c"), 200.0);
+    close(width("#d"), 300.0);
+}
+
