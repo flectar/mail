@@ -350,6 +350,10 @@ pub(crate) fn store_body(
     raw_path: &str,
     parsed: &ParsedBody,
 ) -> Result<Vec<i64>> {
+    // First, as a code in the body is offered only from a confirmed sender.
+    let verification =
+        repo::messages::vouched_for_message(conn, message_id, parsed.headers.sender_verification)?;
+    repo::messages::set_sender_verification(conn, message_id, verification)?;
     repo::messages::store_body(
         conn,
         message_id,
@@ -365,9 +369,6 @@ pub(crate) fn store_body(
             .any(|attachment| !attachment.is_inline),
         Some(&parsed.snippet),
     )?;
-    let verification =
-        repo::messages::vouched_for_message(conn, message_id, parsed.headers.sender_verification)?;
-    repo::messages::set_sender_verification(conn, message_id, verification)?;
     repo::messages::fill_list_headers(
         conn,
         message_id,

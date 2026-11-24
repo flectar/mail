@@ -6,16 +6,16 @@ use flectar_mail_core::{
     events::CoreEvent,
     models::{
         Account, AccountConfig, ActionKind, ActionParams, ActionTarget, AddPasswordAccountArgs,
-        Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CardDavConnection,
-        ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage,
-        CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo, ForwardedMessage, Importance,
-        InvitationCard, Label, ListOrder, ListOwner, MailGrouping, MailHistory, MailProfile,
-        MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor, MessageDetail,
-        MessageSearchCursor, MessageSummary, PerformActionArgs, PortableAccountConfig, Provider,
-        QueueSendArgs, QueueSendResult, RsvpEventArgs, SaveDraftArgs, ScheduledSend, SearchCursor,
-        SenderIdentity, ServerRules, ServerRulesAnswer, ServerSearchCursor, Settings, Snippet,
-        ThreadCursor, ThreadSummary, UnsubscribeOffer, UnsubscribeOutcome, View,
-        normalized_workspace_list_pane_width, roles,
+        Address, BlockOffer, BlockResult, CalendarConnection, CalendarEvent, CancelledSend,
+        CardDavConnection, ConnectCaldavArgs, ConnectCardDavArgs, ContactRecordCursor,
+        ContactRecordPage, CreateEventArgs, CustomTheme, DraftAttachmentIn, FolderInfo,
+        ForwardedMessage, Importance, InvitationCard, Label, ListOrder, ListOwner, MailGrouping,
+        MailHistory, MailProfile, MailProtocol, MailRule, MailboxBadgeCounts, MessageCursor,
+        MessageDetail, MessageSearchCursor, MessageSummary, PerformActionArgs,
+        PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult, RsvpEventArgs,
+        SaveDraftArgs, ScheduledSend, SearchCursor, SenderIdentity, ServerRules, ServerRulesAnswer,
+        ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
+        UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -1487,11 +1487,11 @@ impl CoreMailSource {
             .min_by_key(|send| send.send_at))
     }
 
-    /// Stop a row's scheduled send; its draft stays. Returns whether one
-    /// waited.
-    pub async fn cancel_scheduled_row(&self, row: &MailMessage) -> Result<bool, String> {
+    /// Stop a row's scheduled send; its draft stays. Says whether one
+    /// waited, and whether another of the user's devices may still send it.
+    pub async fn cancel_scheduled_row(&self, row: &MailMessage) -> Result<CancelledSend, String> {
         let Some(send) = self.scheduled_send_of(row).await? else {
-            return Ok(false);
+            return Ok(CancelledSend::NotScheduled);
         };
         self.core
             .cancel_scheduled_send(send.draft_id)
