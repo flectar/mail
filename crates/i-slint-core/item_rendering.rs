@@ -1,0 +1,956 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+#![warn(missing_docs)]
+//! module for rendering the tree of items
+
+use super::items::*;
+use crate::graphics::{
+    Color, FontRequest, Image, IntRect, adjust_rect_and_border_for_inner_drawing,
+};
+use crate::item_tree::ItemTreeRc;
+use crate::item_tree::{ItemVisitor, ItemVisitorVTable, VisitChildrenResult};
+use crate::lengths::{
+    LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
+    PhysicalBorderRadius, PhysicalPx, ScaleFactor, SizeLengths,
+};
+pub use crate::partial_renderer::CachedRenderingData;
+use crate::window::WindowAdapterRc;
+use crate::{Brush, SharedString};
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
+#[cfg(feature = "std")]
+use core::cell::RefCell;
+use core::pin::Pin;
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+use vtable::VRc;
+
+/// A per-item cache.
+///
+/// Cache rendering information for a given item.
+///
+/// Use [`ItemCache::get_or_update_cache_entry`] to get or update the items, the
+/// cache is automatically invalided when the property gets dirty.
+/// [`ItemCache::component_destroyed`] must be called to clear the cache for that
+/// component.
+#[cfg(feature = "std")]
+pub struct ItemCache<T> {
+    /// The pointer is a pointer to a component
+    map: RefCell<HashMap<*const vtable::Dyn, HashMap<u32, crate::graphics::CachedGraphicsData<T>>>>,
+    /// Track if the window scale factor changes; used to clear the cache if necessary.
+    window_scale_factor_tracker: Pin<Box<crate::properties::PropertyTracker>>,
+}
+
+#[cfg(feature = "std")]
+impl<T> Default for ItemCache<T> {
+    fn default() -> Self {
+        Self { map: Default::default(), window_scale_factor_tracker: Box::pin(Default::default()) }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T: Clone> ItemCache<T> {
+    /// Like [`Self::get_or_update_cache_entry`], but drops a value for which `is_stale` returns
+    /// `true` and computes it again: for values whose validity depends on state the dependency
+    /// tracker doesn't see, such as the renderer's current transform.
+    pub fn get_or_update_cache_entry_unless(
+        &self,
+        item_rc: &ItemRc,
+        mut update_fn: impl FnMut() -> T,
+        is_stale: impl FnOnce(&T) -> bool,
+    ) -> T {
+        let value = self.get_or_update_cache_entry(item_rc, &mut update_fn);
+        if !is_stale(&value) {
+            return value;
+        }
+        self.release(item_rc);
+        self.get_or_update_cache_entry(item_rc, update_fn)
+    }
+
+    /// Returns the cached value associated to the `item_rc` if it is still valid.
+    /// Otherwise call the `update_fn` to compute that value, and track property access
+    /// so it is automatically invalided when property becomes dirty.
+    pub fn get_or_update_cache_entry(&self, item_rc: &ItemRc, update_fn: impl FnOnce() -> T) -> T {
+        let component = &(**item_rc.item_tree()) as *const _;
+        let mut borrowed = self.map.borrow_mut();
+        match borrowed.entry(component).or_default().entry(item_rc.index()) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let mut tracker = entry.get_mut().dependency_tracker.take();
+                drop(borrowed);
+                let maybe_new_data = tracker
+                    .get_or_insert_with(|| Box::pin(Default::default()))
+                    .as_ref()
+                    .evaluate_if_dirty(update_fn);
+                let mut borrowed = self.map.borrow_mut();
+                let e = borrowed.get_mut(&component).unwrap().get_mut(&item_rc.index()).unwrap();
+                e.dependency_tracker = tracker;
+                if let Some(new_data) = maybe_new_data {
+                    e.data = new_data.clone();
+                    new_data
+                } else {
+                    e.data.clone()
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(_) => {
+                drop(borrowed);
+                let new_entry = crate::graphics::CachedGraphicsData::new(update_fn);
+                let data = new_entry.data.clone();
+                self.map
+                    .borrow_mut()
+                    .get_mut(&component)
+                    .unwrap()
+                    .insert(item_rc.index(), new_entry);
+                data
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> ItemCache<T> {
+    /// Returns the cached value associated with the `item_rc` if it is in the cache
+    /// and still valid.
+    pub fn with_entry<U>(
+        &self,
+        item_rc: &ItemRc,
+        callback: impl FnOnce(&T) -> Option<U>,
+    ) -> Option<U> {
+        let component = &(**item_rc.item_tree()) as *const _;
+        self.map
+            .borrow()
+            .get(&component)
+            .and_then(|per_component_entries| per_component_entries.get(&item_rc.index()))
+            .and_then(|entry| callback(&entry.data))
+    }
+
+    /// Clears the cache if the window's scale factor has changed since the last call.
+    pub fn clear_cache_if_scale_factor_changed(&self, window: &crate::api::Window) {
+        if self.window_scale_factor_tracker.is_dirty() {
+            self.window_scale_factor_tracker
+                .as_ref()
+                .evaluate_as_dependency_root(|| window.scale_factor());
+            self.clear_all();
+        }
+    }
+
+    /// free the whole cache
+    pub fn clear_all(&self) {
+        self.map.borrow_mut().clear();
+    }
+
+    /// Function that must be called when a component is destroyed.
+    ///
+    /// Usually can be called from [`crate::window::WindowAdapterInternal::unregister_item_tree`]
+    pub fn component_destroyed(&self, component: crate::item_tree::ItemTreeRef) {
+        self.component_destroyed_at(crate::item_tree::ItemTreeRef::as_ptr(component));
+    }
+
+    /// Like [`Self::component_destroyed`], for a component that is already gone,
+    /// given the address that [`crate::item_tree::ItemTreeRef::as_ptr`] returned for it.
+    pub fn component_destroyed_at(&self, component_ptr: core::ptr::NonNull<u8>) {
+        let component_ptr: *const _ = component_ptr.cast().as_ptr();
+        self.map.borrow_mut().remove(&component_ptr);
+    }
+
+    /// free the cache for a given item
+    pub fn release(&self, item_rc: &ItemRc) {
+        let component = &(**item_rc.item_tree()) as *const _;
+        if let Some(sub) = self.map.borrow_mut().get_mut(&component) {
+            sub.remove(&item_rc.index());
+        }
+    }
+
+    /// Returns true if there are no entries in the cache; false otherwise.
+    pub fn is_empty(&self) -> bool {
+        self.map.borrow().is_empty()
+    }
+
+    /// Calls `f` on every cached value.
+    ///
+    /// Use this to shrink values in place rather than removing their entries:
+    /// whatever depends on an entry is only notified of later changes while the entry exists.
+    pub fn for_each_mut(&self, mut f: impl FnMut(&mut T)) {
+        for per_component in self.map.borrow_mut().values_mut() {
+            for entry in per_component.values_mut() {
+                f(&mut entry.data);
+            }
+        }
+    }
+
+    /// Returns a [`RefMut`](std::cell::RefMut) referencing the cached value associated with
+    /// `item_rc`, updating the cache entry first if necessary using `update_fn`.
+    ///
+    /// Unlike [`get_or_update_cache_entry`](Self::get_or_update_cache_entry), this method does
+    /// not require `T: Clone` and returns a mutable reference into the cache, which permits
+    /// in-place modification or temporary extraction of the cached value (e.g., via
+    /// [`std::mem::take`]).
+    pub fn get_or_update_cache_entry_ref(
+        &self,
+        item_rc: &ItemRc,
+        update_fn: impl FnOnce() -> T,
+    ) -> std::cell::RefMut<'_, T> {
+        self.get_or_update_cache_entry_ref_unless(item_rc, update_fn, |_| false)
+    }
+
+    /// Like [`Self::get_or_update_cache_entry_ref`], but also computes the value again when
+    /// `is_stale` returns `true` for the cached one.
+    ///
+    /// The entry is updated in place, so whatever depends on it keeps being notified of changes.
+    pub fn get_or_update_cache_entry_ref_unless(
+        &self,
+        item_rc: &ItemRc,
+        update_fn: impl FnOnce() -> T,
+        is_stale: impl FnOnce(&T) -> bool,
+    ) -> std::cell::RefMut<'_, T> {
+        let component = &(**item_rc.item_tree()) as *const _;
+        let index = item_rc.index();
+
+        {
+            let mut borrowed = self.map.borrow_mut();
+            match borrowed.entry(component).or_default().entry(index) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let entry = entry.get_mut();
+                    let stale = is_stale(&entry.data);
+                    let mut tracker = entry.dependency_tracker.take();
+                    drop(borrowed);
+                    let pinned_tracker =
+                        tracker.get_or_insert_with(|| Box::pin(Default::default())).as_ref();
+                    let maybe_new_data = if stale {
+                        Some(pinned_tracker.evaluate(update_fn))
+                    } else {
+                        pinned_tracker.evaluate_if_dirty(update_fn)
+                    };
+                    let mut borrowed = self.map.borrow_mut();
+                    let e = borrowed.get_mut(&component).unwrap().get_mut(&index).unwrap();
+                    e.dependency_tracker = tracker;
+                    if let Some(new_data) = maybe_new_data {
+                        e.data = new_data;
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(_) => {
+                    drop(borrowed);
+                    let new_entry = crate::graphics::CachedGraphicsData::new(update_fn);
+                    self.map.borrow_mut().get_mut(&component).unwrap().insert(index, new_entry);
+                }
+            }
+        }
+
+        std::cell::RefMut::map(self.map.borrow_mut(), |map| {
+            &mut map.get_mut(&component).unwrap().get_mut(&index).unwrap().data
+        })
+    }
+}
+
+/// Renders the children of the item with the specified index into the renderer.
+pub fn render_item_children(
+    renderer: &mut dyn ItemRenderer,
+    component: &ItemTreeRc,
+    index: isize,
+    window_adapter: &WindowAdapterRc,
+) {
+    let mut actual_visitor =
+        |component: &ItemTreeRc, index: u32, item: Pin<ItemRef>| -> VisitChildrenResult {
+            renderer.save_state();
+            let item_rc = ItemRc::new(component.clone(), index);
+
+            let (do_draw, item_origin, item_size) = renderer.filter_item(&item_rc, window_adapter);
+
+            renderer.translate(item_origin.to_vector());
+
+            // Don't render items that are clipped, with the exception of the Clip or Flickable since
+            // they themselves clip their content.
+            let render_result = if renderer.global_alpha_transparent() {
+                // apply_opacity only multiplies, so the whole subtree stays transparent.
+                RenderingResult::ContinueRenderingWithoutChildren
+            } else if do_draw
+               || item.as_ref().clips_children()
+               // HACK, the geometry of the box shadow does not include the shadow, because when the shadow is the root for repeated elements it would translate the children
+               || ItemRef::downcast_pin::<BoxShadow>(item).is_some()
+               // Transform and Opacity should also be applied regardless if the item itself is clipped or not
+               || ItemRef::downcast_pin::<Transform>(item).is_some()
+               || ItemRef::downcast_pin::<Opacity>(item).is_some()
+               || ItemRef::downcast_pin::<Layer>(item).is_some()
+            {
+                let size = item_size.unwrap_or_else(|| {
+                    crate::properties::evaluate_no_tracking(|| item_rc.geometry()).size
+                });
+                item.as_ref().render(&mut (renderer as &mut dyn ItemRenderer), &item_rc, size)
+            } else {
+                RenderingResult::ContinueRenderingChildren
+            };
+
+            if matches!(render_result, RenderingResult::ContinueRenderingChildren) {
+                render_item_children(renderer, component, index as isize, window_adapter);
+            }
+            renderer.restore_state();
+            VisitChildrenResult::CONTINUE
+        };
+    vtable::new_vref!(let mut actual_visitor : VRefMut<ItemVisitorVTable> for ItemVisitor = &mut actual_visitor);
+    VRc::borrow_pin(component).as_ref().visit_children_item(
+        index,
+        crate::item_tree::TraversalOrder::BackToFront,
+        actual_visitor,
+    );
+}
+
+/// Renders the tree of items that component holds, using the specified renderer. Rendering is done
+/// relative to the specified origin.
+pub fn render_component_items(
+    component: &ItemTreeRc,
+    renderer: &mut dyn ItemRenderer,
+    origin: LogicalPoint,
+    window_adapter: &WindowAdapterRc,
+) {
+    renderer.save_state();
+    renderer.translate(origin.to_vector());
+
+    render_item_children(renderer, component, -1, window_adapter);
+
+    renderer.restore_state();
+}
+
+/// Compute the bounding rect of all children. This does /not/ include item's own bounding rect. Remember to run this
+/// via `evaluate_no_tracking`.
+pub fn item_children_bounding_rect(
+    item_rc: &ItemRc,
+    window_adapter: &WindowAdapterRc,
+) -> LogicalRect {
+    item_children_bounding_rect_transformed(item_rc, window_adapter, Default::default())
+}
+
+fn item_children_bounding_rect_transformed(
+    item_rc: &ItemRc,
+    window_adapter: &WindowAdapterRc,
+    transform: crate::lengths::ItemTransform,
+) -> LogicalRect {
+    let mut bounding_rect = LogicalRect::zero();
+
+    let mut actual_visitor =
+        |component: &ItemTreeRc, index: u32, _ref: Pin<ItemRef>| -> VisitChildrenResult {
+            let item_rc = ItemRc::new(component.clone(), index);
+            let bounds_with_children =
+                item_with_children_bounding_rect_transformed(&item_rc, window_adapter, transform);
+
+            bounding_rect = bounding_rect.union(&bounds_with_children);
+
+            VisitChildrenResult::CONTINUE
+        };
+
+    vtable::new_vref!(let mut actual_visitor : VRefMut<ItemVisitorVTable> for ItemVisitor = &mut actual_visitor);
+    VRc::borrow_pin(item_rc.item_tree()).as_ref().visit_children_item(
+        item_rc.index() as isize,
+        crate::item_tree::TraversalOrder::BackToFront,
+        actual_visitor,
+    );
+
+    bounding_rect
+}
+
+fn item_with_children_bounding_rect_transformed(
+    item_rc: &ItemRc,
+    window_adapter: &WindowAdapterRc,
+    transform: crate::lengths::ItemTransform,
+) -> LogicalRect {
+    let item_geom = item_rc.geometry();
+
+    if item_rc.borrow().as_ref().clips_children() {
+        transform.outer_transformed_rect(&item_geom.cast()).cast()
+    } else {
+        let bounding = item_rc.bounding_rect(&item_geom, window_adapter);
+        let bounding = transform.outer_transformed_rect(&bounding.cast());
+        let children_relative_transform = item_rc
+            .children_transform()
+            .unwrap_or_default()
+            .then_translate(item_geom.origin.to_vector().cast());
+
+        let children_absolute_transform = transform.then(&children_relative_transform);
+
+        item_children_bounding_rect_transformed(
+            item_rc,
+            window_adapter,
+            children_absolute_transform,
+        )
+        .union(&bounding.cast())
+    }
+}
+
+/// Trait for an item that represent a Rectangle to the Renderer
+#[allow(missing_docs)]
+pub trait RenderRectangle {
+    fn background(self: Pin<&Self>) -> Brush;
+}
+
+/// Trait for an item that represent a Rectangle with a border to the Renderer
+#[allow(missing_docs)]
+pub trait RenderBorderRectangle {
+    fn background(self: Pin<&Self>) -> Brush;
+    fn border_width(self: Pin<&Self>) -> LogicalLength;
+    fn border_radius(self: Pin<&Self>) -> LogicalBorderRadius;
+    fn border_color(self: Pin<&Self>) -> Brush;
+}
+
+/// The geometry for drawing a [`RenderBorderRectangle`] in the CSS box model, shared by
+/// the renderers that stroke the border centered on a path: the border is drawn entirely
+/// inside the item's geometry, the background doesn't extend under an opaque border, and
+/// brushes are resolved against the full border box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BorderRectLayout {
+    /// The size of the border box, for resolving the background and border brushes.
+    pub brush_size: euclid::Size2D<f32, PhysicalPx>,
+    /// The corner radii of the outer border box, adjusted for the border width.
+    pub outer_radius: PhysicalBorderRadius,
+    /// The rectangle to fill with the background brush.
+    pub background_rect: euclid::Rect<f32, PhysicalPx>,
+    /// The corner radii of `background_rect`.
+    pub background_radius: PhysicalBorderRadius,
+    /// The rectangle to stroke with `border_color` when `border_width` is positive.
+    pub border_rect: euclid::Rect<f32, PhysicalPx>,
+    /// The corner radii of `border_rect`.
+    pub border_radius: PhysicalBorderRadius,
+    /// The stroke width of the border; zero for transparent borders.
+    pub border_width: euclid::Length<f32, PhysicalPx>,
+    /// The border brush.
+    pub border_color: Brush,
+}
+
+impl BorderRectLayout {
+    /// Computes the layout for a border rectangle of `size`, or `None` when the
+    /// geometry is empty.
+    pub fn new(
+        rect: Pin<&dyn RenderBorderRectangle>,
+        size: LogicalSize,
+        scale_factor: ScaleFactor,
+    ) -> Option<Self> {
+        // `cast()`: the logical Coord type can be i32, the physical geometry is f32.
+        let mut geometry = euclid::Rect::from_size(size.cast() * scale_factor);
+        if geometry.is_empty() {
+            return None;
+        }
+        let brush_size = geometry.size;
+
+        let border_color = rect.border_color();
+        let opaque_border = border_color.is_opaque();
+        let mut border_width = if border_color.is_transparent() {
+            euclid::Length::new(0.)
+        } else {
+            rect.border_width().cast() * scale_factor
+        };
+
+        // The stroke is centered on the path (50% inside, 50% outside), while in CSS the
+        // border is entirely inside the geometry. Ensure positive corner radii are at
+        // least half the border width, so that the outer edge keeps a radius at all;
+        // this is incorrect when the radius is smaller than that, but that can't be
+        // helped - better a radius a bit too big than no radius.
+        let fill_radius = (rect.border_radius().cast() * scale_factor)
+            .outer(border_width / 2. + euclid::Length::new(0.01));
+        let border_radius = fill_radius.inner(border_width / 2.);
+
+        let (background_rect, background_radius) = if opaque_border {
+            // The fill doesn't need to extend under an opaque border, so fill and
+            // stroke share the inset geometry.
+            adjust_rect_and_border_for_inner_drawing(&mut geometry, &mut border_width);
+            (geometry, border_radius)
+        } else {
+            // A (semi-)transparent border must not cover the background, so the fill
+            // covers the full rectangle.
+            let background = (geometry, fill_radius);
+            adjust_rect_and_border_for_inner_drawing(&mut geometry, &mut border_width);
+            background
+        };
+
+        Some(Self {
+            brush_size,
+            outer_radius: fill_radius,
+            background_rect,
+            background_radius,
+            border_rect: geometry,
+            border_radius,
+            border_width,
+            border_color,
+        })
+    }
+}
+
+/// The region children are clipped to when `clip` is enabled on an element with a
+/// border: the rectangle inside the border ring, with the corner radii reduced
+/// accordingly. See <https://github.com/slint-ui/slint/issues/1988>.
+pub fn clip_content_box(
+    size: LogicalSize,
+    radius: LogicalBorderRadius,
+    border_width: LogicalLength,
+) -> (LogicalRect, LogicalBorderRadius) {
+    // A border covering half the size or more leaves no content region. Integer
+    // arithmetic, as the logical Coord type can be i32.
+    let two = 2 as crate::Coord;
+    let border_width = border_width
+        .max(LogicalLength::default())
+        .min(size.width_length() / two)
+        .min(size.height_length() / two);
+    let rect = LogicalRect::new(
+        LogicalPoint::from_lengths(border_width, border_width),
+        LogicalSize::from_lengths(
+            size.width_length() - border_width * two,
+            size.height_length() - border_width * two,
+        ),
+    );
+    (rect, radius.inner(border_width))
+}
+
+/// Trait for an item that represents an Image towards the renderer
+#[allow(missing_docs)]
+pub trait RenderImage {
+    fn target_size(self: Pin<&Self>) -> LogicalSize;
+    fn source(self: Pin<&Self>) -> Image;
+    fn source_clip(self: Pin<&Self>) -> Option<IntRect>;
+    fn image_fit(self: Pin<&Self>) -> ImageFit;
+    fn rendering(self: Pin<&Self>) -> ImageRendering;
+    fn colorize(self: Pin<&Self>) -> Brush;
+    fn alignment(self: Pin<&Self>) -> (ImageHorizontalAlignment, ImageVerticalAlignment);
+    fn tiling(self: Pin<&Self>) -> (ImageTiling, ImageTiling);
+}
+
+/// Trait for an item that has font properties.
+pub trait HasFont {
+    /// The font to shape the item's text with, falling back to the enclosing `Window`'s defaults.
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest;
+}
+
+#[allow(missing_docs)]
+pub enum PlainOrStyledText {
+    Plain(SharedString),
+    Styled(crate::styled_text::StyledText),
+}
+
+/// Trait for an item that represents a string towards the renderer.
+pub trait RenderString: HasFont {
+    /// The text to lay out.
+    fn text(self: Pin<&Self>) -> PlainOrStyledText;
+    /// The `max-lines` property; see [`Self::line_limit`].
+    fn max_lines(self: Pin<&Self>) -> i32 {
+        0
+    }
+    /// The maximum number of lines to lay out and render, from the `max-lines` property.
+    /// Property values less than or equal to zero mean no limit.
+    fn line_limit(self: Pin<&Self>) -> Option<usize> {
+        usize::try_from(self.max_lines()).ok().filter(|max_lines| *max_lines > 0)
+    }
+    /// Stroke brush, width and style. The style is baked into the shaped glyphs, so it lives
+    /// here (rather than in `RenderText`) to keep measuring and drawing shaping-identical.
+    fn stroke(self: Pin<&Self>) -> (Brush, LogicalLength, TextStrokeStyle) {
+        Default::default()
+    }
+    /// Color of `Style::Link` spans. Like `stroke`, it's baked into the shaped glyphs.
+    fn link_color(self: Pin<&Self>) -> Color {
+        Default::default()
+    }
+    /// The factor applied to the font's natural line height, or `None` for the natural height.
+    ///
+    /// Width measurement goes through `TextForWidth`, which never calls this: the line height
+    /// can't change the width, and a factor bound to the width would loop there (#13799).
+    fn line_height_factor(self: Pin<&Self>) -> Option<f32> {
+        None
+    }
+    /// Whether the renderer only measures the width, so a layout shaped with any line height serves.
+    fn measures_width_only(self: Pin<&Self>) -> bool {
+        false
+    }
+}
+
+/// Maps a `line-height-factor` property value to [`RenderString::line_height_factor`].
+/// Negative and non-finite values behave like `1`, the natural line height; `0` collapses lines.
+pub fn resolve_line_height_factor(factor: f32) -> Option<f32> {
+    (factor.is_finite() && factor >= 0.0 && factor != 1.0).then_some(factor)
+}
+
+/// Presents a text to the renderer for measuring its width: like the text itself, but with the
+/// natural line height. See [`RenderString::line_height_factor`].
+pub(crate) struct TextForWidth<'a>(pub Pin<&'a dyn RenderString>);
+
+impl HasFont for TextForWidth<'_> {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        self.0.font_request(self_rc)
+    }
+}
+
+impl RenderString for TextForWidth<'_> {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        self.0.text()
+    }
+    fn max_lines(self: Pin<&Self>) -> i32 {
+        self.0.max_lines()
+    }
+    fn line_limit(self: Pin<&Self>) -> Option<usize> {
+        self.0.line_limit()
+    }
+    fn stroke(self: Pin<&Self>) -> (Brush, LogicalLength, TextStrokeStyle) {
+        self.0.stroke()
+    }
+    fn link_color(self: Pin<&Self>) -> Color {
+        self.0.link_color()
+    }
+    fn line_height_factor(self: Pin<&Self>) -> Option<f32> {
+        None
+    }
+    fn measures_width_only(self: Pin<&Self>) -> bool {
+        true
+    }
+}
+
+/// Returns the text box's alignment anchor in physical pixels.
+/// Renderers can snap this point while preserving the box dimensions used for layout.
+pub fn text_alignment_anchor(
+    size: euclid::Size2D<f32, PhysicalPx>,
+    horizontal: TextHorizontalAlignment,
+    vertical: TextVerticalAlignment,
+) -> euclid::Point2D<f32, PhysicalPx> {
+    let x = match horizontal {
+        TextHorizontalAlignment::Start | TextHorizontalAlignment::Left => 0.0,
+        TextHorizontalAlignment::Center => size.width / 2.0,
+        TextHorizontalAlignment::End | TextHorizontalAlignment::Right => size.width,
+    };
+    let y = match vertical {
+        TextVerticalAlignment::Top => 0.0,
+        TextVerticalAlignment::Center => size.height / 2.0,
+        TextVerticalAlignment::Bottom => size.height,
+    };
+    euclid::Point2D::new(x, y)
+}
+
+/// Trait for an item that represents an Text towards the renderer
+#[allow(missing_docs)]
+pub trait RenderText: RenderString {
+    fn target_size(self: Pin<&Self>) -> LogicalSize;
+    fn color(self: Pin<&Self>) -> Brush;
+    fn alignment(self: Pin<&Self>) -> (TextHorizontalAlignment, TextVerticalAlignment);
+    fn wrap(self: Pin<&Self>) -> TextWrap;
+    fn overflow(self: Pin<&Self>) -> TextOverflow;
+    fn is_markdown(self: Pin<&Self>) -> bool;
+    /// The part of the text drawn as selected, if any.
+    fn selection(self: Pin<&Self>) -> Option<TextSelection> {
+        None
+    }
+}
+
+/// A stretch of a text item's text drawn as selected.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextSelection {
+    /// Byte offsets into the raw text.
+    /// For styled text, that is its paragraphs joined by `'\n'`.
+    pub range: core::ops::Range<usize>,
+    /// The highlight behind the selected glyphs.
+    pub background: Color,
+    /// The color of the selected glyphs, whatever their own.
+    pub foreground: Color,
+}
+
+impl HasFont for (SharedString, Brush) {
+    fn font_request(self: Pin<&Self>, self_rc: &crate::items::ItemRc) -> FontRequest {
+        crate::items::WindowItem::resolved_font_request(
+            self_rc,
+            SharedString::default(),
+            0,
+            LogicalLength::default(),
+            LogicalLength::default(),
+            false,
+        )
+    }
+}
+
+impl RenderString for (SharedString, Brush) {
+    fn text(self: Pin<&Self>) -> PlainOrStyledText {
+        PlainOrStyledText::Plain(self.0.clone())
+    }
+}
+
+impl RenderText for (SharedString, Brush) {
+    fn target_size(self: Pin<&Self>) -> LogicalSize {
+        LogicalSize::default()
+    }
+
+    fn color(self: Pin<&Self>) -> Brush {
+        self.1.clone()
+    }
+
+    fn alignment(
+        self: Pin<&Self>,
+    ) -> (crate::items::TextHorizontalAlignment, crate::items::TextVerticalAlignment) {
+        Default::default()
+    }
+
+    fn wrap(self: Pin<&Self>) -> crate::items::TextWrap {
+        Default::default()
+    }
+
+    fn overflow(self: Pin<&Self>) -> crate::items::TextOverflow {
+        Default::default()
+    }
+
+    fn is_markdown(self: Pin<&Self>) -> bool {
+        false
+    }
+}
+
+/// Trait used to render each items.
+///
+/// The item needs to be rendered relative to its (x,y) position. For example,
+/// draw_rectangle should draw a rectangle in `(pos.x + rect.x, pos.y + rect.y)`
+#[allow(missing_docs)]
+pub trait ItemRenderer {
+    fn draw_rectangle(
+        &mut self,
+        rect: Pin<&dyn RenderRectangle>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+        _cache: &CachedRenderingData,
+    );
+    fn draw_border_rectangle(
+        &mut self,
+        rect: Pin<&dyn RenderBorderRectangle>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+        _cache: &CachedRenderingData,
+    );
+    fn draw_window_background(
+        &mut self,
+        rect: Pin<&dyn RenderRectangle>,
+        self_rc: &ItemRc,
+        size: LogicalSize,
+        cache: &CachedRenderingData,
+    );
+    fn draw_image(
+        &mut self,
+        image: Pin<&dyn RenderImage>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+        _cache: &CachedRenderingData,
+    );
+    fn draw_text(
+        &mut self,
+        text: Pin<&dyn RenderText>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+        _cache: &CachedRenderingData,
+    );
+    fn draw_text_input(
+        &mut self,
+        text_input: Pin<&TextInput>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+    );
+    #[cfg(feature = "path")]
+    fn draw_path(&mut self, path: Pin<&Path>, _self_rc: &ItemRc, _size: LogicalSize);
+    fn draw_box_shadow(
+        &mut self,
+        box_shadow: Pin<&BoxShadow>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+    );
+    fn draw_backdrop_blur(
+        &mut self,
+        _backdrop_blur: Pin<&BackdropBlur>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+    ) {
+    }
+    fn visit_opacity(
+        &mut self,
+        opacity_item: Pin<&Opacity>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+    ) -> RenderingResult {
+        self.apply_opacity(opacity_item.opacity());
+        RenderingResult::ContinueRenderingChildren
+    }
+    fn visit_layer(
+        &mut self,
+        _layer_item: Pin<&Layer>,
+        _self_rc: &ItemRc,
+        _size: LogicalSize,
+    ) -> RenderingResult {
+        // Not supported
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    // Apply the bounds of the Clip element, if enabled. The default implementation calls
+    // combine_clip, but the render may choose an alternate way of implementing the clip.
+    // For example the GL backend uses a layered rendering approach.
+    fn visit_clip(
+        &mut self,
+        clip_item: Pin<&Clip>,
+        _item_rc: &ItemRc,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        if clip_item.clip() {
+            let (clip_rect, clip_radius) =
+                clip_content_box(size, clip_item.logical_border_radius(), clip_item.border_width());
+            let clip_region_valid = self.combine_clip(clip_rect, clip_radius);
+
+            // If clipping is enabled but the clip element is outside the visible range, then we don't
+            // need to bother doing anything, not even rendering the children.
+            if !clip_region_valid {
+                return RenderingResult::ContinueRenderingWithoutChildren;
+            }
+        }
+        RenderingResult::ContinueRenderingChildren
+    }
+
+    /// Clip the further call until restore_state.
+    /// (FIXME: consider removing radius and have another function that take a path instead)
+    /// Returns a boolean indicating the state of the new clip region: true if the clip region covers
+    /// an area; false if the clip region is empty.
+    fn combine_clip(&mut self, rect: LogicalRect, radius: LogicalBorderRadius) -> bool;
+    /// Get the current clip bounding box in the current transformed coordinate.
+    fn get_current_clip(&self) -> LogicalRect;
+
+    fn translate(&mut self, distance: LogicalVector);
+    /// Returns the accumulated local-to-screen transform, including
+    /// translate, scale, and rotate.
+    fn current_transform(&self) -> crate::lengths::ItemTransform {
+        todo!("this renderer does not track transforms for partial rendering")
+    }
+    fn rotate(&mut self, angle_in_degrees: f32);
+    fn scale(&mut self, scale_x_factor: f32, scale_y_factor: f32);
+    /// Apply the opacity (between 0 and 1) for all following items until the next call to restore_state.
+    fn apply_opacity(&mut self, opacity: f32);
+    /// Returns true when the opacity accumulated via [`Self::apply_opacity`] is zero.
+    fn global_alpha_transparent(&self) -> bool {
+        false
+    }
+
+    fn save_state(&mut self);
+    fn restore_state(&mut self);
+
+    /// Returns the scale factor
+    fn scale_factor(&self) -> ScaleFactor;
+
+    /// Draw a pixmap in position indicated by the `pos`.
+    /// The pixmap will be taken from cache if the cache is valid, otherwise, update_fn will be called
+    /// with a callback that need to be called once with `fn (width, height, data)` where data are the
+    /// RGBA premultiplied pixel values
+    fn draw_cached_pixmap(
+        &mut self,
+        item_cache: &ItemRc,
+        update_fn: &dyn Fn(&mut dyn FnMut(u32, u32, &[u8])),
+    );
+
+    /// Draw the given string with the specified color at current (0, 0) with the default font. Mainly
+    /// used by the performance counter overlay.
+    fn draw_string(&mut self, string: &str, color: crate::Color);
+
+    fn draw_image_direct(&mut self, image: crate::graphics::Image);
+
+    /// This is called before it is being rendered (before the draw_* function).
+    /// Returns
+    ///  - if the item needs to be drawn (false means it is clipped or doesn't need to be drawn)
+    ///  - the origin of the item
+    ///  - the size of the item, or None if it doesn't need to be drawn and the size wasn't computed
+    fn filter_item(
+        &mut self,
+        item: &ItemRc,
+        window_adapter: &WindowAdapterRc,
+    ) -> (bool, LogicalPoint, Option<LogicalSize>) {
+        let item_geometry = item.geometry();
+        // Query bounding rect untracked, as properties that affect the bounding rect are already tracked
+        // when rendering the item.
+        let bounding_rect = crate::properties::evaluate_no_tracking(|| {
+            item.bounding_rect(&item_geometry, window_adapter)
+        });
+        (
+            self.get_current_clip().intersects(&bounding_rect),
+            item_geometry.origin,
+            Some(item_geometry.size),
+        )
+    }
+
+    fn window(&self) -> &crate::window::WindowInner;
+
+    /// Return the internal renderer
+    fn as_any(&mut self) -> Option<&mut dyn core::any::Any>;
+}
+
+/// Renderer-backend hooks for [`Layer::render`], which owns the caching and
+/// bounds computation; implementors only describe how to allocate, render
+/// into, and unwrap a layer target.
+///
+/// The `'cache` lifetime lets `layer_cache` hand out a reference that doesn't
+/// borrow `self`, so the orchestrator can call the other `&mut self` methods.
+#[cfg(feature = "std")]
+pub trait LayerRenderer<'cache>: ItemRenderer {
+    /// Per-layer render target (for example a skia `Surface` or a reused GPU texture).
+    type LayerTarget;
+    /// Cached image type produced from rendering into a [`Self::LayerTarget`].
+    type Image: Clone;
+
+    /// Access the renderer's layer cache.
+    fn layer_cache(
+        &self,
+    ) -> &'cache ItemCache<Option<(euclid::Point2D<f32, crate::lengths::PhysicalPx>, Self::Image)>>;
+
+    /// Allocate a target of the given physical size; `None` aborts rendering.
+    fn create_layer_target(
+        &mut self,
+        item_rc: &ItemRc,
+        physical_size: euclid::Size2D<f32, crate::lengths::PhysicalPx>,
+    ) -> Option<Self::LayerTarget>;
+
+    /// Redirect rendering into `target`, translate so children are positioned
+    /// relative to `bounding_rect.origin`, call `render_item_children`, then
+    /// restore. The dance is backend-specific (sub-renderer vs. render-target
+    /// swap), hence the hook.
+    fn render_into_layer(
+        &mut self,
+        target: Self::LayerTarget,
+        item_rc: &ItemRc,
+        bounding_rect: LogicalRect,
+    ) -> Self::Image;
+}
+
+/// Render the children of a [`Layer`] item through the given [`LayerRenderer`] backend.
+#[cfg(feature = "std")]
+pub fn render_layer<'cache, R>(
+    renderer: &mut R,
+    item_rc: &ItemRc,
+) -> Option<(euclid::Point2D<f32, crate::lengths::PhysicalPx>, R::Image)>
+where
+    R: LayerRenderer<'cache> + ?Sized + 'cache,
+{
+    let cache = renderer.layer_cache();
+    let scale_factor = renderer.scale_factor();
+
+    let compute_bounds = |r: &R| -> LogicalRect {
+        item_children_bounding_rect(item_rc, &r.window().window_adapter())
+            .intersection(
+                &r.get_current_clip().union(&LogicalRect::from_size(item_rc.geometry().size)),
+            )
+            .unwrap_or_default()
+    };
+
+    cache.get_or_update_cache_entry(item_rc, || {
+        // Don't track dependencies of the bounding rect here: the actual
+        // rendering below will track them as it walks the children.
+        let bounding_rect = crate::properties::evaluate_no_tracking(|| compute_bounds(renderer));
+        let physical_origin = bounding_rect.origin.cast() * scale_factor;
+        let layer_size = bounding_rect.size.cast() * scale_factor;
+
+        let Some(target) = renderer.create_layer_target(item_rc, layer_size) else {
+            // Target allocation failed (typically a zero-sized layer). The
+            // children never ran, so their dependencies weren't tracked.
+            // Re-invoke the bounds closure with tracking enabled so the
+            // layer re-renders when the size becomes non-zero.
+            let _ = compute_bounds(renderer);
+            return None;
+        };
+
+        let image = renderer.render_into_layer(target, item_rc, bounding_rect);
+        Some((physical_origin, image))
+    })
+}
+
+/// Helper trait to express the features of an item renderer.
+pub trait ItemRendererFeatures {
+    /// The renderer supports applying 2D transformations to items.
+    const SUPPORTS_TRANSFORMATIONS: bool;
+    /// The renderer draws [`BackdropBlur`] items, see [`ItemRenderer::draw_backdrop_blur`].
+    const SUPPORTS_BACKDROP_BLUR: bool = false;
+}
