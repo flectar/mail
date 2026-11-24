@@ -1577,6 +1577,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            scale,
             slices,
             before_id,
             &text_transform,
@@ -1588,6 +1589,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            scale,
             slices,
             child_id,
             &text_transform,
@@ -1599,6 +1601,7 @@ pub(crate) fn build_inline_layout_into(
             &mut text_transformer,
             &mut edges,
             nodes,
+            scale,
             slices,
             after_id,
             &text_transform,
@@ -1622,6 +1625,7 @@ pub(crate) fn build_inline_layout_into(
         text_transformer: &mut TextTransformer,
         edges: &mut InlineEdges,
         nodes: &crate::NodeTree,
+        scale: f32,
         slices: &[InlineSlice],
         node_id: NodeId,
         parent_text_transform: &CaseTransform,
@@ -1697,6 +1701,7 @@ pub(crate) fn build_inline_layout_into(
                                 text_transformer,
                                 edges,
                                 nodes,
+                                scale,
                                 slices,
                                 child_id,
                                 &text_transform,
@@ -1721,10 +1726,7 @@ pub(crate) fn build_inline_layout_into(
                                 width: 0.0,
                                 height: 0.0,
                                 baseline: None,
-                                vertical_align: node
-                                    .primary_styles()
-                                    .map(|s| stylo_to_parley::vertical_align(&s))
-                                    .unwrap_or_default(),
+                                vertical_align: inline_vertical_align(nodes, node, scale),
                             });
                         } else if *tag_name == local_name!("wbr") {
                             // A line break opportunity, even in text that
@@ -1780,13 +1782,14 @@ pub(crate) fn build_inline_layout_into(
                             text_transformer.word_break(builder);
                         } else {
                             // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
-                            let style = node
+                            let mut style = node
                                 .primary_styles()
                                 .map(|s| stylo_to_parley::style(node.id, &s))
                                 .unwrap_or_else(|| parley::TextStyle {
                                     white_space_collapse: WhiteSpaceCollapse::Collapse,
                                     ..Default::default()
                                 });
+                            style.vertical_align = inline_vertical_align(nodes, node, scale);
 
                             let (start_edge, end_edge) = node
                                 .primary_styles()
@@ -1823,6 +1826,7 @@ pub(crate) fn build_inline_layout_into(
                                     text_transformer,
                                     edges,
                                     nodes,
+                                    scale,
                                     slices,
                                     child_id,
                                     &text_transform,
@@ -1851,10 +1855,7 @@ pub(crate) fn build_inline_layout_into(
                             width: 0.0,
                             height: 0.0,
                             baseline: None,
-                            vertical_align: node
-                                .primary_styles()
-                                .map(|s| stylo_to_parley::vertical_align(&s))
-                                .unwrap_or_default(),
+                            vertical_align: inline_vertical_align(nodes, node, scale),
                         });
                     }
                 };
@@ -1961,6 +1962,43 @@ fn inline_edge_widths(style: &style::properties::ComputedValues) -> (f32, f32) {
         (sanitize(left), sanitize(right))
     } else {
         (sanitize(right), sanitize(left))
+    }
+}
+
+/// A node's `vertical-align` in its line. Blink and WebKit lower `sub` by a
+/// fifth of the parent's font size and raise `super` by a third of it, each
+/// plus a device pixel (Blink's `InlineLayoutStateStack::ApplyBaselineShift`).
+/// Parley leaves out the pixel, so lines with superscripts were shorter than
+/// in browsers. It gets these shifts as lengths instead.
+fn inline_vertical_align(
+    nodes: &crate::NodeTree,
+    node: &Node,
+    scale: f32,
+) -> parley::VerticalAlign {
+    let Some(style) = node.primary_styles() else {
+        return parley::VerticalAlign::default();
+    };
+    let align = stylo_to_parley::vertical_align(&style);
+    let parent_font_size = node
+        .parent
+        .and_then(|parent| nodes[parent].primary_styles())
+        .map(|parent| parent.get_font().font_size.used_size.0.px());
+    let (Some(font_size), parley::BaselineShift::Sub | parley::BaselineShift::Super) =
+        (parent_font_size, align.shift)
+    else {
+        return align;
+    };
+    // Blink divides the font size in device pixels as a fixed-point number
+    // with six fractional bits, truncating.
+    let fixed = (font_size * scale * 64.0).round();
+    let shift = if align.shift == parley::BaselineShift::Super {
+        (fixed / 3.0).trunc() / 64.0 + 1.0
+    } else {
+        -((fixed / 5.0).trunc() / 64.0 + 1.0)
+    };
+    parley::VerticalAlign {
+        shift: parley::BaselineShift::Length(shift / scale),
+        ..align
     }
 }
 

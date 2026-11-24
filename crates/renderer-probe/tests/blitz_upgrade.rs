@@ -2292,3 +2292,16 @@ fn lang_matches_the_nearest_language_by_extended_filtering() {
     close(width("#d"), 300.0);
 }
 
+#[test]
+fn superscripts_and_subscripts_shift_as_far_as_in_blink() {
+    // Blink and WebKit raise `vertical-align: super` by a third of the
+    // parent's font size and lower `sub` by a fifth of it, each plus a pixel,
+    // so these lines are 26.3 and 24.2 pixels tall in Chrome.
+    let doc = document(
+        "<style>p{margin:0;font:16px/20px sans-serif}</style>
+         <p id=a>x<span style='vertical-align:super'>y</span></p>
+         <p id=b>x<span style='vertical-align:sub'>y</span></p>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 26.3);
+    close(node(&doc, "#b").final_layout().size.height, 24.2);
+}
