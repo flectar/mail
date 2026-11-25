@@ -318,11 +318,7 @@ pub(super) fn install(
         if let Some(composers) = weak.upgrade()
             && let Some(app) = composers.app.upgrade()
         {
-            if action == "forward_attachment" {
-                composers.forward_shown_as_attachment(&app);
-            } else {
-                composers.open_from_message(&app, action.as_str());
-            }
+            composers.compose_from(&app, ReaderKey::Main, action.as_str(), None);
         }
     });
     // The AI summary's reply, or a suggested one, goes into a reply to the
@@ -331,12 +327,8 @@ pub(super) fn install(
     app.global::<AiSummary>().on_reply_with(move |text| {
         if let Some(composers) = weak.upgrade()
             && let Some(app) = composers.app.upgrade()
-            && let Some(session) = composers.open_from_message(&app, "reply")
         {
-            session.edit(|document| {
-                document.update_selection(0, 0);
-                document.insert_text(&format!("{}\n", text.trim()))
-            });
+            composers.compose_from(&app, ReaderKey::Main, "reply", Some(text.as_str()));
         }
     });
     let weak = Rc::downgrade(&composers);
@@ -370,22 +362,34 @@ pub(super) fn install(
             composers.send_finished(update);
         }
     });
-    #[cfg(desktop)]
-    {
-        let weak = Rc::downgrade(&composers);
-        app.on_appearance_changed(move || {
-            if let Some(composers) = weak.upgrade()
-                && let Some(app) = composers.app.upgrade()
-            {
-                for session in composers.sessions.borrow().iter() {
-                    if let Host::Window(window) = &*session.host.borrow() {
-                        copy_appearance(&app, window);
-                    }
-                }
-            }
-        });
-    }
     composers
+}
+
+/// The main window's look changed: composer windows follow it.
+#[cfg(desktop)]
+pub(super) fn appearance_changed(app: &AppWindow) {
+    with_composers(|composers| {
+        for session in composers.sessions.borrow().iter() {
+            if let Host::Window(window) = &*session.host.borrow() {
+                copy_appearance(app, window);
+            }
+        }
+    });
+}
+
+/// Reply to, forward or edit the message `reader` shows, as its menus and
+/// its AI summary's reply ask. From a conversation's window, the message
+/// opens in a window of its own (#254).
+#[cfg(desktop)]
+pub(super) fn compose_from_reader(
+    app: &AppWindow,
+    reader: &ReaderRef,
+    action: &str,
+    reply: Option<String>,
+) {
+    with_composers(|composers| {
+        composers.compose_from(app, reader.key(), action, reply.as_deref());
+    });
 }
 
 /// The composers, once installed.
@@ -566,7 +570,7 @@ pub(super) fn main_window_suspended(suspended: bool) {
 
 #[cfg(desktop)]
 fn new_window(app: &AppWindow) -> Option<Host> {
-    let window = match crate::window_chrome::composer_window(ComposerWindow::new) {
+    let window = match crate::window_chrome::secondary_window(ComposerWindow::new) {
         Ok(window) => window,
         Err(error) => {
             app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
@@ -689,23 +693,9 @@ fn copy_preferences(from: &AccountMailPreferences<'_>, to: &AccountMailPreferenc
 
 #[cfg(desktop)]
 fn copy_appearance(app: &AppWindow, window: &ComposerWindow) {
-    let from = app.global::<AppTheme>();
-    let to = window.global::<AppTheme>();
-    to.set_preset(from.get_preset());
-    to.set_custom_light_primary(from.get_custom_light_primary());
-    to.set_custom_light_page_bg(from.get_custom_light_page_bg());
-    to.set_custom_light_surface(from.get_custom_light_surface());
-    to.set_custom_light_text(from.get_custom_light_text());
-    to.set_custom_light_border(from.get_custom_light_border());
-    to.set_custom_dark_primary(from.get_custom_dark_primary());
-    to.set_custom_dark_page_bg(from.get_custom_dark_page_bg());
-    to.set_custom_dark_surface(from.get_custom_dark_surface());
-    to.set_custom_dark_text(from.get_custom_dark_text());
-    to.set_custom_dark_border(from.get_custom_dark_border());
-    window
-        .global::<AppIcon>()
-        .set_variant(app.global::<AppIcon>().get_variant());
+    crate::theme::copy_look(app, window);
     window.set_theme(app.get_theme_mode());
+    window.set_interface_text_size(app.get_interface_text_size());
 }
 
 impl Composers {
@@ -766,6 +756,23 @@ impl Composers {
     /// choose on the desktop (#254).
     fn writes_in_windows(&self, app: &AppWindow) -> bool {
         self.pop_out && app.get_compose_in_window()
+    }
+
+    /// A new composer for what `reader` asks: a window of its own for a
+    /// conversation's window, else where Settings says messages are written.
+    fn start_for(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        reader: ReaderKey,
+    ) -> Option<Rc<ComposeSession>> {
+        match reader {
+            ReaderKey::Main => self.start(app),
+            #[cfg(desktop)]
+            ReaderKey::Window(_) => {
+                let host = new_window(app)?;
+                self.start_session(app, host)
+            }
+        }
     }
 
     /// A new composer where messages are written: a window of its own when
@@ -905,6 +912,20 @@ impl Composers {
         Some(session)
     }
 
+    /// A new message in a window of its own, for a link clicked in a
+    /// conversation's window.
+    #[cfg(desktop)]
+    pub(super) fn open_new_window(self: &Rc<Self>, app: &AppWindow) -> Option<Rc<ComposeSession>> {
+        if self.state.borrow().connected_accounts.is_empty() {
+            app.set_render_status(UiMessage::plain("Add an account to send mail."));
+            return None;
+        }
+        let host = new_window(app)?;
+        let session = self.start_session(app, host)?;
+        session.show("new", None);
+        Some(session)
+    }
+
     /// Shows over the main window that files dropped there start a new
     /// message, while one could.
     #[cfg(desktop)]
@@ -950,15 +971,38 @@ impl Composers {
         }
     }
 
+    /// Reply, forward or edit the message `reader` shows, with `reply`
+    /// written in a reply.
+    fn compose_from(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        reader: ReaderKey,
+        action: &str,
+        reply: Option<&str>,
+    ) {
+        if action == "forward_attachment" {
+            self.forward_shown_as_attachment(app, reader);
+            return;
+        }
+        let session = self.open_from_message(app, reader, action);
+        if let (Some(session), Some(text)) = (session, reply) {
+            session.edit(|document| {
+                document.update_selection(0, 0);
+                document.insert_text(&format!("{}\n", text.trim()))
+            });
+        }
+    }
+
     /// Reply, reply all, forward, edit as new, or edit the selected draft.
-    /// Opens the composer to answer, forward or edit the shown message, and
-    /// returns its session.
+    /// Opens the composer to answer, forward or edit the message `reader`
+    /// shows, and returns its session.
     fn open_from_message(
         self: &Rc<Self>,
         app: &AppWindow,
+        reader: ReaderKey,
         action: &str,
     ) -> Option<Rc<ComposeSession>> {
-        let (row, conversation_message_id) = self.shown_message();
+        let (row, conversation_message_id) = self.shown_message(reader);
         let core = self.core();
         let Some(core) = core else {
             app.set_render_status(UiMessage::plain(
@@ -972,7 +1016,7 @@ impl Composers {
         };
 
         if action == "edit_draft" {
-            self.open_draft(app, &core, &row);
+            self.open_draft(app, &core, &row, reader);
             return None;
         }
 
@@ -1004,18 +1048,22 @@ impl Composers {
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| account.email.clone())
             });
-        let prepared = match prepare_message_compose(
-            &source,
-            action,
-            app.global::<ReaderUi>().get_selected_plain_text().as_str(),
-            |message| translated(app, &message).into(),
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
-                return None;
-            }
-        };
+        // What the reader shows of the message, which a reply quotes.
+        let shown_text = reader
+            .host(&self.app)
+            .and_then(|host| host.upgrade())
+            .map(|host| host.ui().get_selected_plain_text())
+            .unwrap_or_default();
+        let prepared =
+            match prepare_message_compose(&source, action, shown_text.as_str(), |message| {
+                translated(app, &message).into()
+            }) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    app.set_render_status(UiMessage::detail("Could not open composer: {}", error));
+                    return None;
+                }
+            };
         let Ok(account_id) = i32::try_from(prepared.account_id) else {
             app.set_render_status(UiMessage::plain(
                 "Could not open composer: invalid account identifier",
@@ -1023,7 +1071,7 @@ impl Composers {
             return None;
         };
 
-        let session = self.start(app)?;
+        let session = self.start_for(app, reader)?;
         let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
@@ -1085,13 +1133,19 @@ impl Composers {
         Some(session)
     }
 
-    fn open_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
+    fn open_draft(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        core: &CoreMailSource,
+        row: &MailMessage,
+        reader: ReaderKey,
+    ) {
         if row.folder != "Drafts" && row.send_at.is_none() && row.label != "DRAFT" {
             app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
             return;
         }
         if row.send_at.is_none() {
-            self.load_draft(app, core, row);
+            self.load_draft(app, core, row, reader);
             return;
         }
         // Editing a scheduled draft cancels its send first, as in Gmail. The
@@ -1144,17 +1198,32 @@ impl Composers {
                     return;
                 }
             }
-            // A message the user started meanwhile stays in the composer.
-            if composers.in_app().is_none_or(|open| open.is_blank()) {
-                composers.load_draft(&app, &core, &row);
+            // A message the user started meanwhile stays in the composer. A
+            // conversation's window opens the draft in a window of its own.
+            if reader != ReaderKey::Main || composers.in_app().is_none_or(|open| open.is_blank()) {
+                composers.load_draft(&app, &core, &row, reader);
             }
         });
     }
 
-    /// Open the draft in the main window's composer.
-    fn load_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
+    /// Open the draft in a composer, as `reader` asked.
+    fn load_draft(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        core: &CoreMailSource,
+        row: &MailMessage,
+        reader: ReaderKey,
+    ) {
         match self.runtime.block_on(core.load_draft(row)) {
-            Ok(draft) => self.show_draft(app, draft),
+            Ok(draft) => match reader {
+                ReaderKey::Main => self.show_draft(app, draft),
+                #[cfg(desktop)]
+                ReaderKey::Window(_) => {
+                    if let Some(window) = new_window(app) {
+                        self.show_written_in(app, draft, "draft", Some(window));
+                    }
+                }
+            },
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not open draft: {}", error));
             }
@@ -1775,7 +1844,7 @@ impl ComposeSession {
         );
         // A main window closed meanwhile may now end the app, which saves
         // the message to Drafts.
-        window_controller::composer_closed();
+        window_controller::window_closed();
     }
 
     /// Show the window this message is in and look after it, as each window
@@ -1954,7 +2023,7 @@ impl ComposeSession {
                 .borrow_mut()
                 .retain(|open| !Rc::ptr_eq(open, &session));
             drop(session);
-            window_controller::composer_closed();
+            window_controller::window_closed();
         });
     }
 
@@ -4892,6 +4961,33 @@ mod tests {
         assert!(main.get_open());
         assert_eq!(main.get_to(), "fourth@example.com");
         assert_eq!(open_windows(), 3);
+    }
+
+    #[test]
+    fn message_windows_follow_the_text_size_and_reduced_motion() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.set_interface_text_size(20.0);
+        app.global::<MotionSettings>().set_preference("on".into());
+        app.set_compose_in_window(true);
+        app.invoke_open_compose("first@example.com".into());
+        let session = composers.sessions.borrow()[0].clone();
+        let Some(HostRef::Window(window)) = session.host() else {
+            panic!("the message has no window of its own");
+        };
+        assert_eq!(window.get_interface_text_size(), 20.0);
+        assert!(window.global::<MotionSettings>().get_reduced());
+
+        // What changes in the main window reaches the open window.
+        app.set_interface_text_size(24.0);
+        app.global::<MotionSettings>().set_preference("off".into());
+        appearance_changed(&app);
+        assert_eq!(window.get_interface_text_size(), 24.0);
+        assert!(!window.global::<MotionSettings>().get_reduced());
     }
 
     #[test]

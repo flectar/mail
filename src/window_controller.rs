@@ -37,8 +37,9 @@ struct Lifecycle {
     first_show: RefCell<Vec<Box<dyn FnOnce()>>>,
     /// Maximized and full-screen state when the window was hidden.
     hidden_state: Cell<(bool, bool)>,
-    /// The main window was closed while messages were being written in
-    /// their own windows; the application ends when the last one closes.
+    /// The main window was closed while messages were being written or
+    /// read in their own windows; the application ends when the last one
+    /// closes.
     quit_after_composers: Cell<bool>,
 }
 
@@ -105,7 +106,7 @@ pub(super) fn create_and_register_window_lifecycle(
             #[cfg(feature = "flatpak")]
             describe_background(&app, &runtime);
             slint::CloseRequestResponse::HideWindow
-        } else if composer::open_windows() > 0 {
+        } else if other_windows() > 0 {
             LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.set(true));
             prepare_for_tray(&app);
             slint::CloseRequestResponse::HideWindow
@@ -145,12 +146,21 @@ pub(super) fn prepare_for_tray(app: &AppWindow) {
     slint::Timer::single_shot(TRIM_DELAY, release_free_memory);
 }
 
-/// A composer window closed. Once the last one is gone, a main window that
-/// was closed while they were open ends the application.
-pub(super) fn composer_closed() {
-    if LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.get())
-        && composer::open_windows() == 0
-    {
+/// The windows of the app's other than the main one: composers' and
+/// conversations'.
+fn other_windows() -> usize {
+    #[cfg(desktop)]
+    let conversations = crate::reader_window::open_windows();
+    #[cfg(mobile)]
+    let conversations = 0;
+    composer::open_windows() + conversations
+}
+
+/// A composer's or a conversation's window closed. Once the last one is
+/// gone, a main window that was closed while they were open ends the
+/// application.
+pub(super) fn window_closed() {
+    if LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.get()) && other_windows() == 0 {
         let _ = slint::quit_event_loop();
     }
 }

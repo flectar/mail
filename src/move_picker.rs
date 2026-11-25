@@ -341,7 +341,9 @@ pub(super) fn transfer_message(report: &TransferReport) -> UiMessage {
 #[derive(Default)]
 struct MovePicker {
     mode: PickerMode,
-    ids: Vec<i32>,
+    /// The rows of the mail to move or copy, and the mailbox they're in.
+    rows: Vec<MailMessage>,
+    from: Scope,
     targets: Vec<MoveTarget>,
     recent: Vec<i64>,
     local: Option<i64>,
@@ -364,20 +366,49 @@ pub(super) fn picker_ids(state: &InboxState, source: &str, id: i32) -> Vec<i32> 
     }
 }
 
+/// The rows of the mail a picker of `reader` acts on: the open
+/// conversation's, or, in the main window, a list row and the rows checked
+/// along with it, or the checked rows.
+pub(super) fn picker_rows_of(
+    state: &RefCell<InboxState>,
+    reader: ReaderKey,
+    source: &str,
+    id: i32,
+) -> Vec<MailMessage> {
+    if source == "open" {
+        return crate::reader_host::row(state, reader).into_iter().collect();
+    }
+    let state = state.borrow();
+    picker_ids(&state, source, id)
+        .iter()
+        .filter_map(|id| state.messages.iter().find(|message| message.id == *id))
+        .cloned()
+        .collect()
+}
+
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
 ) {
-    let picker = Rc::new(RefCell::new(MovePicker::default()));
-    let ui = app.global::<MovePickerUi>();
+    attach(&ReaderRef::main(app), state, runtime);
+}
 
-    let weak = app.as_weak();
+/// The move and copy picker of a reader's window.
+pub(super) fn attach(
+    reader: &ReaderRef,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+) {
+    let picker = Rc::new(RefCell::new(MovePicker::default()));
+    let ui = reader.global::<MovePickerUi>();
+
+    let host = reader.host();
     let request_state = state.clone();
     let request_runtime = runtime.clone();
     let request_picker = picker.clone();
     ui.on_request(move |mode, source, id| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
         let mode = if mode == "copy" {
@@ -385,15 +416,15 @@ pub(super) fn register(
         } else {
             PickerMode::Move
         };
-        let (ids, targets, core, local, named) = {
+        if !request_state.borrow().using_core {
+            return;
+        }
+        let mail = picker_rows_of(&request_state, reader.key(), &source, id);
+        let from = crate::reader_host::scope(&request_state, reader.key());
+        let (targets, core, local, named) = {
             let state = request_state.borrow();
-            if !state.using_core {
-                return;
-            }
-            let ids = picker_ids(&state, &source, id);
-            let mut account_ids = ids
+            let mut account_ids = mail
                 .iter()
-                .filter_map(|id| state.messages.iter().find(|message| message.id == *id))
                 .map(|message| message.account_id)
                 .collect::<Vec<_>>();
             account_ids.sort_unstable();
@@ -407,10 +438,9 @@ pub(super) fn register(
                         && account.mail_protocol == flectar_mail_core::models::MailProtocol::Jmap
                 })
             };
-            let targets = move_targets(&state.mailboxes, &account_ids, state.scope, mode, &jmap);
+            let targets = move_targets(&state.mailboxes, &account_ids, from, mode, &jmap);
             let named = names_accounts(&targets, &account_ids);
             (
-                ids,
                 targets,
                 state.core.clone(),
                 state.local_mail.map(|local| local.account_id),
@@ -421,7 +451,7 @@ pub(super) fn register(
             return;
         };
         if targets.is_empty() {
-            app.set_render_status(match mode {
+            reader.app().set_render_status(match mode {
                 PickerMode::Move => UiMessage::plain("No other folder to move this mail to."),
                 PickerMode::Copy => UiMessage::plain("No folder to copy this mail to."),
             });
@@ -429,7 +459,7 @@ pub(super) fn register(
         }
         // Search matches the names shown, and standard mailboxes show
         // translated ones.
-        let ui = app.global::<MovePickerUi>();
+        let ui = reader.global::<MovePickerUi>();
         let targets = targets
             .into_iter()
             .map(|mut target| {
@@ -450,7 +480,8 @@ pub(super) fn register(
         );
         *request_picker.borrow_mut() = MovePicker {
             mode,
-            ids,
+            rows: mail,
+            from,
             targets,
             recent,
             local,
@@ -465,10 +496,10 @@ pub(super) fn register(
         ui.set_open(true);
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let search_picker = picker.clone();
     ui.on_search(move |query| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
         let picker = search_picker.borrow();
@@ -478,19 +509,23 @@ pub(super) fn register(
             picker.local,
             picker.named,
         );
-        app.global::<MovePickerUi>()
+        reader
+            .global::<MovePickerUi>()
             .set_rows(ModelRc::new(VecModel::from(rows)));
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let choose_state = state.clone();
-    let choose_runtime = runtime.clone();
     ui.on_choose(move |key| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
         let MovePicker {
-            mode, ids, targets, ..
+            mode,
+            rows,
+            from,
+            targets,
+            ..
         } = std::mem::take(&mut *picker.borrow_mut());
         let Some(target) = usize::try_from(key)
             .ok()
@@ -499,36 +534,25 @@ pub(super) fn register(
             return;
         };
         let result = match mode {
-            PickerMode::Move => {
-                let items = {
-                    let state = choose_state.borrow();
-                    ids.iter()
-                        .filter_map(|id| state.messages.iter().find(|message| message.id == *id))
-                        .filter_map(|message| {
-                            Some(MailDragItem {
-                                message_id: message.id,
-                                account_id: i32::try_from(message.account_id).ok()?,
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                };
-                perform_mail_drop(
-                    &app,
-                    &choose_state,
-                    &choose_runtime,
-                    &MailDragPayload { items },
-                    target.scope,
-                    i32::try_from(target.account_id).unwrap_or(-1),
-                    i32::try_from(target.folder_id).unwrap_or(-1),
-                )
-            }
-            PickerMode::Copy => copy_mail(&choose_state, &ids, &target),
+            PickerMode::Move => perform_mail_move(
+                &choose_state,
+                &rows,
+                from,
+                target.scope,
+                i32::try_from(target.account_id).unwrap_or(-1),
+                i32::try_from(target.folder_id).unwrap_or(-1),
+            ),
+            PickerMode::Copy => copy_mail(&choose_state, &rows, &target),
         };
-        if let Err(error) = result {
-            app.set_render_status(match mode {
+        match result {
+            Ok(()) if mode == PickerMode::Move => {
+                crate::reader_host::conversation_left(reader.key());
+            }
+            Ok(()) => {}
+            Err(error) => reader.app().set_render_status(match mode {
                 PickerMode::Move => UiMessage::detail("Could not move mail: {}", error),
                 PickerMode::Copy => UiMessage::detail("Could not copy mail: {}", error),
-            });
+            }),
         }
     });
 }
@@ -537,23 +561,18 @@ pub(super) fn register(
 /// another account.
 fn copy_mail(
     state: &Rc<RefCell<InboxState>>,
-    ids: &[i32],
+    rows: &[MailMessage],
     target: &MoveTarget,
 ) -> Result<(), String> {
     let (core, operations) = {
         let state = state.borrow();
-        let operations = ids
+        let operations = rows
             .iter()
-            .map(|id| {
-                let message = state
-                    .messages
-                    .iter()
-                    .find(|message| message.id == *id)
-                    .ok_or_else(|| "message is no longer available".to_owned())?;
+            .map(|message| {
                 let mail = MailTarget::of(message)
                     .ok_or_else(|| "message thread is unavailable".to_owned())?;
                 Ok((
-                    *id,
+                    message.id,
                     mail,
                     mail_work::Operation::Copy {
                         folder_id: target.folder_id,

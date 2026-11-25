@@ -120,14 +120,14 @@ fn picked(
 enum Picking {
     #[default]
     Nothing,
-    /// Snooze these list rows.
-    Snooze(Vec<i32>),
+    /// Snooze the mail of these rows.
+    Snooze(Vec<MailMessage>),
     /// When a composer's message goes out, or reminds the user.
     Composer(composer::Asking),
-    /// Move the open scheduled draft.
-    Reschedule(i32),
-    /// Remind the user about the open conversation.
-    RemindOpen(i32),
+    /// Move the open scheduled draft, by its row.
+    Reschedule(MailMessage),
+    /// Remind the user about the open conversation, by its row.
+    RemindOpen(MailMessage),
 }
 
 #[derive(Default)]
@@ -297,116 +297,125 @@ pub(super) fn register(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
 ) {
-    let picker = PickerState::default();
-    MAIN_PICKER.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&picker)));
-    let snooze_ui = app.global::<SnoozeUi>();
-    let send_ui = app.global::<SendLaterUi>();
-    let when_ui = app.global::<WhenUi>();
-    let reminder_ui = app.global::<ReminderUi>();
+    let picker = attach_reader(&ReaderRef::main(app), state, runtime);
+    MAIN_PICKER.with(|slot| *slot.borrow_mut() = Some(picker));
+}
 
-    let weak = app.as_weak();
+/// Snooze, the reply reminder and a scheduled draft's time for the
+/// conversation a reader shows, and for the list's rows in the main window.
+pub(super) fn attach_reader(
+    reader: &ReaderRef,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+) -> PickerState {
+    let picker = PickerState::default();
+    let key = reader.key();
+    let snooze_ui = reader.global::<SnoozeUi>();
+    let send_ui = reader.global::<SendLaterUi>();
+    let when_ui = reader.global::<WhenUi>();
+    let reminder_ui = reader.global::<ReminderUi>();
+
+    let host = reader.host();
     let request_state = state.clone();
     let request_picker = picker.clone();
     snooze_ui.on_request(move |source, id| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let ids = {
-            let state = request_state.borrow();
-            if !state.using_core {
-                return;
-            }
-            move_picker::picker_ids(&state, &source, id)
-        };
-        if ids.is_empty() {
+        if !request_state.borrow().using_core {
+            return;
+        }
+        let rows = move_picker::picker_rows_of(&request_state, key, &source, id);
+        if rows.is_empty() {
             return;
         }
         open(
-            &app.global::<WhenUi>(),
-            app.get_time_format_sample(),
+            &reader.global::<WhenUi>(),
+            reader.app().get_time_format_sample(),
             &request_picker,
-            Picking::Snooze(ids),
+            Picking::Snooze(rows),
             snooze_presets(Local::now()),
             false,
         );
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let unsnooze_state = state.clone();
     snooze_ui.on_unsnooze(move |source, id| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let ids = {
-            let state = unsnooze_state.borrow();
-            move_picker::picker_ids(&state, &source, id)
-        };
-        snooze(&app, &unsnooze_state, &ids, None);
+        let rows = move_picker::picker_rows_of(&unsnooze_state, key, &source, id);
+        // Back where it was, the conversation stays open.
+        snooze(reader.app(), &unsnooze_state, &rows, None);
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let change_state = state.clone();
     let change_picker = picker.clone();
     send_ui.on_change_time(move || {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let Some(id) = change_state.borrow().selected_id else {
+        let Some(row) = crate::reader_host::row(&change_state, key) else {
             return;
         };
         open(
-            &app.global::<WhenUi>(),
-            app.get_time_format_sample(),
+            &reader.global::<WhenUi>(),
+            reader.app().get_time_format_sample(),
             &change_picker,
-            Picking::Reschedule(id),
+            Picking::Reschedule(row),
             send_presets(Local::now()),
             false,
         );
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let remind_state = state.clone();
     let remind_open_picker = picker.clone();
     reminder_ui.on_remind_open(move || {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let Some(id) = remind_state.borrow().selected_id else {
+        let Some(row) = crate::reader_host::row(&remind_state, key) else {
             return;
         };
-        let set = !app.global::<ReminderUi>().get_open_remind_time().is_empty();
+        let set = !reader.reminder().get_open_remind_time().is_empty();
         open(
-            &app.global::<WhenUi>(),
-            app.get_time_format_sample(),
+            &reader.global::<WhenUi>(),
+            reader.app().get_time_format_sample(),
             &remind_open_picker,
-            Picking::RemindOpen(id),
+            Picking::RemindOpen(row),
             remind_presets(Local::now()),
             set,
         );
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let dismiss_state = state.clone();
     let dismiss_runtime = runtime.clone();
     reminder_ui.on_dismiss(move || {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let Some((core, row)) = open_row(&dismiss_state) else {
+        let Some((core, row)) = open_row(&dismiss_state, key) else {
             return;
         };
-        dismiss_reminder(&app, &dismiss_state, &dismiss_runtime, &core, &row);
+        dismiss_reminder(reader.app(), &dismiss_state, &dismiss_runtime, &core, &row);
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let now_state = state.clone();
     let now_runtime = runtime.clone();
     send_ui.on_send_now(move || {
-        let Some((core, row)) = open_row(&now_state) else {
+        let Some(reader) = host.upgrade() else {
+            return;
+        };
+        let Some((core, row)) = open_row(&now_state, key) else {
             return;
         };
         change_send(
-            &weak,
+            &reader.app().as_weak(),
             &now_state,
             &now_runtime,
             Box::pin(async move { core.send_scheduled_row_now(&row).await }),
@@ -423,24 +432,24 @@ pub(super) fn register(
 
     // As in Gmail, the message opens as a draft to edit: Continue editing
     // cancels the send first.
-    let weak = app.as_weak();
+    let host = reader.host();
     send_ui.on_cancel(move || {
-        if let Some(app) = weak.upgrade() {
-            app.invoke_compose_message_action("edit_draft".into());
+        if let Some(reader) = host.upgrade() {
+            reader.compose_message_action("edit_draft".into());
         }
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let choose_state = state.clone();
     let choose_runtime = runtime.clone();
     let choose_picker = picker.clone();
     when_ui.on_choose(move |index| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
         // Asked again, saying the time has passed.
         if passed(&choose_picker, index, Local::now()) {
-            let ui = app.global::<WhenUi>();
+            let ui = reader.global::<WhenUi>();
             ui.set_error("past".into());
             ui.set_open(true);
             return;
@@ -448,29 +457,39 @@ pub(super) fn register(
         let Some((picking, at)) = chosen(&choose_picker, index) else {
             return;
         };
-        match at {
-            Some(at) => picked_for(&app, &choose_state, &choose_runtime, picking, at),
-            None => dropped_for(&app, &choose_state, &choose_runtime, picking),
+        let left = match at {
+            Some(at) => picked_for(reader.app(), &choose_state, &choose_runtime, picking, at),
+            None => {
+                dropped_for(reader.app(), &choose_state, &choose_runtime, picking);
+                false
+            }
+        };
+        if left {
+            crate::reader_host::conversation_left(key);
         }
     });
 
-    let weak = app.as_weak();
+    let host = reader.host();
     let custom_state = state.clone();
     let custom_runtime = runtime.clone();
+    let custom_picker = picker.clone();
     when_ui.on_choose_custom(move |date, time| {
-        let Some(app) = weak.upgrade() else {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let ui = app.global::<WhenUi>();
+        let ui = reader.global::<WhenUi>();
         match picked(&date, &time, Local::now()) {
             Ok(at) => {
                 ui.set_open(false);
-                let Picker { picking, .. } = std::mem::take(&mut *picker.borrow_mut());
-                picked_for(&app, &custom_state, &custom_runtime, picking, at);
+                let Picker { picking, .. } = std::mem::take(&mut *custom_picker.borrow_mut());
+                if picked_for(reader.app(), &custom_state, &custom_runtime, picking, at) {
+                    crate::reader_host::conversation_left(key);
+                }
             }
             Err(error) => ui.set_error(error.into()),
         }
     });
+    picker
 }
 
 /// Send a scheduled message now, or move it, off the UI thread: the mail
@@ -502,25 +521,18 @@ fn change_send<T: Send + 'static>(
     });
 }
 
-/// The open message's row, and the core to act on it with.
-fn open_row(state: &Rc<RefCell<InboxState>>) -> Option<(CoreMailSource, MailMessage)> {
-    let id = state.borrow().selected_id?;
-    row_by_id(state, id)
+/// The row of the conversation `reader` shows, and the core to act on it
+/// with.
+fn open_row(
+    state: &Rc<RefCell<InboxState>>,
+    reader: ReaderKey,
+) -> Option<(CoreMailSource, MailMessage)> {
+    let row = crate::reader_host::row(state, reader)?;
+    Some((state.borrow().core.clone()?, row))
 }
 
 fn refresh(app: &AppWindow, state: &Rc<RefCell<InboxState>>, runtime: &tokio::runtime::Handle) {
     let _ = refresh_from_source(app, state, runtime, true, &[]);
-}
-
-/// A row of the open conversation, and the core to act on it with.
-fn row_by_id(state: &Rc<RefCell<InboxState>>, id: i32) -> Option<(CoreMailSource, MailMessage)> {
-    let state = state.borrow();
-    let row = state
-        .messages
-        .iter()
-        .find(|message| message.id == id)?
-        .clone();
-    Some((state.core.clone()?, row))
 }
 
 fn dismiss_reminder(
@@ -550,8 +562,8 @@ fn dropped_for(
 ) {
     match picking {
         Picking::Composer(asking) => composer::answered(asking, None),
-        Picking::RemindOpen(id) => {
-            if let Some((core, row)) = row_by_id(state, id) {
+        Picking::RemindOpen(row) => {
+            if let Some(core) = state.borrow().core.clone() {
                 dismiss_reminder(app, state, runtime, &core, &row);
             }
         }
@@ -559,21 +571,22 @@ fn dropped_for(
     }
 }
 
-/// Act on the time picked for `picking`.
+/// Act on the time picked for `picking`. Returns whether the mail left
+/// where it was, as snoozed mail does.
 fn picked_for(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
     picking: Picking,
     at: chrono::DateTime<Local>,
-) {
+) -> bool {
     match picking {
         Picking::Nothing => {}
-        Picking::Snooze(ids) => snooze(app, state, &ids, Some(at)),
+        Picking::Snooze(rows) => return snooze(app, state, &rows, Some(at)),
         Picking::Composer(asking) => composer::answered(asking, Some(at)),
-        Picking::RemindOpen(id) => {
-            let Some((core, row)) = row_by_id(state, id) else {
-                return;
+        Picking::RemindOpen(row) => {
+            let Some(core) = state.borrow().core.clone() else {
+                return false;
             };
             match runtime.block_on(core.set_reply_reminder(&row, at.timestamp_millis())) {
                 Ok(()) => {
@@ -591,9 +604,9 @@ fn picked_for(
                 }
             }
         }
-        Picking::Reschedule(id) => {
-            let Some((core, row)) = row_by_id(state, id) else {
-                return;
+        Picking::Reschedule(row) => {
+            let Some(core) = state.borrow().core.clone() else {
+                return false;
             };
             change_send(
                 &app.as_weak(),
@@ -613,32 +626,30 @@ fn picked_for(
             );
         }
     }
+    false
 }
 
 /// Snooze the mail until `at`, or end its snooze; the rows leave the list
-/// at once.
+/// at once. Returns whether that started.
 fn snooze(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    ids: &[i32],
+    rows: &[MailMessage],
     at: Option<chrono::DateTime<Local>>,
-) {
-    let operations = {
-        let state = state.borrow();
-        ids.iter()
-            .filter_map(|id| state.messages.iter().find(|message| message.id == *id))
-            .filter_map(|message| Some((message.id, MailTarget::of(message)?)))
-            .map(|(id, target)| {
-                (
-                    id,
-                    target,
-                    mail_work::Operation::Snooze(at.map(|at| at.timestamp_millis())),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
+) -> bool {
+    let operations = rows
+        .iter()
+        .filter_map(|message| Some((message.id, MailTarget::of(message)?)))
+        .map(|(id, target)| {
+            (
+                id,
+                target,
+                mail_work::Operation::Snooze(at.map(|at| at.timestamp_millis())),
+            )
+        })
+        .collect::<Vec<_>>();
     let Some(core) = state.borrow().core.clone() else {
-        return;
+        return false;
     };
     match mail_work::enqueue(state, core, operations) {
         Ok(()) => {
@@ -648,9 +659,11 @@ fn snooze(
                     when_label(at, Local::now()),
                 ));
             }
+            true
         }
         Err(error) => {
             app.set_render_status(UiMessage::detail("Could not snooze mail: {}", error));
+            false
         }
     }
 }

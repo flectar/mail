@@ -1,11 +1,11 @@
 //! Mail attachment metadata and an independent dialog session. Files and Mail
 //! share bounded decoders/PDF workers; opening Mail never changes Files state.
 use crate::document_preview::{Preview, image_thumbnail, preview};
+use crate::reader_host::{ReaderKey, ReaderRef};
 use crate::{
-    AppWindow, EmailReader, InboxState, ListAttachment, MailAttachment, MailAttachments,
-    mail::MailMessage,
+    EmailReader, InboxState, ListAttachment, MailAttachment, MailAttachments, mail::MailMessage,
 };
-use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -38,14 +38,14 @@ pub(crate) fn suspend() {
     }
 }
 
-pub(crate) fn clear(app: &AppWindow) {
-    let ui = app.global::<MailAttachments>();
+pub(crate) fn clear(reader: &ReaderRef) {
+    let ui = reader.global::<MailAttachments>();
     ui.invoke_command("close".into(), "".into());
     ui.set_rows(ModelRc::default());
 }
-pub(crate) fn project(app: &AppWindow, email: &MailMessage, same: bool) {
+pub(crate) fn project(reader: &ReaderRef, email: &MailMessage, same: bool) {
     let previous = same.then(|| {
-        let rows = app.global::<MailAttachments>().get_rows();
+        let rows = reader.global::<MailAttachments>().get_rows();
         (0..rows.row_count())
             .filter_map(|index| rows.row_data(index))
             .filter(|row| row.has_thumbnail)
@@ -53,7 +53,7 @@ pub(crate) fn project(app: &AppWindow, email: &MailMessage, same: bool) {
             .collect::<std::collections::HashMap<_, _>>()
     });
     if !same {
-        clear(app);
+        clear(reader);
     }
     let mut rows = attachment_rows(&email.attachments);
     if let Some(previous) = previous {
@@ -65,11 +65,10 @@ pub(crate) fn project(app: &AppWindow, email: &MailMessage, same: bool) {
         }
     }
     let thumbnail_ids = thumbnail_ids(&email.attachments, &rows);
-    app.global::<MailAttachments>()
-        .set_rows(ModelRc::new(VecModel::from(rows)));
+    let ui = reader.global::<MailAttachments>();
+    ui.set_rows(ModelRc::new(VecModel::from(rows)));
     for id in thumbnail_ids {
-        app.global::<MailAttachments>()
-            .invoke_command("thumbnail".into(), id);
+        ui.invoke_command("thumbnail".into(), id);
     }
 }
 
@@ -388,8 +387,11 @@ fn close(ui: &MailAttachments<'_>, generation: &AtomicU64, session: &RefCell<Ses
     ui.set_is_image(false);
 }
 
+/// Attachments for a reader: the files of the message it shows, their
+/// thumbnails, and the dialog that previews one. Each reader's window has its
+/// own, so a preview in one doesn't close another's.
 pub(crate) fn register(
-    app: &AppWindow,
+    reader: &ReaderRef,
     inbox: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
     documents: Arc<dyn crate::documents::DocumentProvider>,
@@ -400,10 +402,12 @@ pub(crate) fn register(
         selected: None,
     }));
     let generation = Arc::new(AtomicU64::new(0));
-    let weak = app.as_weak();
+    let host = reader.host();
+    let key = reader.key();
     #[cfg(mobile)]
     {
-        let weak = weak.clone();
+        use slint::ComponentHandle;
+        let weak = reader.app().as_weak();
         let _ = SUSPEND.set(Box::new(move || {
             let _ = weak.upgrade_in_event_loop(|app| {
                 app.global::<MailAttachments>()
@@ -417,18 +421,18 @@ pub(crate) fn register(
     let timer = slint::Timer::default();
     let state = inbox.clone();
     let observed = context.clone();
-    let window = weak.clone();
+    let window = host.clone();
     timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(100),
         move || {
-            let Some(app) = window.upgrade() else {
+            let Some(reader) = window.upgrade() else {
                 return;
             };
             let current = state.borrow().core.as_ref().map(|core| {
                 (
                     core.file_core(),
-                    app.global::<EmailReader>().get_message_id(),
+                    reader.global::<EmailReader>().get_message_id(),
                 )
             });
             let changed = match (&*observed.borrow(), &current) {
@@ -437,7 +441,8 @@ pub(crate) fn register(
                 _ => true,
             };
             if changed {
-                app.global::<MailAttachments>()
+                reader
+                    .global::<MailAttachments>()
                     .invoke_command("close".into(), "".into());
                 *observed.borrow_mut() = current;
             }
@@ -460,7 +465,7 @@ pub(crate) fn register(
         flectar_mail_core::models::AttachmentMeta,
         Arc<flectar_mail_core::Core>,
     )>(8);
-    let thumbnail_window = weak.clone();
+    let thumbnail_window = host.clone();
     runtime.spawn(async move {
         while let Some((message, attachment, core)) = thumbnail_job_receiver.recv().await {
             let attachment_id = attachment.id;
@@ -483,8 +488,9 @@ pub(crate) fn register(
             {
                 break;
             }
-            let _ = thumbnail_window
-                .upgrade_in_event_loop(|app| app.global::<MailAttachments>().invoke_deliver());
+            thumbnail_window
+                .clone()
+                .in_event_loop(|reader| reader.global::<MailAttachments>().invoke_deliver());
         }
     });
     let thumbnail_pending = Rc::new(RefCell::new(HashSet::<(usize, i32, i64)>::new()));
@@ -492,15 +498,15 @@ pub(crate) fn register(
     let session_for_delivery = session.clone();
     let current = generation.clone();
     let pending_for_delivery = thumbnail_pending.clone();
-    let window = weak.clone();
-    app.global::<MailAttachments>().on_deliver(move || {
-        let Some(app) = window.upgrade() else {
+    let window = host.clone();
+    reader.global::<MailAttachments>().on_deliver(move || {
+        let Some(reader) = window.upgrade() else {
             return;
         };
         let session = &session_for_delivery;
         while let Ok((revision, message, core, result)) = receiver.try_recv() {
             if current.load(Ordering::SeqCst) != revision
-                || app.global::<EmailReader>().get_message_id() != message
+                || reader.global::<EmailReader>().get_message_id() != message
             {
                 continue;
             }
@@ -514,7 +520,7 @@ pub(crate) fn register(
                 continue;
             }
 
-            let ui = app.global::<MailAttachments>();
+            let ui = reader.global::<MailAttachments>();
             ui.set_busy(false);
             match result {
                 Ok(Some(Preview::Pdf(data, page))) => {
@@ -546,7 +552,7 @@ pub(crate) fn register(
             pending_for_delivery
                 .borrow_mut()
                 .remove(&(core_id, message, attachment_id));
-            if app.global::<EmailReader>().get_message_id() != message
+            if reader.global::<EmailReader>().get_message_id() != message
                 || !state
                     .borrow()
                     .core
@@ -558,7 +564,7 @@ pub(crate) fn register(
             let Ok((pixels, width, height)) = result else {
                 continue;
             };
-            let rows = app.global::<MailAttachments>().get_rows();
+            let rows = reader.global::<MailAttachments>().get_rows();
             let attachment_id = attachment_id.to_string();
             for index in 0..rows.row_count() {
                 let Some(mut row) = rows.row_data(index) else {
@@ -579,13 +585,14 @@ pub(crate) fn register(
     let state = inbox.clone();
     let handle = runtime.clone();
     let pending_thumbnails = thumbnail_pending.clone();
-    app.global::<MailAttachments>()
+    reader
+        .global::<MailAttachments>()
         .on_command(move |action, value| {
             let _keep_timer = &timer;
-            let Some(app) = weak.upgrade() else {
+            let Some(reader) = host.upgrade() else {
                 return;
             };
-            let ui = app.global::<MailAttachments>();
+            let ui = reader.global::<MailAttachments>();
             if action == "close" {
                 close(&ui, &generation, &session);
                 return;
@@ -593,7 +600,7 @@ pub(crate) fn register(
             let Some(core) = state.borrow().core.as_ref().map(|core| core.file_core()) else {
                 return;
             };
-            let message = app.global::<EmailReader>().get_message_id();
+            let message = reader.global::<EmailReader>().get_message_id();
             // A profile switch may happen before the lifecycle timer's next
             // tick. Never use a retained attachment ID with a different Core.
             if (action == "page" || action == "download-current")
@@ -612,23 +619,34 @@ pub(crate) fn register(
                 session.borrow().selected.clone()
             } else {
                 value.parse::<i64>().ok().and_then(|id| {
-                    let state = state.borrow();
                     if listed {
-                        state
+                        return state
+                            .borrow()
                             .messages
                             .iter()
                             .filter_map(|m| m.first_attachment.as_ref())
                             .find(|a| a.id == id)
-                            .cloned()
-                    } else {
-                        state
-                            .conversation_messages
-                            .iter()
-                            .chain(state.messages.iter())
-                            .find(|m| m.id == message)
-                            .and_then(|m| m.attachments.iter().find(|a| a.id == id))
-                            .cloned()
+                            .cloned();
                     }
+                    let attachment =
+                        |m: &MailMessage| m.attachments.iter().find(|a| a.id == id).cloned();
+                    crate::reader_host::kept_message(&state, key, message)
+                        .as_ref()
+                        .and_then(attachment)
+                        // The main window's reader shows a list row until its
+                        // conversation is here.
+                        .or_else(|| {
+                            (key == ReaderKey::Main)
+                                .then(|| {
+                                    let state = state.borrow();
+                                    state
+                                        .messages
+                                        .iter()
+                                        .find(|m| m.id == message)
+                                        .and_then(attachment)
+                                })
+                                .flatten()
+                        })
                 })
             };
             let Some(selected) = selected else {
@@ -693,7 +711,7 @@ pub(crate) fn register(
             ui.set_open(true);
             ui.set_busy(true);
             ui.set_status("".into());
-            let weak = weak.clone();
+            let window = host.clone();
             let sender = sender.clone();
             let documents = documents.clone();
             let task = handle.spawn(async move {
@@ -751,8 +769,8 @@ pub(crate) fn register(
                 }
                 .await;
                 if sender.send((revision, message, core, result)).await.is_ok() {
-                    let _ = weak.upgrade_in_event_loop(|app| {
-                        app.global::<MailAttachments>().invoke_deliver()
+                    window.in_event_loop(|reader| {
+                        reader.global::<MailAttachments>().invoke_deliver()
                     });
                 }
             });

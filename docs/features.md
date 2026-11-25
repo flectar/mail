@@ -118,6 +118,17 @@ Settings → General.
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
 
+## Conversation windows
+
+On the desktop, double-click a conversation, press **Shift+Enter**, or choose
+**Open in new window** from its menu to read it in a window of its own. The
+window shows everything the reader does, with the same actions, and stays on
+its conversation while you go through the rest of your mail. Opening a
+conversation that already has a window brings that window forward. Archiving,
+deleting, moving or snoozing the conversation from its window closes it, and
+so does **Esc**. Replies and forwards from the window open in a window of their
+own. A conversation window opens at the size the last one had.
+
 ## Search
 
 The search field finds mail stored on this device. Every word has to match,

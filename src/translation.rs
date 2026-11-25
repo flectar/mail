@@ -47,7 +47,8 @@ struct Env {
 
 thread_local! {
     static ENV: RefCell<Option<Env>> = const { RefCell::new(None) };
-    static OPEN: RefCell<Open> = RefCell::new(Open::default());
+    /// What each reader's bar knows of the message it shows.
+    static OPEN: PerReader<Open> = const { PerReader::new() };
     /// Messages shown translated in this session.
     static SHOWN: RefCell<HashMap<i64, Shown>> = RefCell::new(HashMap::new());
     /// The app's language, as `apply_language` chose it, and whether the user
@@ -115,19 +116,29 @@ pub(super) fn failure(error: &CoreError) -> (&'static str, String) {
 /// The app's language changed: names follow it.
 pub(super) fn language_changed(app: &AppWindow, language: &str, chosen: bool) {
     APP_LANGUAGE.set((language.to_owned(), chosen));
-    let open_language = OPEN.with_borrow(|open| open.language.clone());
-    let ui = app.global::<Translation>();
-    ui.set_language_name(
-        open_language
-            .map(|tag| names::name(language, &tag, ""))
-            .unwrap_or_default()
-            .into(),
-    );
-    let shown = OPEN
-        .with_borrow(|open| open.message_id)
-        .and_then(|id| SHOWN.with_borrow(|shown| shown.get(&id).map(|shown| shown.target.clone())));
-    if let Some(target) = shown {
-        ui.set_target_name(names::name(language, &target, "").into());
+    for key in OPEN.with(PerReader::keys) {
+        let Some(reader) = key.host(&app.as_weak()).and_then(|host| host.upgrade()) else {
+            continue;
+        };
+        let (open_language, message_id) = OPEN.with(|open| {
+            open.with(key, |open| {
+                open.map(|open| (open.language.clone(), open.message_id))
+                    .unwrap_or_default()
+            })
+        });
+        let ui = reader.global::<Translation>();
+        ui.set_language_name(
+            open_language
+                .map(|tag| names::name(language, &tag, ""))
+                .unwrap_or_default()
+                .into(),
+        );
+        let shown = message_id.and_then(|id| {
+            SHOWN.with_borrow(|shown| shown.get(&id).map(|shown| shown.target.clone()))
+        });
+        if let Some(target) = shown {
+            ui.set_target_name(names::name(language, &target, "").into());
+        }
     }
     project_settings(app);
 }
@@ -137,24 +148,39 @@ pub(super) fn shown_html(message_id: i64) -> Option<String> {
     SHOWN.with_borrow(|shown| shown.get(&message_id).map(|shown| shown.html.clone()))
 }
 
+/// The message a reader's bar is about.
+fn open_message(key: ReaderKey) -> Option<i64> {
+    OPEN.with(|open| open.with(key, |open| open.and_then(|open| open.message_id)))
+}
+
 /// The reader shows `message`: the bar follows it. Its language is found
 /// once its body is here.
-pub(super) fn project(app: &AppWindow, message: &MailMessage) {
+pub(super) fn project(reader: &ReaderRef, message: &MailMessage) {
+    let key = reader.key();
     let id = i64::from(message.id);
-    if OPEN.with_borrow(|open| open.message_id) == Some(id) {
-        let ask = !message.body_pending && OPEN.with_borrow(|open| !open.asked);
+    if open_message(key) == Some(id) {
+        let ask = !message.body_pending
+            && OPEN.with(|open| {
+                open.with(key, |open| {
+                    open.is_some_and(|open| !std::mem::replace(&mut open.asked, true))
+                })
+            });
         if ask {
-            OPEN.with_borrow_mut(|open| open.asked = true);
-            ask_offer(id);
+            ask_offer(key, id);
         }
         return;
     }
-    OPEN.set(Open {
-        message_id: Some(id),
-        asked: !message.body_pending,
-        ..Open::default()
+    OPEN.with(|open| {
+        open.set(
+            key,
+            Open {
+                message_id: Some(id),
+                asked: !message.body_pending,
+                ..Open::default()
+            },
+        );
     });
-    let ui = app.global::<Translation>();
+    let ui = reader.global::<Translation>();
     ui.set_language_name("".into());
     ui.set_always(false);
     match SHOWN.with_borrow(|shown| shown.get(&id).map(|shown| shown.target.clone())) {
@@ -167,16 +193,31 @@ pub(super) fn project(app: &AppWindow, message: &MailMessage) {
     if message.body_pending {
         return;
     }
-    ask_offer(id);
+    ask_offer(key, id);
 }
 
 /// No message is open.
-pub(super) fn clear(app: &AppWindow) {
-    OPEN.set(Open::default());
-    app.global::<Translation>().set_state("".into());
+pub(super) fn clear(reader: &ReaderRef) {
+    OPEN.with(|open| open.remove(reader.key()));
+    reader.global::<Translation>().set_state("".into());
 }
 
-fn ask_offer(message_id: i64) {
+/// A reader's window closed.
+#[cfg(desktop)]
+pub(super) fn forget(key: ReaderKey) {
+    OPEN.with(|open| open.remove(key));
+}
+
+/// The reader `key`, while its window is open.
+fn reader_of(key: ReaderKey) -> Option<ReaderRef> {
+    ENV.with_borrow(|env| {
+        env.as_ref()
+            .and_then(|env| key.host(&env.app))
+            .and_then(|host| host.upgrade())
+    })
+}
+
+fn ask_offer(key: ReaderKey, message_id: i64) {
     ENV.with_borrow(|env| {
         let Some(env) = env else { return };
         let Some(core) = core(&env.state) else { return };
@@ -189,16 +230,21 @@ fn ask_offer(message_id: i64) {
                 .await
                 .map(|settings| settings.always)
                 .unwrap_or_default();
-            let _ = app.upgrade_in_event_loop(move |app| {
+            let _ = app.upgrade_in_event_loop(move |_| {
                 let Ok(offer) = offer else { return };
-                if OPEN.with_borrow(|open| open.message_id) != Some(message_id) {
+                if open_message(key) != Some(message_id) {
                     return;
                 }
-                OPEN.with_borrow_mut(|open| {
-                    open.language = offer.language.clone();
-                    open.offer = offer.offer;
+                let Some(reader) = reader_of(key) else { return };
+                OPEN.with(|open| {
+                    open.with(key, |open| {
+                        if let Some(open) = open {
+                            open.language = offer.language.clone();
+                            open.offer = offer.offer;
+                        }
+                    });
                 });
-                let ui = app.global::<Translation>();
+                let ui = reader.global::<Translation>();
                 let name = offer
                     .language
                     .as_deref()
@@ -215,7 +261,7 @@ fn ask_offer(message_id: i64) {
                     return;
                 }
                 if offer.automatic {
-                    translate(&app, message_id);
+                    translate(&reader, message_id);
                 } else if offer.offer {
                     ui.set_state("offer".into());
                 }
@@ -225,22 +271,20 @@ fn ask_offer(message_id: i64) {
 }
 
 /// Shows the message again, translated or not.
-fn render_again(app: &AppWindow) {
+fn render_again(reader: &ReaderRef) {
     ENV.with_borrow(|env| {
         let Some(env) = env else { return };
-        env.state.borrow().email_renderer.borrow_mut().loaded_key = None;
-        if let Err(error) = render_current(app, &env.state, &env.runtime) {
-            app.set_render_status(UiMessage::detail("Could not show the message: {}", error));
-        }
+        crate::reader_host::show_again(reader, &env.state, &env.runtime);
     });
 }
 
-fn translate(app: &AppWindow, message_id: i64) {
-    let ui = app.global::<Translation>();
+fn translate(reader: &ReaderRef, message_id: i64) {
+    let ui = reader.global::<Translation>();
     if ui.get_state() == "translating" {
         return;
     }
     ui.set_state("translating".into());
+    let key = reader.key();
     ENV.with_borrow(|env| {
         let Some(env) = env else { return };
         let Some(core) = core(&env.state) else { return };
@@ -248,14 +292,14 @@ fn translate(app: &AppWindow, message_id: i64) {
         let languages = reader_languages();
         env.runtime.spawn(async move {
             let result = core.translate_message(message_id, languages).await;
-            let _ = weak.upgrade_in_event_loop(move |app| shown(&app, message_id, result));
+            let _ = weak.upgrade_in_event_loop(move |_| shown(key, message_id, result));
         });
     });
 }
 
-fn shown(app: &AppWindow, message_id: i64, result: Result<MessageTranslation, CoreError>) {
-    let open = OPEN.with_borrow(|open| open.message_id) == Some(message_id);
-    let ui = app.global::<Translation>();
+fn shown(key: ReaderKey, message_id: i64, result: Result<MessageTranslation, CoreError>) {
+    let open = open_message(key) == Some(message_id);
+    let reader = reader_of(key);
     match result {
         Ok(translation) => {
             let html = match (translation.html, translation.text) {
@@ -266,10 +310,15 @@ fn shown(app: &AppWindow, message_id: i64, result: Result<MessageTranslation, Co
                 (None, None) => return,
             };
             if let Some(source) = &translation.source {
-                OPEN.with_borrow_mut(|open| {
-                    if open.message_id == Some(message_id) && open.language.is_none() {
-                        open.language = Some(source.clone());
-                    }
+                OPEN.with(|open| {
+                    open.with(key, |open| {
+                        if let Some(open) = open
+                            && open.message_id == Some(message_id)
+                            && open.language.is_none()
+                        {
+                            open.language = Some(source.clone());
+                        }
+                    });
                 });
             }
             SHOWN.with_borrow_mut(|shown| {
@@ -282,21 +331,23 @@ fn shown(app: &AppWindow, message_id: i64, result: Result<MessageTranslation, Co
                     },
                 )
             });
-            if !open {
+            let (true, Some(reader)) = (open, reader) else {
                 return;
-            }
+            };
+            let ui = reader.global::<Translation>();
             let language = app_language();
             if let Some(source) = translation.source {
                 ui.set_language_name(names::name(&language, &source, "").into());
             }
             ui.set_target_name(names::name(&language, &translation.target, "").into());
             ui.set_state("shown".into());
-            render_again(app);
+            render_again(&reader);
         }
         Err(error) => {
-            if !open {
+            let (true, Some(reader)) = (open, reader) else {
                 return;
-            }
+            };
+            let ui = reader.global::<Translation>();
             let (kind, detail) = failure(&error);
             ui.set_failure(kind.into());
             ui.set_detail(detail.into());
@@ -305,13 +356,14 @@ fn shown(app: &AppWindow, message_id: i64, result: Result<MessageTranslation, Co
     }
 }
 
-fn show_original(app: &AppWindow) {
-    let Some(message_id) = OPEN.with_borrow(|open| open.message_id) else {
+fn show_original(reader: &ReaderRef) {
+    let key = reader.key();
+    let Some(message_id) = open_message(key) else {
         return;
     };
     let source = SHOWN.with_borrow_mut(|shown| shown.remove(&message_id));
-    let offer = OPEN.with_borrow(|open| open.offer);
-    let ui = app.global::<Translation>();
+    let offer = OPEN.with(|open| open.with(key, |open| open.is_some_and(|open| open.offer)));
+    let ui = reader.global::<Translation>();
     // The way to translate it again stays where the translation was.
     ui.set_state(
         if offer || source.is_some_and(|shown| shown.source.is_some()) {
@@ -320,13 +372,16 @@ fn show_original(app: &AppWindow) {
             "".into()
         },
     );
-    render_again(app);
+    render_again(reader);
 }
 
-fn choose(app: &AppWindow, choice: &str) {
-    let Some((message_id, Some(language))) =
-        OPEN.with_borrow(|open| open.message_id.map(|id| (id, open.language.clone())))
-    else {
+fn choose(reader: &ReaderRef, choice: &str) {
+    let key = reader.key();
+    let Some((message_id, Some(language))) = OPEN.with(|open| {
+        open.with(key, |open| {
+            open.and_then(|open| open.message_id.map(|id| (id, open.language.clone())))
+        })
+    }) else {
         return;
     };
     let choice = match choice {
@@ -334,11 +389,11 @@ fn choose(app: &AppWindow, choice: &str) {
         "never" => LanguageChoice::Never,
         _ => LanguageChoice::Ask,
     };
-    let ui = app.global::<Translation>();
+    let ui = reader.global::<Translation>();
     ui.set_always(choice == LanguageChoice::Always);
     match choice {
         // Firefox translates the page as its language goes on the list.
-        LanguageChoice::Always if ui.get_state() == "offer" => translate(app, message_id),
+        LanguageChoice::Always if ui.get_state() == "offer" => translate(reader, message_id),
         LanguageChoice::Never if ui.get_state() == "offer" => ui.set_state("".into()),
         _ => {}
     }
@@ -676,33 +731,8 @@ pub(super) fn install(
         state: Rc::clone(state),
         runtime: runtime.clone(),
     }));
+    attach(&ReaderRef::main(app));
     let ui = app.global::<Translation>();
-    let weak = app.as_weak();
-    ui.on_translate(move || {
-        let Some(app) = weak.upgrade() else { return };
-        if let Some(message_id) = OPEN.with_borrow(|open| open.message_id) {
-            translate(&app, message_id);
-        }
-    });
-    let weak = app.as_weak();
-    ui.on_show_original(move || {
-        if let Some(app) = weak.upgrade() {
-            show_original(&app);
-        }
-    });
-    let weak = app.as_weak();
-    ui.on_choose(move |choice| {
-        if let Some(app) = weak.upgrade() {
-            choose(&app, &choice);
-        }
-    });
-    let weak = app.as_weak();
-    ui.on_open_settings(move || {
-        if let Some(app) = weak.upgrade() {
-            app.set_settings_tab("Translation".into());
-            app.invoke_open_settings();
-        }
-    });
     ui.on_refresh(refresh);
     let weak = app.as_weak();
     ui.on_choose_service(move |index| {
@@ -738,5 +768,38 @@ pub(super) fn install(
             settings.always.retain(|tag| *tag != code);
             settings.never.retain(|tag| *tag != code);
         });
+    });
+}
+
+/// Translate from the bar and menu of a reader.
+pub(super) fn attach(reader: &ReaderRef) {
+    let ui = reader.global::<Translation>();
+    let host = reader.host();
+    ui.on_translate(move || {
+        let Some(reader) = host.upgrade() else { return };
+        if let Some(message_id) = open_message(reader.key()) {
+            translate(&reader, message_id);
+        }
+    });
+    let host = reader.host();
+    ui.on_show_original(move || {
+        if let Some(reader) = host.upgrade() {
+            show_original(&reader);
+        }
+    });
+    let host = reader.host();
+    ui.on_choose(move |choice| {
+        if let Some(reader) = host.upgrade() {
+            choose(&reader, &choice);
+        }
+    });
+    let host = reader.host();
+    ui.on_open_settings(move || {
+        if let Some(reader) = host.upgrade() {
+            let app = reader.app();
+            app.set_settings_tab("Translation".into());
+            app.invoke_open_settings();
+            reader.raise_main();
+        }
     });
 }

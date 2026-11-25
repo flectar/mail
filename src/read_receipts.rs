@@ -10,17 +10,18 @@ use flectar_mail_core::models::{Disposition, ReadReceiptPolicy, ReceiptAnswer};
 
 type Answer = Rc<dyn Fn(i64, ReceiptAnswer)>;
 
+/// The receipts that came back for the message a reader shows, all of them,
+/// and whether its list shows them all.
+type Returned = (Option<i32>, Vec<ReturnedReceipt>, bool);
+
 thread_local! {
     /// Answers a message's request through the core.
     static ANSWER: RefCell<Option<Answer>> = const { RefCell::new(None) };
-    /// The message whose request the bar shows.
-    static OPEN: Cell<Option<i64>> = const { Cell::new(None) };
+    /// The message whose request each reader's bar shows.
+    static OPEN: PerReader<i64> = const { PerReader::new() };
     /// Requests answered here, until the core's answer reaches the reader.
     static ANSWERED: RefCell<HashSet<i64>> = RefCell::new(HashSet::new());
-    /// The open message's returned receipts, all of them, and whether the
-    /// list shows them all.
-    static RETURNED: RefCell<(Option<i32>, Vec<ReturnedReceipt>, bool)> =
-        const { RefCell::new((None, Vec::new(), false)) };
+    static RETURNED: PerReader<Returned> = const { PerReader::new() };
 }
 
 /// A list this long shows its first two and a button for the rest.
@@ -39,10 +40,13 @@ pub(super) fn install(
             if !ANSWERED.with_borrow_mut(|answered| answered.insert(message_id)) {
                 return;
             }
-            if let Some(app) = app.upgrade()
-                && OPEN.get() == Some(message_id)
-            {
-                app.global::<ReadReceipts>().set_available(false);
+            // Every reader that asks about this message stops asking.
+            for key in OPEN.with(PerReader::keys) {
+                if OPEN.with(|open| open.get(key)) == Some(message_id)
+                    && let Some(reader) = key.host(&app).and_then(|host| host.upgrade())
+                {
+                    reader.global::<ReadReceipts>().set_available(false);
+                }
             }
             let Some(core) = state.borrow().core.clone() else {
                 return;
@@ -63,35 +67,49 @@ pub(super) fn install(
             });
         })
     };
-    ANSWER.set(Some(Rc::clone(&answer)));
-    let ui = app.global::<ReadReceipts>();
-    let send = Rc::clone(&answer);
-    ui.on_send(move || {
-        if let Some(message_id) = OPEN.get() {
-            send(message_id, ReceiptAnswer::Send { user_agreed: true });
-        }
-    });
-    ui.on_ignore(move || {
-        if let Some(message_id) = OPEN.get() {
-            answer(message_id, ReceiptAnswer::Decline);
-        }
-    });
-    let app_weak = app.as_weak();
+    ANSWER.set(Some(answer));
+    attach(&ReaderRef::main(app));
+}
+
+/// Answer from the bar a reader shows, and open its list of receipts.
+pub(super) fn attach(reader: &ReaderRef) {
+    let ui = reader.global::<ReadReceipts>();
+    let key = reader.key();
+    ui.on_send(move || answer_open(key, ReceiptAnswer::Send { user_agreed: true }));
+    ui.on_ignore(move || answer_open(key, ReceiptAnswer::Decline));
+    let host = reader.host();
     ui.on_show_all_returned(move || {
-        RETURNED.with_borrow_mut(|returned| returned.2 = true);
-        if let Some(app) = app_weak.upgrade() {
-            show_returned(&app);
+        RETURNED.with(|returned| {
+            returned.with(host.key(), |returned| {
+                if let Some(returned) = returned {
+                    returned.2 = true;
+                }
+            });
+        });
+        if let Some(reader) = host.upgrade() {
+            show_returned(&reader);
         }
     });
+}
+
+/// Answer the request the reader's bar shows.
+fn answer_open(key: ReaderKey, answer: ReceiptAnswer) {
+    let Some(message_id) = OPEN.with(|open| open.get(key)) else {
+        return;
+    };
+    if let Some(send) = ANSWER.with_borrow(Clone::clone) {
+        send(message_id, answer);
+    }
 }
 
 /// The open message's read receipts: its request, by the bar that asks or,
 /// with Always, a receipt sent now when it needs no agreement; and the
 /// receipts that came back for it.
-pub(super) fn project(app: &AppWindow, email: &MailMessage) {
-    project_returned(app, email);
-    let ui = app.global::<ReadReceipts>();
-    let policy = ReadReceiptPolicy::parse(&ui.get_policy()).unwrap_or_default();
+pub(super) fn project(reader: &ReaderRef, email: &MailMessage) {
+    project_returned(reader, email);
+    // The policy is the user's, in the main window's Settings.
+    let policy = ReadReceiptPolicy::parse(&reader.app().global::<ReadReceipts>().get_policy())
+        .unwrap_or_default();
     let ask = email.receipt.as_ref().filter(|ask| {
         policy != ReadReceiptPolicy::Never
             && !ANSWERED.with_borrow(|answered| answered.contains(&ask.message_id))
@@ -101,18 +119,19 @@ pub(super) fn project(app: &AppWindow, email: &MailMessage) {
         request,
     }) = ask
     else {
-        clear_request(app);
+        clear_request(reader);
         return;
     };
     if policy == ReadReceiptPolicy::Always && !request.needs_confirmation {
-        clear_request(app);
+        clear_request(reader);
         let message_id = *message_id;
         if let Some(answer) = ANSWER.with_borrow(Clone::clone) {
             answer(message_id, ReceiptAnswer::Send { user_agreed: false });
         }
         return;
     }
-    OPEN.set(Some(*message_id));
+    OPEN.with(|open| open.set(reader.key(), *message_id));
+    let ui = reader.global::<ReadReceipts>();
     ui.set_sender(email.sender.clone().into());
     // The bar names the receipt's address only when it isn't the sender's.
     let elsewhere = request
@@ -135,20 +154,27 @@ pub(super) fn project(app: &AppWindow, email: &MailMessage) {
     ui.set_available(true);
 }
 
-fn clear_request(app: &AppWindow) {
-    OPEN.set(None);
-    app.global::<ReadReceipts>().set_available(false);
+fn clear_request(reader: &ReaderRef) {
+    OPEN.with(|open| open.remove(reader.key()));
+    reader.global::<ReadReceipts>().set_available(false);
 }
 
-pub(super) fn clear(app: &AppWindow) {
-    clear_request(app);
-    RETURNED.set((None, Vec::new(), false));
-    show_returned(app);
+pub(super) fn clear(reader: &ReaderRef) {
+    clear_request(reader);
+    RETURNED.with(|returned| returned.remove(reader.key()));
+    show_returned(reader);
+}
+
+/// A reader's window closed.
+#[cfg(desktop)]
+pub(super) fn forget(key: ReaderKey) {
+    OPEN.with(|open| open.remove(key));
+    RETURNED.with(|returned| returned.remove(key));
 }
 
 /// What the receipts that came back for the open message say. A list that
 /// was opened in full stays so while the same message is open.
-fn project_returned(app: &AppWindow, email: &MailMessage) {
+fn project_returned(reader: &ReaderRef, email: &MailMessage) {
     let now = Local::now();
     let rows = email
         .returned_receipts
@@ -170,26 +196,30 @@ fn project_returned(app: &AppWindow, email: &MailMessage) {
             time: crate::mail_view_model::message_time(receipt.reported_at, &now).into(),
         })
         .collect();
-    RETURNED.with_borrow_mut(|returned| {
-        let all = returned.0 == Some(email.id) && returned.2;
-        *returned = (Some(email.id), rows, all);
+    RETURNED.with(|returned| {
+        let all = returned.with(reader.key(), |returned| {
+            returned.is_some_and(|(id, _, all)| *id == Some(email.id) && *all)
+        });
+        returned.set(reader.key(), (Some(email.id), rows, all));
     });
-    show_returned(app);
+    show_returned(reader);
 }
 
-fn show_returned(app: &AppWindow) {
-    let ui = app.global::<ReadReceipts>();
-    RETURNED.with_borrow(|(_, rows, all)| {
-        let shown = if rows.len() > RETURNED_SHOWN && !all {
-            RETURNED_SHOWN - 1
-        } else {
-            rows.len()
-        };
-        let current = ui.get_returned();
-        // An unchanged list keeps its rows rather than rebuilding them.
-        if current.row_count() != shown || current.iter().zip(rows).any(|(row, new)| row != *new) {
-            ui.set_returned(ModelRc::new(VecModel::from(rows[..shown].to_vec())));
-        }
-        ui.set_more_returned(i32::try_from(rows.len() - shown).unwrap_or(i32::MAX));
-    });
+fn show_returned(reader: &ReaderRef) {
+    let ui = reader.global::<ReadReceipts>();
+    let (rows, all) = RETURNED
+        .with(|returned| returned.get(reader.key()))
+        .map(|(_, rows, all)| (rows, all))
+        .unwrap_or_default();
+    let shown = if rows.len() > RETURNED_SHOWN && !all {
+        RETURNED_SHOWN - 1
+    } else {
+        rows.len()
+    };
+    let current = ui.get_returned();
+    // An unchanged list keeps its rows rather than rebuilding them.
+    if current.row_count() != shown || current.iter().zip(&rows).any(|(row, new)| row != *new) {
+        ui.set_returned(ModelRc::new(VecModel::from(rows[..shown].to_vec())));
+    }
+    ui.set_more_returned(i32::try_from(rows.len() - shown).unwrap_or(i32::MAX));
 }

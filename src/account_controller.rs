@@ -869,56 +869,32 @@ pub(super) fn reorder_connected_account_rows(
     true
 }
 
-pub(super) fn print_selected_message(state: &Rc<RefCell<InboxState>>) -> Result<(), String> {
-    let html = {
-        let state = state.borrow();
-        let selected_id = state
-            .selected_id
-            .ok_or_else(|| "no message is selected".to_owned())?;
-        let selected = state
-            .conversation_messages
-            .get(state.conversation_selected_index)
-            .filter(|_| state.conversation_owner_id == Some(selected_id))
-            .or_else(|| {
-                state
-                    .messages
-                    .iter()
-                    .find(|message| message.id == selected_id)
-            });
-        selected
-            .and_then(|message| message.html.clone())
-            .ok_or_else(|| "message body is not ready".to_owned())?
-    };
+/// Print the message `reader` shows.
+pub(super) fn print_shown_message(
+    state: &Rc<RefCell<InboxState>>,
+    reader: ReaderKey,
+) -> Result<(), String> {
+    let html = crate::reader_host::shown_message(state, reader)
+        .ok_or_else(|| "no message is selected".to_owned())?
+        .html
+        .ok_or_else(|| "message body is not ready".to_owned())?;
     let printable = crate::email_document::export_html(&html, true);
     open_temporary_html("flectar-mail-print-", &printable)
 }
 
-pub(super) fn open_selected_message_in_browser(
+/// Open the message `reader` shows in the browser.
+pub(super) fn open_shown_message_in_browser(
     state: &Rc<RefCell<InboxState>>,
+    reader: ReaderKey,
 ) -> Result<(), String> {
-    let html = {
-        let state = state.borrow();
-        let selected_id = state
-            .selected_id
-            .ok_or_else(|| "no message is selected".to_owned())?;
-        let message = state
-            .conversation_messages
-            .get(state.conversation_selected_index)
-            .filter(|_| state.conversation_owner_id == Some(selected_id))
-            .or_else(|| {
-                state
-                    .messages
-                    .iter()
-                    .find(|message| message.id == selected_id)
-            })
-            .ok_or_else(|| "selected message is no longer available".to_owned())?;
-        message.html.clone().unwrap_or_else(|| {
-            let preview = display_preview(&message.preview);
-            format!(
-                "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><p>{preview}</p></body></html>"
-            )
-        })
-    };
+    let message = crate::reader_host::shown_message(state, reader)
+        .ok_or_else(|| "selected message is no longer available".to_owned())?;
+    let html = message.html.unwrap_or_else(|| {
+        let preview = display_preview(&message.preview);
+        format!(
+            "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><p>{preview}</p></body></html>"
+        )
+    });
     open_temporary_html(
         "flectar-mail-message-",
         &crate::email_document::export_html(&html, false),

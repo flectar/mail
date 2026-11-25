@@ -33,6 +33,7 @@ import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { ReaderWindows } from "../reader-ui.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
@@ -3875,6 +3876,7 @@ export component SettingsDialog inherits Rectangle {
                             ShortcutSection { vertical-stretch: 0; title: @tr("Navigation"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
                                 ShortcutRow { title: @tr("Move between messages"); keys: [Shortcuts.previous-message, Shortcuts.next-message]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Open message"); keys: [Shortcuts.open-message]; title-color: root.body-text; separator-color: root.faint-text; }
+                                if ReaderWindows.available : ShortcutRow { title: @tr("Open message in a new window"); keys: [Shortcuts.open-message-in-window]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Select message"); keys: [Shortcuts.select-message]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Switch between list and message"); keys: [Shortcuts.switch-pane]; title-color: root.body-text; separator-color: root.faint-text; }
                             }
