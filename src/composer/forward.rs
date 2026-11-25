@@ -100,7 +100,7 @@ impl Composers {
             return;
         };
         let subject = crate::compose_controller::prefixed_subject(&first.subject, "Fwd");
-        let Some(session) = self.open(app) else {
+        let Some(session) = self.start(app) else {
             return;
         };
         let Some(host) = session.host() else {
