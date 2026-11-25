@@ -162,6 +162,9 @@ pub(super) fn show_from_tray(app: &AppWindow) {
         eprintln!("could not restore window: {error}");
         return;
     }
+    // A start in the tray shows the window here first.
+    #[cfg(desktop)]
+    crate::window_places::shown(crate::window_places::Kind::Main, app);
     let (maximized, fullscreen) = LIFECYCLE.with(|lifecycle| {
         lifecycle.minimized.set(false);
         lifecycle.hidden_state.take()

@@ -574,6 +574,8 @@ fn new_window(app: &AppWindow) -> Option<Host> {
         }
     };
     copy_appearance(app, &window);
+    // At the size the last message's window had (#254).
+    crate::window_places::restore(crate::window_places::Kind::Composer, &window);
     window.set_attachment_picker_supported(app.get_document_apis_supported());
     let weak = window.as_weak();
     window.window().on_close_requested(move || {
@@ -1168,7 +1170,10 @@ impl Composers {
             return false;
         };
         match self.show_written_in(&app, draft, "draft", Some(window)) {
-            Some(session) => self.mark_review(&session, draft_id, agent),
+            Some(session) => {
+                session.show_window();
+                self.mark_review(&session, draft_id, agent)
+            }
             None => false,
         }
     }
@@ -1673,22 +1678,10 @@ impl ComposeSession {
         self.host_id.set(self.host_id.get().wrapping_add(1));
         *self.host.borrow_mut() = window_host;
         self.connect();
-        #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window {
-            self.watch_window(handle);
-        }
         self.clear_fields(&main);
         main.ui().set_open(false);
-
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window
-            && let Err(error) = handle.show()
-        {
-            window.ui().set_notice(
-                UiMessage::detail("Could not open composer: {}", error),
-                true,
-            );
-        }
+        self.show_window();
         // A window that never appears would keep the message out of reach.
         #[cfg(desktop)]
         if app.window().has_winit_window() {
@@ -1762,6 +1755,26 @@ impl ComposeSession {
         window_controller::composer_closed();
     }
 
+    /// Show the window this message is in and look after it, as each window
+    /// a message opens in needs.
+    #[cfg(desktop)]
+    fn show_window(self: &Rc<Self>) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let HostRef::Window(handle) = &host else {
+            return;
+        };
+        self.watch_window(handle);
+        match handle.show() {
+            Ok(()) => crate::window_places::shown(crate::window_places::Kind::Composer, handle),
+            Err(error) => host.ui().set_notice(
+                UiMessage::detail("Could not open composer: {}", error),
+                true,
+            ),
+        }
+    }
+
     /// A message's own window returns the memory input leaves behind once
     /// it goes still, as the main window does, keeps no pixels while it is
     /// minimized, hands its help to the keyboard on a key press as the main
@@ -1811,6 +1824,11 @@ impl ComposeSession {
                     }
                 }
                 _ => {}
+            }
+            if matches!(event, WindowEvent::Resized(_))
+                && let Some(window) = help.upgrade()
+            {
+                crate::window_places::changed(crate::window_places::Kind::Composer, &window);
             }
             if matches!(
                 event,
@@ -4507,15 +4525,7 @@ impl ComposeSession {
         self.start_format(false);
         self.show("signature", None);
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &host {
-            self.watch_window(handle);
-            if let Err(error) = handle.show() {
-                ui.set_notice(
-                    UiMessage::detail("Could not open composer: {}", error),
-                    true,
-                );
-            }
-        }
+        self.show_window();
     }
 
     /// Saves the signature being written to Settings, and closes it once saved.
@@ -4830,6 +4840,7 @@ mod tests {
         assert_eq!(open_windows(), 1);
         let review = composers.holding_draft(42).unwrap();
         let host = review.host().unwrap();
+        assert!(host.window().is_visible());
         let ui = host.ui();
         assert_eq!(ui.get_subject(), "Plans");
         assert_eq!(ui.get_to(), "priya@example.com");
