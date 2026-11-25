@@ -1,0 +1,64 @@
+diff --git a/crates/i-slint-backend-winit/winitwindowadapter.rs b/crates/i-slint-backend-winit/winitwindowadapter.rs
+index 2d119e50..b841264a 100644
+--- a/crates/i-slint-backend-winit/winitwindowadapter.rs
++++ b/crates/i-slint-backend-winit/winitwindowadapter.rs
+@@ -693,6 +693,11 @@ pub struct WinitWindowAdapter {
+     /// If that's the case, we should't resize to the preferred size in set_visible
+     has_explicit_size: Cell<bool>,
+ 
++    /// A size the application gave the window while it had no native window, for setting its
++    /// frame when it is shown.
++    #[cfg(target_os = "windows")]
++    size_before_show: Cell<Option<winit::dpi::Size>>,
++
+     /// Indicate whether we've ever received a resize event from winit after showing the window.
+     pending_resize_event_after_show: Cell<bool>,
+ 
+@@ -778,6 +783,8 @@ impl WinitWindowAdapter {
+             pending_requested_size: Cell::new(None),
+             physical_size_before_scale_factor: Cell::new(None),
+             has_explicit_size: Default::default(),
++            #[cfg(target_os = "windows")]
++            size_before_show: Default::default(),
+             pending_resize_event_after_show: Default::default(),
+             place_before_hiding: Default::default(),
+             has_presentable_frame: Default::default(),
+@@ -2107,6 +2114,13 @@ impl WinitWindowAdapter {
+                 self.resize_window(size.into())?;
+             }
+ 
++            // A size the application gave the window before it existed is the size of its client
++            // area, like the preferred size. winit made a frame for it with a caption, which a
++            // window that draws its own title bar doesn't have.
++            #[cfg(target_os = "windows")]
++            let size_before_show =
++                self.size_before_show.take().map(|size| size.to_physical::<u32>(scale_factor));
++
+             // Before the first frame, which is drawn at the size the window then has. A minimized
+             // window is left alone, since its position is the off-screen one Windows parks it at.
+             #[cfg(target_os = "windows")]
+@@ -2126,7 +2140,11 @@ impl WinitWindowAdapter {
+                     || kept_work_area.is_some_and(|work| {
+                         win32_window(&winit_window).and_then(work_area) == Some(work)
+                     });
+-                place_in_work_area(&winit_window, requested_size, only_if_lost);
++                place_in_work_area(
++                    &winit_window,
++                    requested_size.or(size_before_show),
++                    only_if_lost,
++                );
+             }
+ 
+             // Pre-render the first frame before mapping the window to avoid a flash of
+@@ -2329,6 +2347,11 @@ impl WindowAdapter for WinitWindowAdapter {
+     fn set_size(&self, size: corelib::api::WindowSize) {
+         self.has_explicit_size.set(true);
+         self.place_before_hiding.take();
++        #[cfg(target_os = "windows")]
++        self.size_before_show.set(
++            matches!(&*self.winit_window_or_none.borrow(), WinitWindowOrNone::None(_))
++                .then(|| window_size_to_winit(&size)),
++        );
+         // TODO: don't ignore error, propagate to caller
+         self.resize_window(window_size_to_winit(&size)).ok();
+     }

@@ -21,8 +21,22 @@ const PASTE_LIMIT: usize = 60_000;
 /// subject.
 const FILE_NAME: &str = "email.html";
 
-/// `core` returns the open mail data, whose settings choose the folder a
-/// saved file starts in.
+/// What a report needs from the app: the open mail data, whose settings
+/// choose the folder a saved file starts in, and where files and links go.
+struct Reporter {
+    core: Box<dyn Fn() -> Option<Arc<Core>>>,
+    runtime: tokio::runtime::Handle,
+    documents: Arc<dyn DocumentProvider>,
+    temp_dir: PathBuf,
+    opener: ExternalUrlOpener,
+    saving: Cell<bool>,
+}
+
+thread_local! {
+    static REPORTER: RefCell<Option<Rc<Reporter>>> = const { RefCell::new(None) };
+}
+
+/// `core` returns the open mail data.
 pub(super) fn register(
     app: &AppWindow,
     core: impl Fn() -> Option<Arc<Core>> + 'static,
@@ -31,45 +45,60 @@ pub(super) fn register(
     temp_dir: PathBuf,
     opener: ExternalUrlOpener,
 ) {
+    REPORTER.set(Some(Rc::new(Reporter {
+        core: Box::new(core),
+        runtime: runtime.clone(),
+        documents,
+        temp_dir,
+        opener,
+        saving: Cell::new(false),
+    })));
     let weak = app.as_weak();
-    let runtime = runtime.clone();
-    let saving = Rc::new(Cell::new(false));
     app.on_report_rendering_issue(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let url = issue_url(&Environment::from_app(&app).describe());
-        let html = app.get_selected_source();
-        if fits_in_issue(&html) {
-            if !html.is_empty() {
-                crate::renderer_input_controller::copy_text(&app, html.into());
-                app.set_render_status(UiMessage::plain(
-                    "Copied HTML source. Paste it into the issue.",
-                ));
-            }
-            open_form(&app, &opener, &url);
-            return;
+        if let Some(app) = weak.upgrade() {
+            report(&ReaderRef::main(&app));
         }
-        // The browser would cover a save dialog opened after it, so the form
-        // opens once the file is saved.
-        if saving.replace(true) {
-            return;
+    });
+}
+
+/// Report how the message `reader` shows renders: the form opens with the
+/// reader's settings, and the message's HTML goes on the clipboard, or into
+/// a file when it is too long for an issue.
+pub(super) fn report(reader: &ReaderRef) {
+    let Some(reporter) = REPORTER.with_borrow(Clone::clone) else {
+        return;
+    };
+    let app = reader.app();
+    let url = issue_url(&Environment::from_reader(reader).describe());
+    let html = reader.ui().get_selected_source();
+    if fits_in_issue(&html) {
+        if !html.is_empty() {
+            crate::renderer_input_controller::copy_text(reader, html.into());
+            app.set_render_status(UiMessage::plain(
+                "Copied HTML source. Paste it into the issue.",
+            ));
         }
-        let request = save_html(
-            core(),
-            Arc::clone(&documents),
-            temp_dir.clone(),
-            html.into(),
-        );
-        let weak = app.as_weak();
-        let opener = opener.clone();
-        let saving = Rc::clone(&saving);
-        crate::documents::run_request(&runtime, request, move |result| {
-            saving.set(false);
-            if let Some(app) = weak.upgrade() {
-                finish_saving(&app, &opener, &url, result);
-            }
-        });
+        open_form(app, &reporter.opener, &url);
+        return;
+    }
+    // The browser would cover a save dialog opened after it, so the form
+    // opens once the file is saved.
+    if reporter.saving.replace(true) {
+        return;
+    }
+    let request = save_html(
+        (reporter.core)(),
+        Arc::clone(&reporter.documents),
+        reporter.temp_dir.clone(),
+        html.into(),
+    );
+    let weak = app.as_weak();
+    let finished = Rc::clone(&reporter);
+    crate::documents::run_request(&reporter.runtime, request, move |result| {
+        finished.saving.set(false);
+        if let Some(app) = weak.upgrade() {
+            finish_saving(&app, &finished.opener, &url, result);
+        }
     });
 }
 
@@ -164,16 +193,18 @@ struct Environment {
 }
 
 impl Environment {
-    fn from_app(app: &AppWindow) -> Self {
-        let reader = app.global::<EmailReader>();
-        let colors = app.global::<MessageColors>();
+    fn from_reader(host: &ReaderRef) -> Self {
+        let reader = host.email();
+        let colors = host.colors();
         Self {
             version: env!("CARGO_PKG_VERSION"),
             package: package(),
             system: system(),
             architecture: std::env::consts::ARCH,
             distribution: distribution(),
-            gpu: app.global::<RendererSettings>().get_active() == "gpu",
+            // A conversation's window paints its message on the CPU.
+            gpu: host.key() == ReaderKey::Main
+                && host.app().global::<RendererSettings>().get_active() == "gpu",
             zoom: reader.get_zoom(),
             fit: reader.get_auto_fit(),
             colors: if colors.get_original() {
@@ -183,7 +214,7 @@ impl Environment {
             } else {
                 "light"
             },
-            remote_images_blocked: app.get_remote_images_blocked(),
+            remote_images_blocked: host.ui().get_remote_images_blocked(),
         }
     }
 
@@ -496,8 +527,8 @@ mod tests {
             clock.set(Duration::from_secs(1));
             slint::platform::update_timers_and_animations();
         }
-        app.set_selected_source(SOURCE.into());
-        app.set_remote_images_blocked(true);
+        app.global::<ReaderUi>().set_selected_source(SOURCE.into());
+        app.global::<ReaderUi>().set_remote_images_blocked(true);
         app.global::<RendererSettings>().set_active("gpu".into());
         app.global::<EmailReader>().set_zoom(0.85);
         app.global::<EmailReader>().set_auto_fit(true);
@@ -522,7 +553,7 @@ mod tests {
         );
 
         // The dialog selects Report issue when it opens.
-        app.set_rendering_info_open(true);
+        app.global::<ReaderUi>().set_rendering_info_open(true);
         let key = slint::SharedString::from(slint::platform::Key::Return);
         app.window()
             .dispatch_event(WindowEvent::KeyPressed { text: key.clone() });

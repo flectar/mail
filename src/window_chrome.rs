@@ -101,14 +101,14 @@ pub(crate) const PLATFORM: &str = if cfg!(target_os = "windows") {
 
 thread_local! {
     static STARTUP_FRAME: Cell<WindowFrame> = const { Cell::new(WindowFrame::System) };
-    /// Set while a composer window is being created.
+    /// Set while a composer's or a conversation's window is being created.
     #[cfg(desktop)]
     static CREATING_COMPOSER: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Native window attributes for the main window, applied by the backend
-/// selector before the window is created. Composer windows keep the
-/// platform's own frame.
+/// selector before the window is created. Composer and conversation windows
+/// keep the platform's own frame.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[cfg_attr(target_os = "windows", allow(unused_variables))]
 pub(crate) fn window_attributes(
@@ -128,11 +128,12 @@ pub(crate) fn window_attributes(
     }
 }
 
-/// Create a composer window. The winit backend applies the attributes hook
-/// while the component creates its window, so the hook can tell the two
-/// kinds apart: only the main window gets the integrated frame.
+/// Create a window other than the main one: a composer's or a
+/// conversation's. The winit backend applies the attributes hook while the
+/// component creates its window, so the hook can tell them apart: only the
+/// main window gets the integrated frame.
 #[cfg(desktop)]
-pub(crate) fn composer_window<T>(
+pub(crate) fn secondary_window<T>(
     create: impl FnOnce() -> Result<T, slint::PlatformError>,
 ) -> Result<T, slint::PlatformError> {
     CREATING_COMPOSER.set(true);
@@ -296,7 +297,11 @@ fn register_desktop_events(app: &AppWindow) {
                 macos::refresh(&app);
                 report_minimized(&app);
             }
+            winit::event::WindowEvent::Moved(_) => {
+                crate::window_places::changed(crate::window_places::Kind::Main, &app);
+            }
             winit::event::WindowEvent::Resized(size) => {
+                crate::window_places::changed(crate::window_places::Kind::Main, &app);
                 // AppKit lays the title bar out again on resize and full-screen
                 // transitions, which moves the traffic lights back.
                 #[cfg(target_os = "macos")]

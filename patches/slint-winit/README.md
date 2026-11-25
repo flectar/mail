@@ -62,13 +62,22 @@ guidance for redisplayed windows is to show them with the size, location and
 state they had, and to move or resize them only when the monitor configuration
 no longer allows that.
 
+## Windows that open at the size they had
+
+Flectar Mail gives its main window the size it had when it was last closed
+(Mail #254), as Slint's `set_size` before the window is shown. That size is the
+client area's, and winit makes a frame for it with a caption. Flectar Mail's
+window draws its own title bar, so on Windows its client area came out taller
+than the saved size by the caption and the top border, the same as for the
+preferred size before patch 0005, and it grew by that much at every start.
+
 ## Sources and adaptation
 
 `crates/i-slint-backend-winit` is the published 1.19.0 archive, revision
-`e436f546f71481d786cbc2a74316b1be1ef678c1`, plus six patches.
+`e436f546f71481d786cbc2a74316b1be1ef678c1`, plus seven patches.
 `0001-dependency-scanner.patch` lists five dependencies that the release
 declares but does not import, so `cargo machete` can scan the crate. The other
-five are ours.
+six are ours.
 
 `0002-wayland-file-drops.patch` gives the clipboard a drop handler that sends
 each drag to the event loop, which finds the window by its Wayland surface and
@@ -121,6 +130,14 @@ size isn't the one it is restored to. A size or position the application sets
 while the window is hidden wins. Flectar Mail maximizes the window again itself
 (`src/window_controller.rs`).
 
+`0007-windows-frame-a-size-set-before-showing.patch` keeps a size the
+application sets while a window has no native window, and on Windows passes it
+to patch 0005's check when the window is shown, as the preferred size is. The
+frame is then set from the borders the window actually has, so the client area
+gets that size. A window created maximized would be shown at once and remember
+the frame winit made, so Flectar Mail maximizes its window only after showing
+it (`src/window_places.rs`).
+
 `Cargo.toml.orig` is kept unchanged for provenance. The standalone lockfile is
 omitted, and the application lockfiles resolve the patched manifest.
 
@@ -151,5 +168,5 @@ When Flectar Mail moves to a Slint release on winit 0.31, the file drop patch
 goes together with smithay-clipboard, as `patches/smithay-clipboard/README.md`
 lists. The frame patches stay until a Slint release paces and presents software
 frames the same way, and the window patches until it places windows in the work
-area and keeps their size and place across hiding. Remove the vendored crate
-when none is left.
+area, keeps their size and place across hiding and gives a size set before
+showing to the client area. Remove the vendored crate when none is left.

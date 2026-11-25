@@ -153,7 +153,7 @@ fn show(
 
 /// A folder's name after its parents' names, as "Archive / 2026". The Inbox
 /// of servers that keep every folder in it goes by its name in `inbox`.
-fn folder_name(names: &[String], inbox: &str) -> String {
+pub(super) fn folder_name(names: &[String], inbox: &str) -> String {
     names
         .iter()
         .enumerate()

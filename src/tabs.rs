@@ -1180,7 +1180,7 @@ impl Tabs {
             },
             reader: match (reader_restore, conversation) {
                 (Some(restore), _) => restore.offset,
-                (None, Some(_)) => (-app.get_email_scroll_y()).max(0.0),
+                (None, Some(_)) => (-app.global::<ReaderUi>().get_email_scroll_y()).max(0.0),
                 (None, None) => 0.0,
             },
         };
@@ -1569,7 +1569,7 @@ impl Tabs {
             self.reader_restore.set(Some(restore));
             return true;
         }
-        let current = -app.get_email_scroll_y();
+        let current = -app.global::<ReaderUi>().get_email_scroll_y();
         // The user scrolled.
         if restore
             .applied
@@ -1577,12 +1577,13 @@ impl Tabs {
         {
             return false;
         }
-        let viewport = app.get_email_viewport_height();
-        let bottom = (app.get_email_scroll_document_height() - viewport).max(0.0);
+        let viewport = app.global::<ReaderUi>().get_email_viewport_height();
+        let bottom =
+            (app.global::<ReaderUi>().get_email_scroll_document_height() - viewport).max(0.0);
         let y = restore.offset.min(bottom);
         if restore.applied != Some(y) {
-            app.set_email_scroll_y(-y);
-            app.invoke_email_scroll(y, viewport);
+            app.global::<ReaderUi>().set_email_scroll_y(-y);
+            app.global::<ReaderUi>().invoke_email_scroll(y, viewport);
             restore.applied = Some(y);
             self.reader_restore.set(Some(restore));
         }
@@ -2820,8 +2821,9 @@ mod tests {
         let state = Rc::clone(&context.state);
         let tabs = Tabs::new(&app, context);
         app.set_active_view("mail".into());
-        app.set_email_viewport_height(500.0);
-        app.set_email_scroll_document_height(1000.0);
+        app.global::<ReaderUi>().set_email_viewport_height(500.0);
+        app.global::<ReaderUi>()
+            .set_email_scroll_document_height(1000.0);
         let message = |id: i32| {
             let mut message = fixture_messages()[0].clone();
             message.id = id;
@@ -2849,25 +2851,28 @@ mod tests {
         assert!(step(), "waits for the body");
         state.borrow_mut().conversation_messages[1].body_pending = false;
         assert!(step(), "waits one more poll for the reader's own reset");
-        assert_eq!(app.get_email_scroll_y(), 0.0);
+        assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), 0.0);
         // The message is shorter than the offset for now: scroll to its end
         // and follow it while it grows.
         assert!(step());
-        assert_eq!(app.get_email_scroll_y(), -500.0);
-        app.set_email_scroll_document_height(3000.0);
+        assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), -500.0);
+        app.global::<ReaderUi>()
+            .set_email_scroll_document_height(3000.0);
         assert!(!step(), "the offset is reached");
-        assert_eq!(app.get_email_scroll_y(), -1200.0);
+        assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), -1200.0);
 
         // The user's own scrolling ends the restore.
-        app.set_email_scroll_document_height(1000.0);
-        app.set_email_scroll_y(0.0);
+        app.global::<ReaderUi>()
+            .set_email_scroll_document_height(1000.0);
+        app.global::<ReaderUi>().set_email_scroll_y(0.0);
         tabs.restore_reader(7, Some(70), 1200.0);
         assert!(step());
         assert!(step());
-        app.set_email_scroll_y(-100.0);
-        app.set_email_scroll_document_height(3000.0);
+        app.global::<ReaderUi>().set_email_scroll_y(-100.0);
+        app.global::<ReaderUi>()
+            .set_email_scroll_document_height(3000.0);
         assert!(!step());
-        assert_eq!(app.get_email_scroll_y(), -100.0);
+        assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), -100.0);
 
         // So does opening another message of the conversation, or another
         // conversation.
@@ -2876,7 +2881,7 @@ mod tests {
         tabs.restore_reader(7, Some(70), 1200.0);
         state.borrow_mut().selected_id = Some(8);
         assert!(!step());
-        assert_eq!(app.get_email_scroll_y(), -100.0);
+        assert_eq!(app.global::<ReaderUi>().get_email_scroll_y(), -100.0);
     }
 
     /// Another screen, such as Settings, replaces mail in the same tab, and
@@ -2896,7 +2901,7 @@ mod tests {
             state.preview_closed = false;
         }
         ui.set_list_offset(640.0);
-        app.set_email_scroll_y(-300.0);
+        app.global::<ReaderUi>().set_email_scroll_y(-300.0);
         let view = || {
             let state = state.borrow();
             format!("{}\n{}\n{}", state.scope, state.query, state.search_filter)
@@ -2907,7 +2912,7 @@ mod tests {
         assert_eq!(app.get_active_view(), "settings");
         assert_eq!(app.get_settings_return_view(), "mail");
         // The new mail view starts at the top, as the window resets it.
-        app.set_email_scroll_y(0.0);
+        app.global::<ReaderUi>().set_email_scroll_y(0.0);
         ui.set_list_offset(0.0);
         // Saved meanwhile, the tab is Settings over where mail was.
         let (place, ..) = tabs.live(&app, false);
@@ -3009,6 +3014,7 @@ mod tests {
             can_create_children: true,
             can_rename: true,
             can_delete: true,
+            can_hide: false,
             label: "Folder".into(),
             scope: Some(Scope::Folder(folder_id)),
             context: String::new(),

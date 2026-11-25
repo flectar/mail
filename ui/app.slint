@@ -1,12 +1,16 @@
 export { AccountMailPreferences, SignatureChoice } from "components/account-mail-preferences.slint";
 import { OpenPgpReader } from "components/account-mail-preferences.slint";
 import { MailAttachments } from "models.slint";
+import { ReaderUi } from "reader-ui.slint";
 import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint";
 export { MailAttachments, MailAttachment } from "models.slint";
+export { ReaderUi, ReaderWindows } from "reader-ui.slint";
+export { ReaderWindow } from "reader-window.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
 export { MessageSource } from "message-source.slint";
+export { FolderVisibility, FolderShownRow } from "folder-visibility.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -98,6 +102,7 @@ export { ThemeDraft } from "components/theme-editor.slint";
 import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
 export { MessageColors } from "message-colors.slint";
+import { MessageColors } from "message-colors.slint";
 export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
 import { FilesView, FilesUi } from "views/files-view.slint";
 import { ContactsView } from "views/contacts-view.slint";
@@ -403,10 +408,12 @@ export global I18n {
         if (key == "{} of {} folders") { return @tr("{0} of {n} folder" | "{0} of {n} folders" % round(second-argument.to-float()), argument); }
         if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Text style preference saved.") { return @tr("Text style preference saved."); }
+        if (key == "Writing window preference saved.") { return @tr("Writing window preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
         if (key == "Could not save the update preference: {}") { return @tr("Could not save the update preference: {}", argument); }
         if (key == "Could not save the undo send preference: {}") { return @tr("Could not save the undo send preference: {}", argument); }
         if (key == "Could not save the text style preference: {}") { return @tr("Could not save the text style preference: {}", argument); }
+        if (key == "Could not save the writing window preference: {}") { return @tr("Could not save the writing window preference: {}", argument); }
         if (key == "Could not save the signature: {}") { return @tr("Could not save the signature: {}", argument); }
         if (key == "Sync interval is active for this session.") { return @tr("Sync interval is active for this session."); }
         if (key == "Sync interval set to {} minutes.") { return @tr("Sync interval set to {} minutes.", argument); }
@@ -664,6 +671,7 @@ export global I18n {
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
         if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
+        if (key == "Could not load the message: {}") { return @tr("Could not load the message: {}", argument); }
         if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
         if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
         if (key == "Could not save the prompts: {}") { return @tr("Could not save the prompts: {}", argument); }
@@ -835,6 +843,9 @@ export global I18n {
         if (key == "Could not create folder: {}") { return @tr("Could not create folder: {}", argument); }
         if (key == "Could not rename folder: {}") { return @tr("Could not rename folder: {}", argument); }
         if (key == "Could not delete folder: {}") { return @tr("Could not delete folder: {}", argument); }
+        if (key == "Folder hidden. Show it again in Settings → Accounts.") { return @tr("Folder hidden. Show it again in Settings → Accounts."); }
+        if (key == "Could not hide folder: {}") { return @tr("Could not hide folder: {}", argument); }
+        if (key == "Could not change the folder: {}") { return @tr("Could not change the folder: {}", argument); }
         if (key == "Could not close preview: {}") { return @tr("Could not close preview: {}", argument); }
         if (key == "Opened the system print view.") { return @tr("Opened the system print view."); }
         if (key == "Could not print message: {}") { return @tr("Could not print message: {}", argument); }
@@ -847,6 +858,7 @@ export global I18n {
         if (key == "Could not open draft: invalid account identifier") { return @tr("Could not open draft: invalid account identifier"); }
         if (key == "Connected account") { return @tr("Connected account"); }
         if (key == "Could not open composer: {}") { return @tr("Could not open composer: {}", argument); }
+        if (key == "Could not open the conversation's window: {}") { return @tr("Could not open the conversation's window: {}", argument); }
         if (key == "Add an account to send mail.") { return @tr("Add an account to send mail."); }
         if (key == "On this device") { return @tr("On this device"); }
         if (key == "Could not open composer: invalid account identifier") { return @tr("Could not open composer: invalid account identifier"); }
@@ -986,11 +998,17 @@ export global I18n {
     }
 }
 
-// Everything a composer window copies from the main window's look.
+// Everything composer and conversation windows copy from the main window's
+// look.
 struct Appearance {
     mode: string,
     preset: string,
     icon: AppIconVariant,
+    text-size: length,
+    motion: bool,
+    motion-preference: string,
+    motion-reduced: bool,
+    message-colors: string,
     light_primary: color,
     light_page: color,
     light_surface: color,
@@ -1009,6 +1027,8 @@ struct Appearance {
 export component ComposerWindow inherits Window {
     // "light", "dark" or "system": the main window's theme-mode.
     in property <string> theme: "system";
+    // The main window's interface text size (src/text_size.rs).
+    in property <length> interface-text-size: 0px;
     in property <bool> attachment-picker-supported: true;
     // The window's close button asks the composer, which protects a
     // message with content behind its discard confirmation.
@@ -1019,6 +1039,7 @@ export component ComposerWindow inherits Window {
     title: ComposerUi.subject != "" ? ComposerUi.subject : ComposerText.mode-title(ComposerUi.mode);
     icon: AppIcon.window-image(AppIcon.variant);
     default-font-family: "Google Sans Flex";
+    default-font-size: root.interface-text-size;
     preferred-width: 760px;
     preferred-height: 720px;
     min-width: 420px;
@@ -1091,6 +1112,8 @@ export component AppWindow inherits Window {
     callback create_folder(int, int, string);
     callback rename_folder(int, string);
     callback delete_folder(int);
+    // Hide a folder from the sidebar and the Move to list (#253).
+    callback hide_folder(int);
     callback load_more();
     callback load_earlier_mail();
     callback sync_mail();
@@ -1149,6 +1172,7 @@ export component AppWindow inherits Window {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
+    callback save_compose_in_window(bool);
     callback save_mark_read(string);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -1194,12 +1218,7 @@ export component AppWindow inherits Window {
     callback load_storage_usage();
     callback cancel_storage_usage();
     callback open_email_link(string);
-    callback copy_email_status(string);
     callback report_rendering_issue();
-    callback email-pointer-event(float, float, string, bool, bool, bool, bool);
-    callback email-scroll(float, float);
-    callback email-key-event(string, bool, bool, bool, bool, bool, bool);
-    callback select-email-text();
     callback set-remote-images(bool);
     callback load-remote-images-for-message();
     callback calendar-navigate(string, int);
@@ -1266,14 +1285,8 @@ export component AppWindow inherits Window {
 
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> mail_list_entries: [];
-    in property <[ThreadMessageRow]> thread_messages: [];
-    in property <int> selected_thread_index: 0;
     in property <[SidebarRow]> sidebar_rows: [];
     in-out property <string> folder_filter_query: "";
-    in property <[MailLabelRow]> mail_labels: [];
-    in property <[MailLabelRow]> mail_label_results: [];
-    in property <int> selected_mail_label_count: 0;
-    in property <bool> selected_account_uses_labels: false;
     in property <[AccountRow]> connected_accounts: [];
     in property <bool> has_device_mail: false;
     in property <bool> mail_export_running: false;
@@ -1388,37 +1401,15 @@ export component AppWindow inherits Window {
     in-out property <int> mail_preview_lines: 1;
     // Files dragged over the window would start a new message with them.
     in property <bool> drop_starts_message: false;
-    in property <string> selected_sender: "";
-    in property <string> selected_address: "";
-    in property <string> selected_subject: "";
-    in property <string> selected_time: "";
-    in property <string> selected_to: "";
-    in property <MessageDetails> selected_details;
-    in property <string> selected_label: "";
-    in property <bool> selected_is_draft: false;
-    in property <string> selected_initials: "?";
-    in property <image> selected_favicon;
-    in property <bool> selected_has_favicon: false;
     in property <LocalizedMessage> render-message;
     property <string> render_status: I18n.ui-message(root.render-message.key, root.render-message.argument, root.render-message.second_argument, root.render-message.third_argument);
-    in property <string> selected_plain_text: "";
-    in property <string> selected_source: "";
-    in property <string> selected_text: "";
-    in property <bool> has_selection: false;
-    in property <string> clipboard_request: "";
-    in property <int> clipboard_request_id: 0;
     in property <LocalizedMessage> sync-message;
     property <string> sync_status: I18n.ui-message(root.sync-message.key, root.sync-message.argument, root.sync-message.second_argument, root.sync-message.third_argument);
     in property <bool> sync_in_progress: false;
     // Rust: an account's sidebar heading shows a problem.
     in property <bool> account_problem: false;
-    in property <[EmailTile]> email_tiles: [];
-    in property <[EmailLink]> email_links: [];
     // The renderer reports the total laid-out content height while retaining
     // only viewport-adjacent raster tiles.
-    in-out property <float> email-content-aspect: 900 / 520;
-    in-out property <bool> source_mode: false;
-    in-out property <bool> rendering_info_open: false;
     in property <bool> can_load_more: false;
     in property <bool> mail_loading_more: false;
     in property <bool> mail_page_loading: false;
@@ -1427,16 +1418,8 @@ export component AppWindow inherits Window {
     in property <bool> has_selected: true;
     in property <int> previous_email_id: -1;
     in property <int> next_email_id: -1;
-    in property <bool> selected_starred: false;
-    in property <bool> selected_unread: false;
-    in property <string> selected_sender_verification: "";
-    in-out property <bool> text_mode: false;
     // The Rust renderer reads these bindings during Slint's WGPU rendering
     // callback and reflows Blitz at the current logical viewport size.
-    in-out property <length> email-viewport-width: 0px;
-    in-out property <length> email-viewport-height: 0px;
-    in-out property <length> email-scroll-document-height: 0px;
-    in-out property <length> email-scroll-y: 0px;
     private property <bool> settings-open: root.active_view == "settings";
     // The join dialog was opened from the welcome screen, which has no
     // Settings to show it in.
@@ -1511,7 +1494,9 @@ export component AppWindow inherits Window {
     changed search_query => { TabsUi.navigated(); }
     changed search_filter => { TabsUi.navigated(); }
     changed has_selected => { TabsUi.navigated(); }
-    changed selected_subject => { TabsUi.navigated(); }
+    // The open message's subject names its tab.
+    private property <string> open-subject: ReaderUi.selected_subject;
+    changed open-subject => { TabsUi.navigated(); }
     changed calendar_selected_date => { TabsUi.navigated(); }
     changed calendar_view_mode => { TabsUi.navigated(); }
     // Own scan lifetime here: the conditional SettingsDialog is destroyed on
@@ -1560,6 +1545,8 @@ export component AppWindow inherits Window {
     in-out property <int> undo_send_seconds: 10;
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
+    // On the desktop, messages are written in a window of their own (#254).
+    in-out property <bool> compose_in_window: false;
     in-out property <string> compose_text_size: "normal";
     in-out property <string> mark_read: "immediately";
     in-out property <bool> collect_outgoing_contacts: true;
@@ -1576,7 +1563,6 @@ export component AppWindow inherits Window {
     in-out property <bool> oauth_in_progress: false;
     in property <bool> remote-images-available: true;
     in-out property <bool> remote-images-enabled: false;
-    in property <bool> remote-images-blocked: false;
     // The account a new message is written from: one the mail view shows.
     in-out property <int> compose_account_id: -1;
     in-out property <string> compose_from_label: @tr("No connected account");
@@ -1889,11 +1875,14 @@ export component AppWindow inherits Window {
             : ColorScheme.unknown;
     }
 
-    // Composer windows have their own globals and follow this window's
-    // appearance through Rust.
+    // Composer and conversation windows have their own globals and follow
+    // this window's appearance through Rust.
     callback appearance-changed();
     private property <Appearance> appearance: {
         mode: root.theme-mode, preset: AppTheme.preset, icon: AppIcon.variant,
+        text-size: root.interface-text-size, motion: MotionSettings.enabled,
+        motion-preference: MotionSettings.preference, motion-reduced: MotionSettings.system-reduced,
+        message-colors: MessageColors.preference,
         light_primary: AppTheme.custom-light-primary, light_page: AppTheme.custom-light-page-bg,
         light_surface: AppTheme.custom-light-surface, light_text: AppTheme.custom-light-text,
         light_border: AppTheme.custom-light-border, dark_primary: AppTheme.custom-dark-primary,
@@ -2016,13 +2005,13 @@ export component AppWindow inherits Window {
             // `changed` misses the sizes a new mail view starts with. A phone's
             // window never resizes, so they're the only ones its reader gets.
             init => {
-                root.email-viewport-width = self.email-viewport-width;
-                root.email-viewport-height = self.email-viewport-height;
-                root.email-scroll-document-height = self.email-scroll-document-height;
+                ReaderUi.email-viewport-width = self.email-viewport-width;
+                ReaderUi.email-viewport-height = self.email-viewport-height;
+                ReaderUi.email-scroll-document-height = self.email-scroll-document-height;
             }
-            changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
-            changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
-            changed email-scroll-document-height => { root.email-scroll-document-height = self.email-scroll-document-height; }
+            changed email-viewport-width => { ReaderUi.email-viewport-width = self.email-viewport-width; }
+            changed email-viewport-height => { ReaderUi.email-viewport-height = self.email-viewport-height; }
+            changed email-scroll-document-height => { ReaderUi.email-scroll-document-height = self.email-scroll-document-height; }
             compact-page <=> root.mail-compact-page;
             folders-open <=> root.mail-folders-open;
             loading: !root.startup_hydrated || root.mail_page_loading;
@@ -2039,8 +2028,6 @@ export component AppWindow inherits Window {
             emails: root.emails;
             list_entries: root.mail_list_entries;
             group_mail_by_date: root.group_mail_by_date;
-            thread_messages: root.thread_messages;
-            selected_thread_index: root.selected_thread_index;
             sidebar_rows: root.sidebar_rows;
             mail_profiles: root.mail_profiles;
             profiles-in-sidebar: !root.top-bar && !root.compact-layout;
@@ -2053,12 +2040,6 @@ export component AppWindow inherits Window {
                 root.new_profile_requested = true;
             }
             folder_filter_query <=> root.folder_filter_query;
-            mail_labels: root.mail_labels;
-            mail_label_results: root.mail_label_results;
-            selected_mail_label_count: root.selected_mail_label_count;
-            selected_account_uses_labels: root.selected_account_uses_labels;
-            email_tiles: root.email_tiles;
-            email_links: root.email_links;
             active_view: root.active_view;
             selected_scope: root.selected_scope;
             selected_scope_title: root.display_scope_title;
@@ -2069,23 +2050,6 @@ export component AppWindow inherits Window {
             mail_oldest_first: root.mail_oldest_first;
             mail_compact_rows: root.mail_compact_rows;
             mail_preview_lines: root.mail_preview_lines;
-            selected_sender: root.selected_sender;
-            selected_address: root.selected_address;
-            selected_subject: root.selected_subject;
-            selected_time: root.selected_time;
-            selected_to: root.selected_to;
-            selected_details: root.selected_details;
-            selected_label: root.selected_label;
-            selected_is_draft: root.selected_is_draft;
-            selected_initials: root.selected_initials;
-            selected_favicon: root.selected_favicon;
-            selected_has_favicon: root.selected_has_favicon;
-            selected_plain_text: root.selected_plain_text;
-            selected_source: root.selected_source;
-            selected_text: root.selected_text;
-            has_selection: root.has_selection;
-            clipboard_request: root.clipboard_request;
-            clipboard_request_id: root.clipboard_request_id;
             sync_in_progress: root.sync_in_progress;
             account_problem: root.account_problem;
             can_load_more: root.can_load_more;
@@ -2095,18 +2059,9 @@ export component AppWindow inherits Window {
             has_selected: root.startup_ready && root.has_selected;
             previous-email-id: root.previous_email_id;
             next-email-id: root.next_email_id;
-            selected_starred: root.selected_starred;
-            selected_unread: root.selected_unread;
-            selected_sender_verification: root.selected_sender_verification;
-            remote-images-blocked: root.remote-images-blocked;
             monochrome_sidebar_icons: root.monochrome_sidebar_icons;
             print_supported: root.print_supported;
             mail_sidebar_collapsed <=> root.mail_sidebar_collapsed;
-            text_mode <=> root.text_mode;
-            source_mode <=> root.source_mode;
-            rendering_info_open <=> root.rendering_info_open;
-            email-content-aspect <=> root.email-content-aspect;
-            email-scroll-y <=> root.email-scroll-y;
             open-settings(page) => {
                 root.settings_tab = page;
                 root.open-settings();
@@ -2146,6 +2101,7 @@ export component AppWindow inherits Window {
             }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
+            request_folder_hide(id) => { root.hide_folder(id); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
             request_label_delete(id, name, account, global, has-descendants) => {
                 root.open-label-delete(id, name, account, global, has-descendants);
@@ -2187,16 +2143,7 @@ export component AppWindow inherits Window {
             open_message_in_browser => { root.open_message_in_browser(); }
             open_compose => { root.open_compose(""); }
             open_email_link(url) => { root.open_email_link(url); }
-            copy_email_status(status) => { root.copy_email_status(status); }
             report_rendering_issue => { root.report_rendering_issue(); }
-            email-pointer-event(x, y, kind, control, shift, alt, meta) => {
-                root.email-pointer-event(x, y, kind, control, shift, alt, meta);
-            }
-            email-scroll(offset, viewport-height) => { root.email-scroll(offset, viewport-height); }
-            email-key-event(text, pressed, repeat, control, shift, alt, meta) => {
-                root.email-key-event(text, pressed, repeat, control, shift, alt, meta);
-            }
-            select-email-text => { root.select-email-text(); }
             load-remote-images-for-message => { root.load-remote-images-for-message(); }
         }
         }
@@ -2472,6 +2419,7 @@ export component AppWindow inherits Window {
             sync_interval_minutes <=> root.sync_interval_minutes;
             undo_send_seconds <=> root.undo_send_seconds;
             compose_font <=> root.compose_font;
+            compose_in_window <=> root.compose_in_window;
             compose_text_size <=> root.compose_text_size;
             mark_read <=> root.mark_read;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
@@ -2585,6 +2533,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_compose_text_style(font, size) => { root.save_compose_text_style(font, size); }
+            save_compose_in_window(enabled) => { root.save_compose_in_window(enabled); }
             save_mark_read(choice) => { root.save_mark_read(choice); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
@@ -2677,7 +2626,7 @@ export component AppWindow inherits Window {
             height: parent.height;
             live-workspace: root.active_view;
             live-title: root.active_view != "mail" ? ""
-                : root.has_selected && root.selected_subject != "" ? root.selected_subject
+                : root.has_selected && ReaderUi.selected_subject != "" ? ReaderUi.selected_subject
                 : root.display_scope_title;
         }
 
@@ -3227,7 +3176,7 @@ export component AppWindow inherits Window {
         // open conversation or mailbox.
         live-workspace: root.active_view;
         live-title: root.active_view != "mail" ? ""
-            : root.has_selected && root.selected_subject != "" ? root.selected_subject
+            : root.has_selected && ReaderUi.selected_subject != "" ? ReaderUi.selected_subject
             : root.display_scope_title;
         background-color: root.tab-strip-bg;
         // The active tab opens into what lies under the strip: the raised

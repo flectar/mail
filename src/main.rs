@@ -46,6 +46,7 @@ mod files_controller;
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 mod flatpak_secrets;
 mod folder_roles;
+mod folder_visibility;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -97,8 +98,13 @@ mod preview_controls;
 mod read_marking;
 mod read_receipts;
 mod reader_clipboard;
+mod reader_host;
 #[cfg(test)]
 mod reader_validation;
+#[cfg(desktop)]
+mod reader_window;
+#[cfg(all(test, desktop))]
+mod reader_window_tests;
 #[cfg(test)]
 mod screenshot_email;
 #[cfg(test)]
@@ -141,6 +147,8 @@ mod updates;
 mod when_picker;
 mod window_chrome;
 mod window_controller;
+#[cfg(desktop)]
+mod window_places;
 mod word_diff;
 
 slint::include_modules!();
@@ -188,6 +196,7 @@ use mail_groups::{
 use mail_render_projection::*;
 use mail_scope::{Scope, StandardMailbox, accounts_to_check};
 use mail_view_model::*;
+use reader_host::{PerReader, ReaderHost, ReaderKey, ReaderRef};
 use renderer::{GpuEmailRenderer, RenderedEmail};
 use renderer_input_controller::register_renderer_input_callbacks;
 use rich_compose::{ComposeSelection, RichComposeDocument};
@@ -488,6 +497,34 @@ enum MailListUpdateKind {
 
 struct MailMetadataUpdate {
     result: Result<mail::MailMetadata, String>,
+}
+
+/// A folder and every folder in it, as the sidebar lists them.
+fn folder_tree_ids(mailboxes: &[MailboxEntry], folder_id: i64) -> Vec<i64> {
+    let parents = mailboxes
+        .iter()
+        .filter(|mailbox| mailbox.folder_id >= 0)
+        .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
+        .collect::<HashMap<_, _>>();
+    std::iter::once(folder_id)
+        .chain(
+            parents
+                .keys()
+                .copied()
+                .filter(|&folder| folder != folder_id),
+        )
+        .filter(|&folder| {
+            let mut candidate = folder;
+            let mut visited = HashSet::new();
+            while candidate >= 0 && visited.insert(candidate) {
+                if candidate == folder_id {
+                    return true;
+                }
+                candidate = parents.get(&candidate).copied().unwrap_or(-1);
+            }
+            false
+        })
+        .collect()
 }
 
 struct FolderMutationUpdate {
@@ -853,12 +890,32 @@ fn resolve_single_mail_drop(
         .iter()
         .find(|message| message.id == item.message_id)
         .ok_or_else(|| "message is no longer available".to_owned())?;
-    let target =
-        MailTarget::of(message).ok_or_else(|| "message thread is unavailable".to_owned())?;
     if message.account_id != i64::from(item.account_id) {
         return Err("dragged message account is stale".to_owned());
     }
-    if state.scope == target_scope {
+    resolve_mail_move(
+        state,
+        message,
+        state.scope,
+        target_scope,
+        target_account_id,
+        target_folder_id,
+    )
+}
+
+/// Where moving the mail of `message`, which `from` shows, to the target
+/// takes it.
+fn resolve_mail_move(
+    state: &InboxState,
+    message: &MailMessage,
+    from: Scope,
+    target_scope: Scope,
+    target_account_id: i32,
+    target_folder_id: i32,
+) -> Result<(MailTarget, MailDropDestination), String> {
+    let target =
+        MailTarget::of(message).ok_or_else(|| "message thread is unavailable".to_owned())?;
+    if from == target_scope {
         return Err("message is already in this destination".to_owned());
     }
 
@@ -967,7 +1024,7 @@ fn resolve_single_mail_drop(
             }
             // Folders are told apart by scope: another folder can have the
             // name of the one shown.
-            if state.scope.shows_mail_in(target_scope) {
+            if from.shows_mail_in(target_scope) {
                 return Err("message is already in this destination".to_owned());
             }
             match standard {
@@ -1023,6 +1080,44 @@ fn resolve_mail_drop(
             .map(|(target, destination)| (item.message_id, target, destination))
         })
         .collect()
+}
+
+/// Move the mail of `rows`, which `from` shows, to the mailbox chosen in a
+/// reader's or the list's move picker.
+fn perform_mail_move(
+    state: &Rc<RefCell<InboxState>>,
+    rows: &[MailMessage],
+    from: Scope,
+    target_scope: Scope,
+    target_account_id: i32,
+    target_folder_id: i32,
+) -> Result<(), String> {
+    let (core, operations) = {
+        let state = state.borrow();
+        if !state.using_core {
+            return Err("mail account is not ready".to_owned());
+        }
+        let core = state
+            .core
+            .clone()
+            .ok_or_else(|| "mail core is unavailable".to_owned())?;
+        let operations = rows
+            .iter()
+            .map(|row| {
+                let (target, destination) = resolve_mail_move(
+                    &state,
+                    row,
+                    from,
+                    target_scope,
+                    target_account_id,
+                    target_folder_id,
+                )?;
+                Ok((row.id, target, mail_work::Operation::Drop(destination)))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        (core, operations)
+    };
+    mail_work::enqueue(state, core, operations)
 }
 
 fn perform_mail_drop(
@@ -1987,6 +2082,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    // The window comes back at the size and place it had (#254).
+    #[cfg(desktop)]
+    {
+        window_places::install(&platform.paths.data_dir, &runtime);
+        window_places::restore(window_places::Kind::Main, &app);
+    }
     motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
@@ -2015,7 +2116,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         .on_resolve(|action, current, minimum, maximum| {
             crate::preview_controls::zoom(&action, current, minimum, maximum)
         });
-    theme::register_theme_utilities(&app);
+    theme::register_theme_utilities(&app.global::<ThemeUtilities>());
     app.set_print_supported(!cfg!(mobile));
     // Every host provides a document provider now: desktop dialogs on desktop,
     // the system picker on mobile. The document entry points (compose
@@ -2035,6 +2136,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         startup_metrics.emit("started_in_tray", serde_json::Value::Null);
     } else {
         renderer_preferences::initialize_step(use_wgpu, || app.show())?;
+        #[cfg(desktop)]
+        window_places::shown(window_places::Kind::Main, &app);
         startup_metrics.emit(
             "window_shown",
             serde_json::json!({
@@ -2212,8 +2315,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     return;
                 };
 
-                let logical_width = app.get_email_viewport_width();
-                let logical_height = app.get_email_viewport_height();
+                let logical_width = app.global::<ReaderUi>().get_email_viewport_width();
+                let logical_height = app.global::<ReaderUi>().get_email_viewport_height();
                 let scale_factor = app.window().scale_factor();
                 let complex_message = email_renderer_for_notifier
                     .borrow()
@@ -2228,8 +2331,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         );
                     match fallback {
                         Ok(Some(frame)) => {
-                            apply_cpu_frame(&app, frame);
-                            sync_reader_metadata(&app, &email_renderer_for_notifier);
+                            apply_cpu_frame(&ReaderRef::main(&app), frame);
+                            sync_reader_metadata(
+                                &ReaderRef::main(&app),
+                                &email_renderer_for_notifier,
+                            );
                             if complex_message {
                                 app.set_render_status(UiMessage::plain(
                                     "Large message rendered in compatibility mode.",
@@ -2242,13 +2348,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             }
                         }
                         Ok(None) => {
-                            sync_reader_metadata(&app, &email_renderer_for_notifier);
+                            sync_reader_metadata(
+                                &ReaderRef::main(&app),
+                                &email_renderer_for_notifier,
+                            );
                         }
                         Err(cpu_error) => {
                             app.global::<EmailReader>()
                                 .set_notice(cpu_error.clone().into());
-                            clear_reader_projection(&app);
-                            app.set_text_mode(true);
+                            clear_reader_projection(&ReaderRef::main(&app));
+                            app.global::<ReaderUi>().set_text_mode(true);
                             app.set_render_status(UiMessage::detail(
                                 "Software email render failed: {}",
                                 cpu_error,
@@ -2266,8 +2375,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 );
                 match result {
                     Ok(Some(frame)) => {
-                        apply_gpu_frame(&app, frame);
-                        sync_reader_metadata(&app, &email_renderer_for_notifier);
+                        apply_gpu_frame(&ReaderRef::main(&app), frame);
+                        sync_reader_metadata(&ReaderRef::main(&app), &email_renderer_for_notifier);
                     }
                     Ok(None) => {}
                     Err(gpu_error) => {
@@ -2284,21 +2393,27 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             );
                         match fallback {
                             Ok(Some(frame)) => {
-                                apply_cpu_frame(&app, frame);
-                                sync_reader_metadata(&app, &email_renderer_for_notifier);
+                                apply_cpu_frame(&ReaderRef::main(&app), frame);
+                                sync_reader_metadata(
+                                    &ReaderRef::main(&app),
+                                    &email_renderer_for_notifier,
+                                );
                                 app.set_render_status(UiMessage::detail(
                                     "Rendered with software fallback after GPU error: {}",
                                     gpu_error,
                                 ));
                             }
                             Ok(None) => {
-                                sync_reader_metadata(&app, &email_renderer_for_notifier);
+                                sync_reader_metadata(
+                                    &ReaderRef::main(&app),
+                                    &email_renderer_for_notifier,
+                                );
                             }
                             Err(cpu_error) => {
                                 app.global::<EmailReader>()
                                     .set_notice(cpu_error.clone().into());
-                                clear_reader_projection(&app);
-                                app.set_text_mode(true);
+                                clear_reader_projection(&ReaderRef::main(&app));
+                                app.global::<ReaderUi>().set_text_mode(true);
                                 app.set_render_status(UiMessage::arguments(
                                     "Blitz render failed (GPU: {}; software: {})",
                                     gpu_error,
@@ -2313,7 +2428,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     app.set_emails(Rc::clone(&initial_state.email_rows).into());
     app.set_mail_list_entries(Rc::clone(&initial_state.mail_list_entries).into());
-    app.set_thread_messages(Rc::clone(&initial_state.conversation_rows).into());
+    app.global::<ReaderUi>()
+        .set_thread_messages(Rc::clone(&initial_state.conversation_rows).into());
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     let app_language = platform.app_language.clone();
@@ -2344,7 +2460,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.paths.temp_dir(),
     );
 
-    attachment_controller::register(&app, &state, &runtime, platform.documents.clone());
+    attachment_controller::register(
+        &ReaderRef::main(&app),
+        &state,
+        &runtime,
+        platform.documents.clone(),
+    );
 
     let state_for_mail_drag = Rc::clone(&state);
     app.global::<MailDragApi>()
@@ -3591,17 +3712,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 return;
             };
             if !use_wgpu {
-                let (width, height) = email_viewport_size(&app);
+                let (width, height) = email_viewport_size(&ReaderRef::main(&app));
                 match renderer.borrow_mut().render_cpu_if_needed(
                     width,
                     height,
                     app.window().scale_factor(),
                 ) {
-                    Ok(Some(frame)) => apply_cpu_frame(&app, frame),
+                    Ok(Some(frame)) => apply_cpu_frame(&ReaderRef::main(&app), frame),
                     Ok(None) => {}
                     Err(error) => {
                         app.global::<EmailReader>().set_notice(error.clone().into());
-                        app.set_text_mode(true);
+                        app.global::<ReaderUi>().set_text_mode(true);
                         app.set_render_status(UiMessage::detail(
                             "Email resource render failed: {}",
                             error,
@@ -3609,7 +3730,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     }
                 }
             }
-            sync_reader_metadata(&app, &renderer);
+            sync_reader_metadata(&ReaderRef::main(&app), &renderer);
             app.window().request_redraw();
         });
     });
@@ -3919,7 +4040,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let delete_folder_state = Rc::clone(&state);
     let delete_folder_runtime = runtime.clone();
-    let delete_folder_updates = folder_tx;
+    let delete_folder_updates = folder_tx.clone();
     app.on_delete_folder(move |folder_id| {
         let Some(core) = delete_folder_state.borrow().core.clone() else {
             return;
@@ -3927,33 +4048,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let folder_id = i64::from(folder_id);
         let (current_scope, removed_folders) = {
             let state = delete_folder_state.borrow();
-            let parents = state
-                .mailboxes
-                .iter()
-                .filter(|mailbox| mailbox.folder_id >= 0)
-                .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
-                .collect::<HashMap<_, _>>();
-            // The folder and everything under it.
-            let removed_folders = std::iter::once(folder_id)
-                .chain(
-                    parents
-                        .keys()
-                        .copied()
-                        .filter(|&folder| folder != folder_id),
-                )
-                .filter(|&folder| {
-                    let mut candidate = folder;
-                    let mut visited = HashSet::new();
-                    while candidate >= 0 && visited.insert(candidate) {
-                        if candidate == folder_id {
-                            return true;
-                        }
-                        candidate = parents.get(&candidate).copied().unwrap_or(-1);
-                    }
-                    false
-                })
-                .collect::<Vec<_>>();
-            (state.scope, removed_folders)
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
         };
         let selected_folder_is_deleted = matches!(
             current_scope,
@@ -3983,6 +4078,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     reveal_parent_id: None,
                     issued_scope: current_scope,
                     removed_folders,
+                })
+                .await;
+        });
+    });
+    // Hiding a folder takes it and the folders in it from the sidebar, as
+    // deleting would, and a list showing one goes to the inbox (#253).
+    let hide_folder_state = Rc::clone(&state);
+    let hide_folder_runtime = runtime.clone();
+    let hide_folder_updates = folder_tx;
+    app.on_hide_folder(move |folder_id| {
+        let Some(core) = hide_folder_state.borrow().core.clone() else {
+            return;
+        };
+        let folder_id = i64::from(folder_id);
+        let (current_scope, hidden_folders) = {
+            let state = hide_folder_state.borrow();
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
+        };
+        let scope = if matches!(current_scope, Scope::Folder(id) if hidden_folders.contains(&id)) {
+            Scope::UNIFIED_INBOX
+        } else {
+            current_scope
+        };
+        let updates = hide_folder_updates.clone();
+        hide_folder_runtime.spawn(async move {
+            let result = core.set_folder_hidden(folder_id, true).await;
+            let metadata = if result.is_ok() {
+                core.load_mail_metadata(scope).await.ok()
+            } else {
+                None
+            };
+            let message = match result {
+                Ok(()) => UiMessage::plain("Folder hidden. Show it again in Settings → Accounts."),
+                Err(error) => UiMessage::detail("Could not hide folder: {}", error),
+            };
+            let _ = updates
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                    issued_scope: current_scope,
+                    removed_folders: hidden_folders,
                 })
                 .await;
         });
@@ -4355,6 +4492,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 &ui_task_tx_for_device_sync,
                 pending.device_sync,
             );
+        }
+        // Conversation windows show their mail whichever view the main
+        // window shows.
+        #[cfg(desktop)]
+        if pending.all_mail_changed || !pending.changed_threads.is_empty() {
+            reader_window::mail_changed(&pending.changed_threads, pending.all_mail_changed);
         }
         if !mail_active {
             return;
@@ -5001,11 +5144,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let mut state = product_state.borrow_mut();
                 state.email_renderer.borrow_mut().clear();
                 release_unselected_bodies(&mut state.messages, None);
-                clear_reader_projection(&app);
-                app.set_selected_source("".into());
-                app.set_selected_plain_text("".into());
+                clear_reader_projection(&ReaderRef::main(&app));
+                app.global::<ReaderUi>().set_selected_source("".into());
+                app.global::<ReaderUi>().set_selected_plain_text("".into());
                 // The next reader starts at the top, and tabs scroll it back.
-                app.set_email_scroll_y(0.0);
+                app.global::<ReaderUi>().set_email_scroll_y(0.0);
             }
             if previous == "calendar" {
                 let mut calendar = product_calendar.borrow_mut();
@@ -5981,6 +6124,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
 
         app.set_remote_images_enabled(enabled);
+        #[cfg(desktop)]
+        reader_window::remote_images_changed(enabled);
         app.set_sync_status(if let Some(error) = sender_icon_error {
             UiMessage::detail("Remote sender icons unavailable: {}", error)
         } else if enabled {
@@ -6423,28 +6568,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let (core, selected_id, target) = {
-            let state = state_for_label.borrow();
-            let target = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id))
-                .and_then(MailTarget::of);
-            (state.core.clone(), state.selected_id, target)
-        };
-        let result = (|| {
-            let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
-            let target = target.ok_or_else(|| "no message is selected".to_owned())?;
-            mail_work::enqueue(
-                &state_for_label,
-                core,
-                vec![(
-                    selected_id.unwrap(),
-                    target,
-                    mail_work::Operation::Label(i64::from(label_id), applied),
-                )],
-            )
-        })();
-        if let Err(error) = result {
+        let row = selected_row(&state_for_label.borrow()).cloned();
+        if let Err(error) = toggle_mail_label(&state_for_label, row.as_ref(), label_id, applied) {
             app.set_render_status(UiMessage::detail("Could not update label: {}", error));
         }
     });
@@ -6454,100 +6579,25 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let runtime_for_save_label = runtime.clone();
     app.on_save_mail_label(
         move |label_id, owner_account_id, name, color, global, parent_label_id| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        let (core, target, selected_account_id, parent_path) = {
-            let state = state_for_save_label.borrow();
-            let selected = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id));
-            (
-                state.core.clone(),
-                selected.and_then(MailTarget::of),
-                selected.map(|message| message.account_id),
-                if parent_label_id >= 0 {
-                    state
-                        .labels
-                        .iter()
-                        .find(|label| {
-                            label.id == i64::from(parent_label_id)
-                                && !label.is_auto
-                                && label.owner_account_id == Some(i64::from(owner_account_id))
-                        })
-                        .map(|label| label.name.clone())
-                        .ok_or_else(|| "the parent label no longer exists".to_owned())
-                        .map(Some)
-                } else {
-                    Ok(None)
-                },
-            )
-        };
-        let existing_id = (label_id >= 0).then_some(i64::from(label_id));
-        let color = format!(
-            "#{:02x}{:02x}{:02x}",
-            color.red(),
-            color.green(),
-            color.blue()
-        );
-        let result: Result<bool, String> = (|| {
-            let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
-            let parent_path = parent_path?;
-            let leaf = name.trim();
-            if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
-                return Err(
-                    "label names cannot contain '/'; create each nesting level separately"
-                        .to_owned(),
-                );
-            }
-            let full_name = if existing_id.is_none()
-                && let Some(parent_path) = parent_path
-            {
-                format!("{}/{leaf}", parent_path.trim_end_matches('/'))
-            } else {
-                leaf.to_owned()
+            let Some(app) = app_weak.upgrade() else {
+                return;
             };
-            let label = runtime_for_save_label.block_on(core.save_label(
-                existing_id,
-                &full_name,
-                color.as_str(),
-                if existing_id.is_none() && !global {
-                    Some(if owner_account_id >= 0 {
-                        i64::from(owner_account_id)
-                    } else {
-                        selected_account_id.ok_or_else(|| {
-                            "select a message before creating an account label".to_owned()
-                        })?
-                    })
-                } else {
-                    None
-                },
-            ))?;
-            if existing_id.is_none() && owner_account_id < 0 {
-                let target = target.ok_or_else(|| "no message is selected".to_owned())?;
-                runtime_for_save_label
-                    .block_on(core.perform_label_action(target, label.id, true))?;
-            }
-            refresh_from_source(
+            let row = selected_row(&state_for_save_label.borrow()).cloned();
+            save_mail_label(
                 &app,
                 &state_for_save_label,
                 &runtime_for_save_label,
-                true,
-                &[],
-            )?;
-            Ok(existing_id.is_some())
-        })();
-        match result {
-            Ok(true) => app.set_render_status(UiMessage::plain("Label updated.")),
-            Ok(false) if owner_account_id >= 0 => {
-                app.set_render_status(UiMessage::plain("Label created."))
-            }
-            Ok(false) => app.set_render_status(UiMessage::plain("Label created and added.")),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not save label: {}", error))
-            }
-        }
-    },
+                row.as_ref(),
+                LabelEdit {
+                    label_id,
+                    owner_account_id,
+                    name: name.to_string(),
+                    color,
+                    global,
+                    parent_label_id,
+                },
+            );
+        },
     );
 
     let app_weak = app.as_weak();
@@ -6614,11 +6664,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let selected = state
             .selected_id
             .and_then(|id| state.messages.iter().find(|message| message.id == id));
-        app.set_mail_label_results(ModelRc::new(VecModel::from(make_label_rows(
-            &state.labels,
-            selected,
-            query.as_str(),
-        ))));
+        app.global::<ReaderUi>()
+            .set_mail_label_results(ModelRc::new(VecModel::from(make_label_rows(
+                &state.labels,
+                selected,
+                query.as_str(),
+            ))));
     });
 
     let app_weak = app.as_weak();
@@ -6646,7 +6697,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        match print_selected_message(&state_for_print) {
+        match print_shown_message(&state_for_print, ReaderKey::Main) {
             Ok(()) => app.set_render_status(UiMessage::plain("Opened the system print view.")),
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Could not print message: {}", error))
@@ -6660,7 +6711,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        match open_selected_message_in_browser(&state_for_browser) {
+        match open_shown_message_in_browser(&state_for_browser, ReaderKey::Main) {
             Ok(()) => {
                 app.set_render_status(UiMessage::plain("Opened the message in your browser."))
             }
@@ -6687,12 +6738,25 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         cfg!(desktop),
     );
     mailto_links::install(&app, composers);
+    // Composer and conversation windows have their own globals, and follow
+    // the main window's look through here.
+    #[cfg(desktop)]
+    {
+        let app_weak = app.as_weak();
+        app.on_appearance_changed(move || {
+            if let Some(app) = app_weak.upgrade() {
+                composer::appearance_changed(&app);
+                reader_window::appearance_changed(&app);
+            }
+        });
+    }
     undo::install(&app, &state, &runtime);
     unsubscribe::install(&app, &state, &runtime, platform.external_urls.clone());
     link_services::install(&app, &state, &runtime, platform.external_urls.clone());
     read_receipts::install(&app, &state, &runtime);
     folder_roles::install(&app, &state, &runtime);
     message_source::install(&app, &state, &runtime, platform.documents.clone());
+    folder_visibility::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);
@@ -6706,6 +6770,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
 
     when_picker::register(&app, &state, &runtime);
+    #[cfg(desktop)]
+    reader_window::install(
+        &app,
+        &state,
+        &runtime,
+        platform.documents.clone(),
+        platform.external_urls.clone(),
+    );
     let app_weak = app.as_weak();
     let state_for_account = Rc::clone(&state);
     let runtime_for_account = runtime.clone();
@@ -7447,7 +7519,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
 
     register_renderer_input_callbacks(
-        &app,
+        &ReaderRef::main(&app),
         &email_renderer,
         use_wgpu,
         platform.external_urls.clone(),
@@ -7596,11 +7668,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .set(mail_pagination_generation_for_scope.get().wrapping_add(1));
         mail_pagination_in_progress_for_scope.set(false);
         app.set_mail_loading_more(false);
+        let scope = scope.parse().unwrap_or(Scope::UNIFIED_INBOX);
+        // A folder this device doesn't sync is checked as it's opened (#253).
+        if let Scope::Folder(folder_id) = scope
+            && let Some(core) = state_for_scope.borrow().core.clone()
+        {
+            runtime_for_scope.spawn(async move {
+                if let Err(error) = core.check_folder(folder_id).await {
+                    tracing::debug!(folder_id, %error, "an opened folder couldn't be checked");
+                }
+            });
+        }
         {
             let mut state = state_for_scope.borrow_mut();
             // An unknown key cannot come from the sidebar; keep the inbox
             // reachable rather than presenting a list for no mailbox.
-            state.set_scope(scope.parse().unwrap_or(Scope::UNIFIED_INBOX));
+            state.set_scope(scope);
             state.pending_selection = None;
             state.pending_selection_opens = false;
             state.restore_thread_message = None;
@@ -7967,16 +8050,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         visibility_renderer.borrow_mut().set_suspended(suspended);
         composer::main_window_suspended(suspended);
         if suspended {
-            app.set_email_tiles(ModelRc::default());
+            app.global::<ReaderUi>().set_email_tiles(ModelRc::default());
         } else {
             if !use_wgpu {
-                let (width, height) = email_viewport_size(&app);
+                let (width, height) = email_viewport_size(&ReaderRef::main(&app));
                 match visibility_renderer.borrow_mut().render_cpu_if_needed(
                     width,
                     height,
                     app.window().scale_factor(),
                 ) {
-                    Ok(Some(frame)) => apply_cpu_frame(&app, frame),
+                    Ok(Some(frame)) => apply_cpu_frame(&ReaderRef::main(&app), frame),
                     Ok(None) => {}
                     Err(error) => app.set_render_status(UiMessage::detail(
                         "Email resource render failed: {}",
@@ -8006,7 +8089,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let until = std::time::Instant::now() + memory::PRESSURE_WINDOW;
         if renderer.borrow_mut().release_caches(until) {
             let tiles = renderer.borrow().retained_tiles();
-            mail_render_projection::retain_email_tiles(&app, tiles);
+            mail_render_projection::retain_email_tiles(&ReaderRef::main(&app), tiles);
         }
         mail_view_model::release_sender_images();
         let core = state.borrow().core.clone();
@@ -8046,6 +8129,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     };
     // Timers stop with the event loop, so a pending tab save is written now.
     app.global::<TabsUi>().invoke_flush();
+    // And where the windows were.
+    #[cfg(desktop)]
+    window_places::flush();
     // So are the messages still being written.
     composer::save_open_messages();
     // Messages sent with an undo delay leave now, not at the next start.
@@ -8611,4 +8697,139 @@ mod tests {
 pub fn suspend_file_preview() {
     files_controller::suspend();
     attachment_controller::suspend();
+}
+
+/// A label as the reader's label editor saves it.
+struct LabelEdit {
+    label_id: i32,
+    owner_account_id: i32,
+    name: String,
+    color: slint::Color,
+    global: bool,
+    parent_label_id: i32,
+}
+
+/// The list row of the conversation the main window's reader shows.
+fn selected_row(state: &InboxState) -> Option<&MailMessage> {
+    state
+        .selected_id
+        .and_then(|id| state.messages.iter().find(|message| message.id == id))
+}
+
+/// Add the label `label_id` to the conversation of `row`, or take it off.
+fn toggle_mail_label(
+    state: &Rc<RefCell<InboxState>>,
+    row: Option<&MailMessage>,
+    label_id: i32,
+    applied: bool,
+) -> Result<(), String> {
+    let core = state.borrow().core.clone();
+    let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
+    let row = row.ok_or_else(|| "no message is selected".to_owned())?;
+    let target = MailTarget::of(row).ok_or_else(|| "no message is selected".to_owned())?;
+    mail_work::enqueue(
+        state,
+        core,
+        vec![(
+            row.id,
+            target,
+            mail_work::Operation::Label(i64::from(label_id), applied),
+        )],
+    )
+}
+
+/// Create or change a label from a reader, which shows the conversation of
+/// `row`: a new label of no account goes on that conversation.
+fn save_mail_label(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    row: Option<&MailMessage>,
+    edit: LabelEdit,
+) {
+    let LabelEdit {
+        label_id,
+        owner_account_id,
+        name,
+        color,
+        global,
+        parent_label_id,
+    } = edit;
+    let (core, target, selected_account_id, parent_path) = {
+        let state = state.borrow();
+        (
+            state.core.clone(),
+            row.and_then(MailTarget::of),
+            row.map(|message| message.account_id),
+            if parent_label_id >= 0 {
+                state
+                    .labels
+                    .iter()
+                    .find(|label| {
+                        label.id == i64::from(parent_label_id)
+                            && !label.is_auto
+                            && label.owner_account_id == Some(i64::from(owner_account_id))
+                    })
+                    .map(|label| label.name.clone())
+                    .ok_or_else(|| "the parent label no longer exists".to_owned())
+                    .map(Some)
+            } else {
+                Ok(None)
+            },
+        )
+    };
+    let existing_id = (label_id >= 0).then_some(i64::from(label_id));
+    let color = format!(
+        "#{:02x}{:02x}{:02x}",
+        color.red(),
+        color.green(),
+        color.blue()
+    );
+    let result: Result<bool, String> = (|| {
+        let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
+        let parent_path = parent_path?;
+        let leaf = name.trim();
+        if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
+            return Err(
+                "label names cannot contain '/'; create each nesting level separately".to_owned(),
+            );
+        }
+        let full_name = if existing_id.is_none()
+            && let Some(parent_path) = parent_path
+        {
+            format!("{}/{leaf}", parent_path.trim_end_matches('/'))
+        } else {
+            leaf.to_owned()
+        };
+        let label = runtime.block_on(core.save_label(
+            existing_id,
+            &full_name,
+            color.as_str(),
+            if existing_id.is_none() && !global {
+                Some(if owner_account_id >= 0 {
+                    i64::from(owner_account_id)
+                } else {
+                    selected_account_id.ok_or_else(|| {
+                        "select a message before creating an account label".to_owned()
+                    })?
+                })
+            } else {
+                None
+            },
+        ))?;
+        if existing_id.is_none() && owner_account_id < 0 {
+            let target = target.ok_or_else(|| "no message is selected".to_owned())?;
+            runtime.block_on(core.perform_label_action(target, label.id, true))?;
+        }
+        refresh_from_source(app, state, runtime, true, &[])?;
+        Ok(existing_id.is_some())
+    })();
+    match result {
+        Ok(true) => app.set_render_status(UiMessage::plain("Label updated.")),
+        Ok(false) if owner_account_id >= 0 => {
+            app.set_render_status(UiMessage::plain("Label created."))
+        }
+        Ok(false) => app.set_render_status(UiMessage::plain("Label created and added.")),
+        Err(error) => app.set_render_status(UiMessage::detail("Could not save label: {}", error)),
+    }
 }

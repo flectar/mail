@@ -1,8 +1,8 @@
 diff --git a/crates/i-slint-core/items/flickable.rs b/crates/i-slint-core/items/flickable.rs
-index 6442ea37..68551a7c 100644
+index 6442ea37..c0b0de81 100644
 --- a/crates/i-slint-core/items/flickable.rs
 +++ b/crates/i-slint-core/items/flickable.rs
-@@ -1057,17 +1057,23 @@ impl FlickableDataInner {
+@@ -1057,17 +1057,26 @@ impl FlickableDataInner {
  
      /// `release_time` is when the pointer was released, on the clock of the tracked samples.
      fn animate(&mut self, flick: Pin<&Flickable>, flick_rc: &ItemRc, release_time: Instant) {
@@ -23,15 +23,28 @@ index 6442ea37..68551a7c 100644
 +            // fling stops at the edge instead of bouncing.
 +            let reduced_motion = Flickable::reduced_motion(flick_rc);
 +            if reduced_motion && !(inside_bounds_x && inside_bounds_y) {
-+                let released_at = LogicalPoint::from_lengths(flick.content_x(), flick.content_y());
-+                let target = self.scroll_to(flick, flick_rc, -released_at, ScrollBehavior::Instant);
-+                self.pending_flicked |= target != released_at.to_vector();
-+                return;
++                if !inside_bounds_x {
++                    self.start_spring_back(flick, flick_rc, Dimension::X, &geo);
++                }
++                if !inside_bounds_y {
++                    self.start_spring_back(flick, flick_rc, Dimension::Y, &geo);
++                }
++                self.pending_flicked = true;
 +            }
              let estimated_velocity =
                  self.velocity_rb.estimate_velocity(release_time).map(|v| v.velocity);
  
-@@ -1107,7 +1113,11 @@ impl FlickableDataInner {
+@@ -1076,6 +1085,9 @@ impl FlickableDataInner {
+                                       velocity: Option<f32>,
+                                       inside_bounds: bool| {
+                 if !inside_bounds {
++                    if reduced_motion {
++                        return None;
++                    }
+                     return Some(Self::spring_back(
+                         flick,
+                         flick_rc,
+@@ -1107,7 +1119,11 @@ impl FlickableDataInner {
                      &content,
                      FlickAnimation::create_animation(
                          FlickAnimationParameter::Velocity { velocity: velocity + carried_velocity },

@@ -9,6 +9,7 @@ A closer look at what the [README](../README.md) summarizes.
 - [Server settings for new accounts](#server-settings-for-new-accounts)
 - [Advanced account settings](#advanced-account-settings)
 - [Special folders](#special-folders)
+- [Choosing folders](#choosing-folders)
 - [Sender addresses](#sender-addresses)
 - [Automatic Cc and Bcc](#automatic-cc-and-bcc)
 - [New-mail notifications](#new-mail-notifications)
@@ -116,6 +117,17 @@ Settings → General.
   <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
   <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
 </picture>
+
+## Conversation windows
+
+On the desktop, double-click a conversation, press **Shift+Enter**, or choose
+**Open in new window** from its menu to read it in a window of its own. The
+window shows everything the reader does, with the same actions, and stays on
+its conversation while you go through the rest of your mail. Opening a
+conversation that already has a window brings that window forward. Archiving,
+deleting, moving or snoozing the conversation from its window closes it, and
+so does **Esc**. Replies and forwards from the window open in a window of their
+own. A conversation window opens at the size the last one had.
 
 ## Search
 
@@ -309,6 +321,24 @@ its place, one deleted gives it back to the server's folder, and with
 **Subscribed folders only** a chosen folder is listed though you haven't
 subscribed to it. Flectar Mail Sync takes the choices to your other devices.
 
+## Choosing folders
+
+Folders an account never uses, such as one for notes or an old archive, can
+leave the sidebar. **Hide folder** in a folder's menu in the sidebar hides it,
+with the folders in it, and **Folders** in the account's card in Settings →
+Accounts lists every folder with a switch to show or hide it. A hidden folder
+also leaves the **Move to** list, and its mail still downloads and turns up in
+searches. The Inbox and the folders for sent mail, drafts and the like always
+show. A hidden folder renamed in Flectar Mail stays hidden, and Flectar Mail
+Sync hides it on your other devices too. This works for IMAP, JMAP and POP3
+accounts. Gmail keeps its labels.
+
+An IMAP account can also leave folders out of what this device syncs, such as a
+large archive. Turn off a folder's **Sync** switch in **Folders**, and its mail
+stops downloading in the background, while the mail already here stays. Opening
+the folder checks it then. The Inbox, Sent and Drafts always sync, and each
+device keeps its own choice.
+
 ## Sender addresses
 
 An account can send from more addresses than the one it signs in with. Gmail's
@@ -470,6 +500,14 @@ bring the system title bar back. Each platform keeps its own behavior: macOS
 keeps the native traffic lights, Windows keeps Snap Layouts and the system menu,
 and Linux follows the button order and title-bar actions configured for GNOME or
 KDE.
+
+The window opens at the size it had when you last closed it, and maximized
+again if it was. Windows and macOS also put it back where it was, as long as
+that is still on a screen, while on Linux the window manager places it. A
+message moved into a window of its own opens at the size the last one had. With
+**Write in a new window** on in Settings → General → Writing, new messages,
+replies, forwards and drafts open in a window of their own, so your mail stays
+in view while you write.
 
 ## Calendar, contacts, and files
 
@@ -1053,9 +1091,9 @@ Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
 that already syncs and type the code it shows into **Enter code** on the new
 one, either on the welcome screen or in Settings → Sync. A device can also join
 with your recovery code. Each device keeps its own mail checking, how much mail
-history it downloads and what it downloads ahead of time, its proxy and server
-timeout, and settings that belong to the device itself, such as reduced motion
-and text size.
+history it downloads and what it downloads ahead of time, which folders of an
+IMAP account it syncs, its proxy and server timeout, and settings that belong
+to the device itself, such as reduced motion and text size.
 
 Accounts arrive with their passwords, so they work on a new device at once.
 Google and Microsoft sign-ins go only to devices of the same kind. A

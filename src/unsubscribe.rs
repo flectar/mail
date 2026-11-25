@@ -18,7 +18,9 @@ struct Leaving {
 }
 
 thread_local! {
-    static LEAVING: RefCell<Option<Leaving>> = const { RefCell::new(None) };
+    static CONTROLLER: RefCell<Option<Rc<Controller>>> = const { RefCell::new(None) };
+    /// The list each reader's dialog is about.
+    static LEAVING: PerReader<Leaving> = const { PerReader::new() };
 }
 
 pub(super) fn install(
@@ -27,27 +29,42 @@ pub(super) fn install(
     runtime: &tokio::runtime::Handle,
     opener: ExternalUrlOpener,
 ) {
-    let ui = app.global::<Unsubscribe>();
-    let controller = Rc::new(Controller {
-        app: app.as_weak(),
-        state: Rc::clone(state),
-        runtime: runtime.clone(),
-        opener,
+    CONTROLLER.with(|slot| {
+        *slot.borrow_mut() = Some(Rc::new(Controller {
+            state: Rc::clone(state),
+            runtime: runtime.clone(),
+            opener,
+        }));
     });
-    let this = Rc::clone(&controller);
-    ui.on_start(move || this.start());
-    let this = Rc::clone(&controller);
-    ui.on_confirm(move || this.confirm());
-    let this = Rc::clone(&controller);
-    ui.on_review(move || this.review());
-    let this = Rc::clone(&controller);
-    ui.on_clean_up(move |action| this.clean_up(&action));
-    let this = controller;
-    ui.on_close(move || this.close());
+    attach(&ReaderRef::main(app));
+}
+
+/// Leave the list of the message a reader shows, from its banner, menu and
+/// dialog.
+pub(super) fn attach(reader: &ReaderRef) {
+    let Some(controller) = CONTROLLER.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    let ui = reader.global::<Unsubscribe>();
+    let (this, host) = (Rc::clone(&controller), reader.host());
+    ui.on_start(move || this.start(&host));
+    let (this, host) = (Rc::clone(&controller), reader.host());
+    ui.on_confirm(move || this.confirm(&host));
+    let (this, host) = (Rc::clone(&controller), reader.host());
+    ui.on_review(move || this.review(&host));
+    let (this, host) = (Rc::clone(&controller), reader.host());
+    ui.on_clean_up(move |action| this.clean_up(&host, &action));
+    let host = reader.host();
+    ui.on_close(move || controller.close(&host));
+}
+
+/// A reader's window closed.
+#[cfg(desktop)]
+pub(super) fn forget(key: ReaderKey) {
+    LEAVING.with(|leaving| leaving.remove(key));
 }
 
 struct Controller {
-    app: slint::Weak<AppWindow>,
     state: Rc<RefCell<InboxState>>,
     runtime: tokio::runtime::Handle,
     opener: ExternalUrlOpener,
@@ -56,21 +73,16 @@ struct Controller {
 impl Controller {
     /// The banner or the menu: find out how the open message's list takes a
     /// request, and ask.
-    fn start(&self) {
-        let Some(app) = self.app.upgrade() else {
+    fn start(&self, host: &ReaderHost) {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        if !app.global::<Unsubscribe>().get_stage().is_empty() {
+        if !reader.global::<Unsubscribe>().get_stage().is_empty() {
             return;
         }
-        let (core, row) = {
-            let state = self.state.borrow();
-            let row = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id))
-                .cloned();
-            (state.core.clone(), row)
-        };
+        let key = host.key();
+        let row = crate::reader_host::row(&self.state, key);
+        let core = self.state.borrow().core.clone();
         let (Some(core), Some(row)) = (core, row) else {
             return;
         };
@@ -78,8 +90,9 @@ impl Controller {
             return;
         };
         let account_id = row.account_id;
-        let sender = app.get_selected_sender().to_string();
+        let sender = reader.ui().get_selected_sender().to_string();
         self.spawn(
+            host,
             async move {
                 let Some(message_id) = core.unsubscribe_message_of(target).await? else {
                     return Ok(None);
@@ -89,59 +102,68 @@ impl Controller {
                     .await?
                     .map(|offer| (message_id, offer)))
             },
-            move |app, result| match result {
+            move |reader, result| match result {
                 Ok(Some((message_id, offer))) => {
-                    let ui = app.global::<Unsubscribe>();
+                    let ui = reader.global::<Unsubscribe>();
                     ui.set_sender(sender.into());
                     show_offer(&ui, &offer);
                     ui.set_inbox_count(0);
                     ui.set_stage("confirm".into());
-                    LEAVING.with(|slot| {
-                        *slot.borrow_mut() = Some(Leaving {
-                            message_id,
-                            account_id,
-                            offer,
-                            inbox: Vec::new(),
-                        });
+                    LEAVING.with(|leaving| {
+                        leaving.set(
+                            key,
+                            Leaving {
+                                message_id,
+                                account_id,
+                                offer,
+                                inbox: Vec::new(),
+                            },
+                        );
                     });
                 }
                 Ok(None) => crate::undo::tell(
-                    &app,
+                    reader.app(),
                     UiMessage::plain("This message names no way to unsubscribe."),
                 ),
-                Err(error) => {
-                    crate::undo::tell(&app, UiMessage::detail("Could not unsubscribe: {}", error))
-                }
+                Err(error) => crate::undo::tell(
+                    reader.app(),
+                    UiMessage::detail("Could not unsubscribe: {}", error),
+                ),
             },
         );
     }
 
     /// The dialog's main button: make the request, or open the list's page.
-    fn confirm(&self) {
-        let Some(app) = self.app.upgrade() else {
+    fn confirm(&self, host: &ReaderHost) {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let Some((message_id, offer)) = LEAVING.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .map(|leaving| (leaving.message_id, leaving.offer.clone()))
+        let key = host.key();
+        let Some((message_id, offer)) = LEAVING.with(|leaving| {
+            leaving.with(key, |leaving| {
+                leaving.map(|leaving| (leaving.message_id, leaving.offer.clone()))
+            })
         }) else {
             return;
         };
         if let UnsubscribeOffer::Website { url } = &offer {
             let url = url.clone();
-            self.close();
+            self.close(host);
             if let Err(error) = crate::mail_render_projection::open_email_link(&self.opener, &url) {
-                crate::undo::tell(&app, UiMessage::detail("Could not open link: {}", error));
+                crate::undo::tell(
+                    reader.app(),
+                    UiMessage::detail("Could not open link: {}", error),
+                );
             }
             return;
         }
         let Some(core) = self.state.borrow().core.clone() else {
             return;
         };
-        let ui = app.global::<Unsubscribe>();
+        let ui = reader.global::<Unsubscribe>();
         ui.set_stage("working".into());
         self.spawn(
+            host,
             async move {
                 let outcome = core.unsubscribe(message_id).await?;
                 let inbox = match outcome {
@@ -155,23 +177,25 @@ impl Controller {
                 };
                 Ok((outcome, inbox))
             },
-            move |app, result| {
+            move |reader, result| {
                 // Closed while the request went out: the request still
                 // counts, and the notice tells of it.
-                let open = LEAVING.with(|slot| {
-                    slot.borrow()
-                        .as_ref()
-                        .is_some_and(|leaving| leaving.message_id == message_id)
+                let open = LEAVING.with(|leaving| {
+                    leaving.with(key, |leaving| {
+                        leaving.is_some_and(|leaving| leaving.message_id == message_id)
+                    })
                 });
-                let ui = app.global::<Unsubscribe>();
+                let ui = reader.global::<Unsubscribe>();
                 match result {
                     Ok((UnsubscribeOutcome::NeedsBrowser { url }, _)) if open => {
                         ui.set_host(host_of(&url).into());
                         ui.set_stage("website".into());
-                        LEAVING.with(|slot| {
-                            if let Some(leaving) = slot.borrow_mut().as_mut() {
-                                leaving.offer = UnsubscribeOffer::Website { url };
-                            }
+                        LEAVING.with(|leaving| {
+                            leaving.with(key, |leaving| {
+                                if let Some(leaving) = leaving {
+                                    leaving.offer = UnsubscribeOffer::Website { url };
+                                }
+                            });
                         });
                     }
                     Ok((UnsubscribeOutcome::NeedsBrowser { .. }, _)) => {}
@@ -181,16 +205,18 @@ impl Controller {
                         if open && !inbox.is_empty() {
                             ui.set_inbox_count(i32::try_from(inbox.len()).unwrap_or(i32::MAX));
                             ui.set_stage("done".into());
-                            LEAVING.with(|slot| {
-                                if let Some(leaving) = slot.borrow_mut().as_mut() {
-                                    leaving.inbox = inbox;
-                                }
+                            LEAVING.with(|leaving| {
+                                leaving.with(key, |leaving| {
+                                    if let Some(leaving) = leaving {
+                                        leaving.inbox = inbox;
+                                    }
+                                });
                             });
                             return;
                         }
-                        close_dialog(&app);
+                        close_dialog(&reader);
                         crate::undo::tell(
-                            &app,
+                            reader.app(),
                             match outcome {
                                 UnsubscribeOutcome::MailtoSent => {
                                     UiMessage::detail("Unsubscribe request sent to {}.", to)
@@ -204,7 +230,7 @@ impl Controller {
                         ui.set_stage("error".into());
                     }
                     Err(error) => crate::undo::tell(
-                        &app,
+                        reader.app(),
                         UiMessage::detail("Could not unsubscribe: {}", error),
                     ),
                 }
@@ -214,11 +240,11 @@ impl Controller {
 
     /// Open an emailed request in the composer, to be looked over and sent
     /// there (RFC 2369 appendix B.2.4).
-    fn review(&self) {
-        let Some(leaving) = LEAVING.with(|slot| slot.borrow_mut().take()) else {
+    fn review(&self, host: &ReaderHost) {
+        let Some(leaving) = LEAVING.with(|leaving| leaving.remove(host.key())) else {
             return;
         };
-        self.close();
+        self.close(host);
         let UnsubscribeOffer::Mailto {
             from,
             to,
@@ -254,12 +280,13 @@ impl Controller {
     }
 
     /// Archive the list's messages in the inbox, or move them to Trash.
-    fn clean_up(&self, action: &str) {
-        let Some(inbox) = LEAVING.with(|slot| slot.borrow().as_ref().map(|l| l.inbox.clone()))
+    fn clean_up(&self, host: &ReaderHost, action: &str) {
+        let Some(inbox) = LEAVING
+            .with(|leaving| leaving.with(host.key(), |leaving| leaving.map(|l| l.inbox.clone())))
         else {
             return;
         };
-        self.close();
+        self.close(host);
         let Some(core) = self.state.borrow().core.clone() else {
             return;
         };
@@ -270,10 +297,11 @@ impl Controller {
         };
         let count = inbox.len();
         self.spawn(
+            host,
             async move { core.act_on_messages(inbox, kind).await },
-            move |app, result| match result {
+            move |reader, result| match result {
                 Ok(action_ids) if !action_ids.is_empty() => crate::undo::gesture(
-                    &app,
+                    reader.app(),
                     action_ids,
                     UndoableBatch {
                         kind,
@@ -282,33 +310,35 @@ impl Controller {
                     },
                 ),
                 Ok(_) => {}
-                Err(error) => {
-                    app.set_render_status(UiMessage::detail("Message action failed: {}", error))
-                }
+                Err(error) => reader
+                    .app()
+                    .set_render_status(UiMessage::detail("Message action failed: {}", error)),
             },
         );
     }
 
-    fn close(&self) {
-        LEAVING.with(|slot| slot.borrow_mut().take());
-        if let Some(app) = self.app.upgrade() {
-            close_dialog(&app);
+    fn close(&self, host: &ReaderHost) {
+        LEAVING.with(|leaving| leaving.remove(host.key()));
+        if let Some(reader) = host.upgrade() {
+            close_dialog(&reader);
         }
     }
 
-    /// Run `work` on the runtime and `apply` its result on the UI thread.
+    /// Run `work` on the runtime and `apply` its result to the reader on the
+    /// UI thread, while its window is open.
     fn spawn<T: Send + 'static>(
         &self,
+        host: &ReaderHost,
         work: impl Future<Output = Result<T, String>> + Send + 'static,
-        apply: impl FnOnce(AppWindow, Result<T, String>) + 'static,
+        apply: impl FnOnce(ReaderRef, Result<T, String>) + 'static,
     ) {
-        let weak = self.app.clone();
+        let host = host.clone();
         let task = self.runtime.spawn(work);
         let abort = task.abort_handle();
         if slint::spawn_local(async move {
             let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
-            if let Some(app) = weak.upgrade() {
-                apply(app, result);
+            if let Some(reader) = host.upgrade() {
+                apply(reader, result);
             }
         })
         .is_err()
@@ -318,8 +348,8 @@ impl Controller {
     }
 }
 
-fn close_dialog(app: &AppWindow) {
-    app.global::<Unsubscribe>().set_stage("".into());
+fn close_dialog(reader: &ReaderRef) {
+    reader.global::<Unsubscribe>().set_stage("".into());
 }
 
 /// What the dialog says about how the list takes the request.

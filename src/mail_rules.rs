@@ -98,8 +98,18 @@ pub(super) fn install(
     ui.on_add_action(|| with_controller(|controller| controller.add_action()));
     ui.on_run(|| with_controller(|controller| controller.run()));
     ui.on_confirm_run(|| with_controller(|controller| controller.confirm_run()));
-    ui.on_create_from_message(|| with_controller(|controller| controller.create_from_message()));
     ui.on_remove_action(|index| with_controller(|controller| remove(&controller.actions, index)));
+    attach(&ReaderRef::main(app));
+}
+
+/// "Create rule…" in a reader's menu, for mail like the message it shows.
+pub(super) fn attach(reader: &ReaderRef) {
+    let key = reader.key();
+    reader
+        .global::<MailRules>()
+        .on_create_from_message(move || {
+            with_controller(|controller| controller.create_from_message(key));
+        });
 }
 
 /// Show the rules in Settings, once the core is there.
@@ -256,24 +266,25 @@ impl Controller {
 
     /// The message menu: Settings opens on a new rule for mail like the
     /// open message, for its mailing list or its sender.
-    fn create_from_message(&self) {
-        let (core, target) = {
-            let state = self.state.borrow();
-            let target = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id))
-                .and_then(crate::mail::MailTarget::of);
-            (state.core.clone(), target)
-        };
+    fn create_from_message(&self, reader: ReaderKey) {
+        let target = crate::reader_host::row(&self.state, reader)
+            .as_ref()
+            .and_then(crate::mail::MailTarget::of);
+        let core = self.state.borrow().core.clone();
         let (Some(core), Some(target)) = (core, target) else {
             return;
         };
         self.spawn(
             async move { Ok((core.rule_from(target).await?, core.rule_choices().await?)) },
-            |app, result| match result {
+            move |app, result| match result {
                 Ok((rule, (accounts, folders, labels))) => {
                     app.set_settings_tab("Rules".into());
                     app.invoke_open_settings();
+                    // Asked from a conversation's window, the editor is in
+                    // the main window's Settings.
+                    if reader != ReaderKey::Main {
+                        crate::window_controller::activate(&app, None);
+                    }
                     let choices = choices_of(accounts, folders, labels);
                     with_controller(|controller| controller.show(&app, choices, Some(rule)));
                 }

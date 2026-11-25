@@ -91,6 +91,8 @@ export struct MailboxRow {
     can_create_children: bool,
     can_rename: bool,
     can_delete: bool,
+    // A folder the user can hide from the sidebar (#253).
+    can_hide: bool,
     label_has_emoji: bool,
     label: string,
     scope: string,

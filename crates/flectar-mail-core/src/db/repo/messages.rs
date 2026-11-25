@@ -102,13 +102,15 @@ macro_rules! basic_message_select {
 
 /// The attachment of an account's newest mail since `since` that hasn't
 /// downloaded yet and is `largest` bytes at most, with that mail's date,
-/// but those in `skip` (#253). Only parts the server can send alone count.
+/// but those in `skip` and the mail of the folders in `skip_folders` (#253).
+/// Only parts the server can send alone count.
 pub fn next_attachment_to_prefetch(
     conn: &Connection,
     account_id: i64,
     since: Option<i64>,
     largest: i64,
     skip: &[i64],
+    skip_folders: &[i64],
 ) -> Result<Option<(i64, i64)>> {
     let mut stmt = conn.prepare_cached(
         "SELECT a.id, COALESCE(m.internal_date, m.date) AS sent
@@ -118,14 +120,17 @@ pub fn next_attachment_to_prefetch(
            AND (a.imap_section IS NOT NULL OR a.jmap_blob_id IS NOT NULL)
            AND (a.size IS NULL OR a.size <= ?3)
            AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
+           AND m.folder_id NOT IN (SELECT value FROM json_each(?5))
          ORDER BY sent DESC, a.id DESC
          LIMIT ?4",
     )?;
     let limit = i64::try_from(skip.len().saturating_add(1)).unwrap_or(i64::MAX);
+    let skip_folders = serde_json::to_string(skip_folders)?;
     let rows = stmt
-        .query_map(params![account_id, since, largest, limit], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-        })?
+        .query_map(
+            params![account_id, since, largest, limit, skip_folders],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows.into_iter().find(|(id, _)| !skip.contains(id)))
 }
@@ -2075,7 +2080,7 @@ mod tests {
         attachment(new, 10, false, None);
         attachment(draft, 10, false, Some("2"));
         let next = |since, skip: &[i64]| {
-            next_attachment_to_prefetch(&conn, 1, since, 1_000, skip).unwrap()
+            next_attachment_to_prefetch(&conn, 1, since, 1_000, skip, &[]).unwrap()
         };
 
         assert_eq!(next(None, &[]), Some((new_file, 5_000)));
@@ -2094,6 +2099,11 @@ mod tests {
         .unwrap();
         let jmap_file = conn.last_insert_rowid();
         assert_eq!(next(None, &[]), Some((jmap_file, 7_000)));
+        // The mail of a folder the account doesn't sync waits too.
+        assert_eq!(
+            next_attachment_to_prefetch(&conn, 1, None, 1_000, &[], &[1]).unwrap(),
+            None
+        );
     }
 
     /// A JMAP account's bodies download newest first, inside its history,

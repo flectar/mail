@@ -1,0 +1,194 @@
+import { Palette } from "std-widgets.slint";
+import { AppIcon } from "app-icon.slint";
+import { AppTheme } from "design-system.slint";
+import { EmailReader, MailAttachments } from "models.slint";
+import { AccountMailPreferences, OpenPgpReader } from "components/account-mail-preferences.slint";
+import { BoundReadingPane, ReaderUi } from "reader-ui.slint";
+import { ActionTooltipLayer } from "components/tooltip-bubble.slint";
+import { ConfirmationDialog } from "components/confirmation-dialog.slint";
+import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint";
+import { BlockSenderDialog } from "dialogs/block-sender-dialog.slint";
+import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
+import { UnsubscribeDialog } from "dialogs/unsubscribe-dialog.slint";
+import { WhenDialog, WhenUi } from "dialogs/when-dialog.slint";
+import { BlockSender } from "block-sender.slint";
+import { Unsubscribe } from "unsubscribe.slint";
+
+// A conversation in a window of its own on the desktop (#254). The window
+// has its own reader globals, so it keeps showing its conversation while the
+// main window shows others, and what is done here is done to it alone.
+export component ReaderWindow inherits Window {
+    // "light", "dark" or "system": the main window's theme-mode.
+    in property <string> theme: "system";
+    // The main window's interface text size (src/text_size.rs).
+    in property <length> interface-text-size: 0px;
+    in property <bool> print-supported: true;
+    // The conversation is in Trash, where deleting it is for good.
+    in property <bool> trash-view: false;
+    // Minimized: the reader keeps no pixels until it is shown again.
+    in-out property <bool> render-suspended: false;
+
+    callback message-action(string);
+    callback compose-message-action(string);
+    callback toggle-mail-label(int, bool);
+    callback save-mail-label(int, string, color, bool);
+    callback search-mail-labels(string);
+    callback select-thread-message(int);
+    callback print-message();
+    callback open-message-in-browser();
+    callback open-email-link(string);
+    callback report-rendering-issue();
+    callback load-remote-images-for-message();
+    // The reader's close button or Escape.
+    callback request-close();
+
+    title: ReaderUi.selected_subject != "" ? ReaderUi.selected_subject : @tr("(No subject)");
+    icon: AppIcon.window-image(AppIcon.variant);
+    default-font-family: "Google Sans Flex";
+    default-font-size: root.interface-text-size;
+    preferred-width: 880px;
+    preferred-height: 760px;
+    min-width: 420px;
+    min-height: 360px;
+    background: AppTheme.surface;
+
+    private property <bool> trash-delete-open: false;
+
+    init => {
+        root.apply-theme();
+        pane.focus-content();
+    }
+    changed theme => { root.apply-theme(); }
+
+    function apply-theme() {
+        Palette.color-scheme = root.theme == "dark" ? ColorScheme.dark
+            : root.theme == "light" ? ColorScheme.light
+            : ColorScheme.unknown;
+    }
+
+    // Placed rather than laid out: the pane wraps the subject to the
+    // window's width, which a layout would size the window from in turn.
+    FocusScope {
+        x: 0px;
+        y: 0px;
+        enabled: false;
+        // Escape closes the window, as message windows do, once find, a
+        // selection and caret browsing have taken theirs.
+        capture-key-pressed(event) => {
+            if event.modifiers.control || event.modifiers.meta || event.modifiers.alt { return reject; }
+            if event.text == Key.Escape && !EmailReader.find-open && !ReaderUi.has_selection
+                && !EmailReader.caret-mode && !ReaderUi.rendering_info_open && !root.trash-delete-open
+                && !MovePickerUi.open && !WhenUi.open && Unsubscribe.stage == "" && BlockSender.stage == ""
+                && !MailAttachments.open && !AccountMailPreferences.reader-open {
+                root.request-close();
+                return accept;
+            }
+            reject
+        }
+
+        pane := BoundReadingPane {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            full-width: true;
+            window-width: root.width;
+            list-navigation: false;
+            print_supported: root.print-supported;
+            trash_view: root.trash-view;
+            accent: AppTheme.accent;
+            accent-soft: AppTheme.accent-soft;
+            border: AppTheme.border;
+            border-subtle: AppTheme.border-subtle;
+            control-bg: AppTheme.control-bg;
+            heading: AppTheme.heading;
+            muted-control-bg: AppTheme.muted-control-bg;
+            muted-text: AppTheme.muted;
+            secondary-text: AppTheme.secondary;
+            surface: AppTheme.surface;
+            surface-raised: AppTheme.surface-raised;
+            title-color: AppTheme.title;
+            init => {
+                ReaderUi.email-viewport-width = self.email-viewport-width;
+                ReaderUi.email-viewport-height = self.email-viewport-height;
+            }
+            changed email-viewport-width => { ReaderUi.email-viewport-width = self.email-viewport-width; }
+            changed email-viewport-height => { ReaderUi.email-viewport-height = self.email-viewport-height; }
+            message_action(action) => {
+                if action == "delete_permanently" { root.trash-delete-open = true; }
+                else { root.message-action(action); }
+            }
+            toggle-mail-label(id, applied) => { root.toggle-mail-label(id, applied); }
+            save-mail-label(id, name, color, global) => { root.save-mail-label(id, name, color, global); }
+            search-mail-labels(query) => { root.search-mail-labels(query); }
+            select_thread_message(index) => { root.select-thread-message(index); }
+            compose_message_action(action) => { root.compose-message-action(action); }
+            close_preview => { root.request-close(); }
+            print_message => { root.print-message(); }
+            open_message_in_browser => { root.open-message-in-browser(); }
+            open_email_link(url) => { root.open-email-link(url); }
+            report_rendering_issue => { root.report-rendering-issue(); }
+            load-remote-images-for-message => { root.load-remote-images-for-message(); }
+        }
+    }
+
+    if Unsubscribe.stage != "" : UnsubscribeDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 16000;
+    }
+
+    if BlockSender.stage != "" : BlockSenderDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 16000;
+    }
+
+    if root.trash-delete-open : ConfirmationDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 16000;
+        open <=> root.trash-delete-open;
+        title: @tr("Delete permanently?");
+        description: @tr("Permanently delete this conversation from Trash?");
+        detail: @tr("This action cannot be undone.");
+        confirm-label: @tr("Delete permanently");
+        icon: @image-url("icons/lucide/outline/trash.svg");
+        surface: AppTheme.surface;
+        dialog-border-color: AppTheme.border;
+        title-color: AppTheme.title;
+        body-color: AppTheme.body;
+        muted-color: AppTheme.muted;
+        confirmed => { root.message-action("delete_permanently"); }
+    }
+
+    if MovePickerUi.open : MoveDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 15000;
+    }
+
+    // Snooze and the reply reminder ask over the conversation they are for.
+    if WhenUi.open : WhenDialog {
+        width: parent.width;
+        height: parent.height;
+        z: 15000;
+    }
+
+    AttachmentPreviewDialog {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    OpenPgpReader {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    // The window's action help, above its dialogs.
+    ActionTooltipLayer {
+        width: parent.width;
+        height: parent.height;
+        z: 49000;
+    }
+}

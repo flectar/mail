@@ -121,8 +121,8 @@ pub(super) fn window_attributes(attributes: WindowAttributes) -> WindowAttribute
     attributes.with_class_name(CLASS_NAME)
 }
 
-/// Composer windows have their own class, so the creation hook never takes
-/// one for the main window.
+/// Composer and conversation windows have their own class, so the creation
+/// hook never takes one for the main window.
 pub(super) fn composer_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     attributes.with_class_name(COMPOSER_CLASS_NAME)
 }

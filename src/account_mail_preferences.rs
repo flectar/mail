@@ -1014,9 +1014,12 @@ pub(super) fn register(
     register_keys_and_reader(app, state, &tasks);
 }
 
-fn show_message(app: &AppWindow, message: OpenedMessage, memory: &Arc<std::sync::Mutex<Vec<u8>>>) {
+fn show_message(
+    ui: &AccountMailPreferences<'_>,
+    message: OpenedMessage,
+    memory: &Arc<std::sync::Mutex<Vec<u8>>>,
+) {
     *memory.lock().unwrap() = message.mime;
-    let ui = app.global::<AccountMailPreferences>();
     ui.set_reader_text(message.text.into());
     ui.set_reader_status(message.status.into());
     ui.set_reader_open(true);
@@ -1046,7 +1049,7 @@ fn register_keys_and_reader(app: &AppWindow, state: &Rc<RefCell<InboxState>>, ta
                     ui.set_key_inventory(text.into());
                     ui.set_status("Keys loaded. Verify fingerprints before trusting recipient keys.".into());
                 }
-                Ok(KeyResult::Message(message)) if generation.get() == expected => show_message(&app, message, &opened),
+                Ok(KeyResult::Message(message)) if generation.get() == expected => show_message(&ui, message, &opened),
                 Ok(KeyResult::Message(_)) => {},
                 Ok(KeyResult::Done(text)) => ui.set_status(text.into()),
                 Err(e) => ui.set_status(e.into()),
@@ -1106,7 +1109,9 @@ fn register_keys_and_reader(app: &AppWindow, state: &Rc<RefCell<InboxState>>, ta
                     return;
                 }
                 match result {
-                    Ok(message) => show_message(&app, message, &opened),
+                    Ok(message) => {
+                        show_message(&app.global::<AccountMailPreferences>(), message, &opened)
+                    }
                     Err(e) => app
                         .global::<AccountMailPreferences>()
                         .set_reader_status(e.into()),
@@ -1261,6 +1266,104 @@ async fn key_action(action: &str, fingerprint: &str, email: &str) -> Result<KeyR
 async fn key_action(_: &str, _: &str, _: &str) -> Result<KeyResult, String> {
     Err("OpenPGP requires desktop GnuPG.".into())
 }
+/// The OpenPGP message a conversation's window shows over its reader (#254),
+/// which the window decrypts and verifies on its own.
+#[cfg(desktop)]
+pub(super) fn attach_reader(
+    reader: &ReaderRef,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+) {
+    let memory = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let generation = Rc::new(Cell::new(0_u64));
+    let ui = reader.preferences();
+    {
+        let host = reader.host();
+        let (state, runtime) = (state.clone(), runtime.clone());
+        let (memory, generation) = (memory.clone(), generation.clone());
+        ui.on_read_message(move || {
+            let Some(reader) = host.upgrade() else { return };
+            let Some(core) = core(&state) else { return };
+            let Some(row) = crate::reader_host::row(&state, reader.key()) else {
+                return;
+            };
+            let Some(target) = crate::mail::MailTarget::of(&row) else {
+                return;
+            };
+            let ui = reader.preferences();
+            ui.set_reader_text("".into());
+            ui.set_reader_status("Opening OpenPGP message…".into());
+            ui.set_reader_open(true);
+            *memory.lock().unwrap() = Vec::new();
+            generation.set(generation.get().wrapping_add(1));
+            let expected = generation.get();
+            let task = runtime.spawn(async move {
+                // A conversation opens its newest message; a single
+                // message's row, that message.
+                let message_id = match target {
+                    crate::mail::MailTarget::Message { id, .. } => id,
+                    crate::mail::MailTarget::Thread(thread_id) => {
+                        core.get_latest_thread_body(thread_id)
+                            .await
+                            .map_err(|e| e.to_string())?
+                            .id
+                    }
+                };
+                core.open_openpgp_message(message_id)
+                    .await
+                    .map_err(|e| e.to_string())
+            });
+            let (host, memory, generation) = (host.clone(), memory.clone(), generation.clone());
+            let _ = slint::spawn_local(async move {
+                let result = task.await.unwrap_or_else(|e| Err(e.to_string()));
+                let Some(reader) = host.upgrade() else { return };
+                if generation.get() != expected {
+                    return;
+                }
+                let ui = reader.preferences();
+                match result {
+                    Ok(message) => show_message(&ui, message, &memory),
+                    Err(e) => ui.set_reader_status(e.into()),
+                }
+            });
+        });
+    }
+    {
+        let host = reader.host();
+        let (memory, generation) = (memory.clone(), generation.clone());
+        ui.on_close_reader(move || {
+            generation.set(generation.get().wrapping_add(1));
+            *memory.lock().unwrap() = Vec::new();
+            if let Some(reader) = host.upgrade() {
+                let ui = reader.preferences();
+                ui.set_reader_open(false);
+                ui.set_reader_text("".into());
+                ui.set_reader_status("".into());
+            }
+        });
+    }
+    let host = reader.host();
+    let runtime = runtime.clone();
+    ui.on_export_message(move || {
+        let data = memory.lock().unwrap().clone();
+        if data.is_empty() {
+            return;
+        }
+        let expected = generation.get();
+        let generation = generation.clone();
+        let host = host.clone();
+        let task = runtime.spawn(export_message(data));
+        let _ = slint::spawn_local(async move {
+            let result = task.await.unwrap_or_else(|e| Err(e.to_string()));
+            if let (Err(e), Some(reader)) = (result, host.upgrade())
+                && generation.get() == expected
+            {
+                reader.preferences().set_reader_status(e.into());
+            }
+        });
+    });
+}
+
 #[cfg(desktop)]
 async fn export_message(data: Vec<u8>) -> Result<(), String> {
     if let Some(file) = rfd::AsyncFileDialog::new()
