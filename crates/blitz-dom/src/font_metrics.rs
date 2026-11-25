@@ -144,7 +144,23 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
             );
             let location_ref = LocationRef::from(&location);
             let metrics = Metrics::new(&font_ref, font_size, location_ref);
-            Some((metrics.ascent, metrics.x_height, metrics.cap_height))
+            // A font whose OS/2 table predates the x-height and cap height
+            // (version 1, as DejaVu's is) gives neither. Browsers then measure
+            // the top of its "x" and "H", as Skia does with FreeType, rather
+            // than taking half an em for `ex` and the ascent for `cap`.
+            let glyph_metrics = GlyphMetrics::new(&font_ref, font_size, location_ref);
+            let charmap = Charmap::new(&font_ref);
+            let top_of = |ch: char| {
+                let bounds = glyph_metrics.bounds(charmap.map(ch)?)?;
+                Some(bounds.y_max).filter(|top| *top > 0.0)
+            };
+            let x_height = metrics.x_height.filter(|h| *h != 0.0);
+            let cap_height = metrics.cap_height.filter(|h| *h != 0.0);
+            Some((
+                metrics.ascent,
+                x_height.or_else(|| top_of('x')),
+                cap_height.or_else(|| top_of('H')),
+            ))
         }
 
         let zero_advance = advance_of(&mut query, '0', font_size.px(), &variations);
@@ -155,7 +171,7 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
 
         FontMetrics {
             ascent: CSSPixelLength::new(ascent),
-            x_height: x_height.filter(|xh| *xh != 0.0).map(CSSPixelLength::new),
+            x_height: x_height.map(CSSPixelLength::new),
             cap_height: cap_height.map(CSSPixelLength::new),
             zero_advance_measure: zero_advance.map(CSSPixelLength::new),
             ic_width: ic_advance.map(CSSPixelLength::new),

@@ -2502,3 +2502,43 @@ fn the_root_or_body_background_covers_the_canvas_once() {
     let alpha = at(&pixels, 5, 5)[3];
     assert!((126..=130).contains(&alpha), "{alpha}");
 }
+
+#[test]
+fn ex_and_cap_come_from_the_glyphs_when_the_font_does_not_give_them() {
+    // A font whose OS/2 table is version 1, as DejaVu's is, gives no x-height
+    // or cap height. As in browsers, `ex` and `cap` then measure the top of
+    // its "x" and "H", which match the values this font gives. They were half
+    // an em and the ascent.
+    let font = include_bytes!(
+        "../../../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf"
+    );
+    let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+    let os2 = (0..tables)
+        .map(|index| &font[12 + 16 * index..28 + 16 * index])
+        .find(|record| &record[..4] == b"OS/2")
+        .unwrap();
+    let os2 = u32::from_be_bytes(os2[8..12].try_into().unwrap()) as usize;
+    let mut version_1 = font.to_vec();
+    version_1[os2..os2 + 2].copy_from_slice(&1u16.to_be_bytes());
+    let widths = |font: Vec<u8>| {
+        let mut font_ctx = blitz_dom::FontContext::default();
+        font_ctx.collection.register_fonts(font.into(), None);
+        let mut doc = HtmlDocument::from_html(
+            "<div id=ex style=\"font:20px 'Google Sans Flex';width:10ex\"></div>
+             <div id=cap style=\"font:20px 'Google Sans Flex';width:10cap\"></div>",
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                font_ctx: Some(font_ctx),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        let width = |selector| node(&doc, selector).final_layout().size.width;
+        (width("#ex"), width("#cap"))
+    };
+    let (ex, cap) = widths(font.to_vec());
+    let (glyph_ex, glyph_cap) = widths(version_1);
+    close(ex, 102.0);
+    close(glyph_ex, ex);
+    close(glyph_cap, cap);
+}
