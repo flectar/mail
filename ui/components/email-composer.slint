@@ -893,7 +893,10 @@ export component EmailComposer inherits Rectangle {
                                 // A right click on an image selects it.
                                 body-input.set-selection-offsets(root.selection-start, root.selection-end);
                             }
-                            if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
+                            // Only a held button drags the selection. A pointer resting on
+                            // the text gets moves after every wheel step too, and each one
+                            // would hand the caret back to the input, which scrolls to it.
+                            if (event.button == PointerEventButton.left || (event.kind == PointerEventKind.move && self.pressed) || event.kind == PointerEventKind.cancel) {
                                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                     body-input.focus();
                                 }
