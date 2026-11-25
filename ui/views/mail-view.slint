@@ -66,6 +66,7 @@ export component MailView inherits FocusScope {
     in-out property <bool> mail_sidebar_collapsed: false;
     // Settings replaces this view, showing the given page.
     callback open-settings(string);
+    callback show-settings;
     // An account Settings signs in again once it shows the account.
     in-out property <int> settings_sign_in_account: -1;
     // The account whose settings Settings shows open.
@@ -739,6 +740,10 @@ export component MailView inherits FocusScope {
                 manage-profiles => {
                     root.folders-open = false;
                     root.open-settings("Accounts");
+                }
+                show-settings => {
+                    root.folders-open = false;
+                    root.show-settings();
                 }
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;

@@ -1692,8 +1692,10 @@ export component AppWindow inherits Window {
     // Linux draws the whole frame, so it also provides the resize border and
     // window outline that the window manager would otherwise draw.
     private property <bool> client-frame: root.no-frame && !root.maximized && !root.full-screen;
+    // Settings opens from the drawers on phones, as a full page with its own
+    // close button.
     private property <bool> compact-primary-nav-visible: root.compact-layout
-        && !ComposerUi.open && !root.calendar-editor-shown
+        && !ComposerUi.open && !root.calendar-editor-shown && !root.settings-open
         && !(root.active_view == "mail" && root.mail-compact-page == "message")
         && !(root.active_view == "mail" && root.mail-folders-open)
         && !(root.active_view == "contacts" && root.contacts-detail-visible)
@@ -2066,6 +2068,7 @@ export component AppWindow inherits Window {
                 root.settings_tab = page;
                 root.open-settings();
             }
+            show-settings => { root.open-settings(); }
             settings_sign_in_account <=> root.settings-sign-in-account;
             settings_open_account <=> root.settings-open-account;
             accent: root.accent;
@@ -2333,6 +2336,7 @@ export component AppWindow inherits Window {
                 list-pane-width <=> root.workspace_list_pane_width;
                 account-model: root.connected_accounts;
                 list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
+                show-settings => { root.open-settings(); }
             }
         }
 
@@ -2614,7 +2618,6 @@ export component AppWindow inherits Window {
             accent-color: root.accent;
             accent-background: root.accent-soft;
             muted-color: root.muted-text;
-            open-settings => { root.toggle-settings(); }
             select-view(view) => { root.active_view = view; }
         }
 
