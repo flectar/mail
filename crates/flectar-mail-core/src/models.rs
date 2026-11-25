@@ -3293,6 +3293,10 @@ pub struct Settings {
     pub compose_font: String,
     #[serde(default = "default_compose_text_size")]
     pub compose_text_size: String,
+    /// On the desktop, new messages, replies, forwards and drafts open in a
+    /// window of their own instead of over the mail (#254).
+    #[serde(default)]
+    pub compose_in_window: bool,
     /// How many days a link to a file sent by link works, or 0 for as long as the file is
     /// kept. A server that limits links shortens it.
     #[serde(default = "default_link_expiry_days")]
@@ -3739,6 +3743,7 @@ impl Default for Settings {
             undo_send_seconds: 10,
             compose_font: default_compose_font(),
             compose_text_size: default_compose_text_size(),
+            compose_in_window: false,
             link_expiry_days: default_link_expiry_days(),
             link_password: false,
             load_remote_images: false,
@@ -4280,6 +4285,8 @@ mod tests {
         assert_eq!(ListDensity::parse("cozy"), None);
         assert!(s.show_tabs);
         assert!(s.conversation_view);
+        // Messages are written over the mail until Settings says otherwise.
+        assert!(!s.compose_in_window);
         // New installs draw their own frame; a saved choice stays.
         assert_eq!(s.window_frame, "integrated");
         let saved: Settings = serde_json::from_str(

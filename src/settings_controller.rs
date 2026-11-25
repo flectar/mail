@@ -234,6 +234,25 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_compose_window = Rc::clone(state);
+    let runtime_for_compose_window = runtime.clone();
+    app.on_save_compose_in_window(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_compose_window.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_compose_window.block_on(core.set_compose_in_window(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Writing window preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the writing window preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_mark_read = Rc::clone(state);
     let runtime_for_mark_read = runtime.clone();
     app.on_save_mark_read(move |choice| {

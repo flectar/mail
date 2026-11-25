@@ -1014,6 +1014,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     });
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
     app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_in_window(settings.compose_in_window);
     app.set_compose_text_size(settings.compose_text_size.as_str().into());
     app.set_mark_read(settings.mark_read.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
