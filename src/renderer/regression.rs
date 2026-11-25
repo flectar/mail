@@ -469,7 +469,7 @@ fn scrolling_reuses_pixels_and_layout_with_a_bounded_cache() {
         assert_eq!(r.layout_count, layouts);
     }
     r.clear();
-    assert!(r.tiles.is_empty() && r.cpu_painter.is_none());
+    assert!(r.tiles.is_empty() && r.backend.borrow().cpu_painter.is_none());
 }
 
 #[test]
@@ -498,7 +498,7 @@ fn memory_pressure_keeps_only_the_visible_tiles_until_it_passes() {
 
     assert!(r.release_caches(Instant::now() + Duration::from_secs(600)));
     assert_eq!(tiles(&r), [3, 4, 5]);
-    assert!(r.cpu_painter.is_none());
+    assert!(r.backend.borrow().cpu_painter.is_none());
     assert_eq!(r.retained_tiles().len(), 3);
     // Scrolling paints what it reveals, still without overscan.
     r.set_visible_region(2100.0, 900.0);
@@ -532,7 +532,10 @@ fn releasing_paint_buffers_keeps_the_painter_and_its_pixels() {
     assert!(!painted.is_empty());
 
     r.release_paint_buffers();
-    assert!(r.cpu_painter.is_some(), "images and glyphs stay cached");
+    assert!(
+        r.backend.borrow().cpu_painter.is_some(),
+        "images and glyphs stay cached"
+    );
     r.tiles.clear();
     r.region_dirty = true;
     r.render_cpu_if_needed(520, 900, 1.0).unwrap();
@@ -1728,4 +1731,163 @@ fn slant_axis_italics_lean_forward() {
             "the italic l doesn't lean forward at {scale}x, its left edge is at {top} near the top and {bottom} near the bottom"
         );
     }
+}
+
+/// A solid square picture as a data URL, which loads without a network.
+fn solid_png(color: [u8; 3]) -> String {
+    use base64::Engine;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(16, 16, image::Rgb(color))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+    )
+}
+
+fn picture_loaded(r: &GpuEmailRenderer) -> bool {
+    let email = r.email.as_ref().unwrap();
+    let id = email.document.query_selector("img").unwrap().unwrap();
+    email
+        .document
+        .get_node(id)
+        .and_then(|node| node.element_data())
+        .and_then(|element| element.raster_image_data())
+        .is_some()
+}
+
+/// A renderer on `backend` whose message is a picture in `color` taller than
+/// the first tile, once the picture has loaded.
+fn picture_renderer(
+    backend: &Rc<RefCell<PaintBackend>>,
+    runtime: &tokio::runtime::Runtime,
+    color: [u8; 3],
+) -> GpuEmailRenderer {
+    let mut r = GpuEmailRenderer::with_backend(Rc::clone(backend));
+    r.configure_resources(runtime.handle().clone(), false)
+        .unwrap();
+    let html = format!(
+        "<body style='margin:0'><img style='display:block;width:520px;height:600px' src='{}'></body>",
+        solid_png(color)
+    );
+    let email = r.prepare_email_html(&html, false).unwrap();
+    r.set_email(email);
+    for _ in 0..200 {
+        if picture_loaded(&r) {
+            break;
+        }
+        runtime.block_on(async { tokio::time::sleep(Duration::from_millis(5)).await });
+        r.poll_resources();
+    }
+    assert!(picture_loaded(&r), "the picture should load");
+    r
+}
+
+fn middle_of_first_tile(r: &GpuEmailRenderer) -> [u8; 3] {
+    let pixels = r.tiles[&0].image.to_rgb8().expect("tiles are RGB");
+    let (width, height) = (pixels.width() as usize, pixels.height() as usize);
+    let pixel = pixels.as_slice()[height / 2 * width + width / 2];
+    [pixel.r, pixel.g, pixel.b]
+}
+
+fn long_message() -> String {
+    format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='height:110px;margin:0'>Scrollable words</p>".repeat(100)
+    )
+}
+
+fn sharing(backend: &Rc<RefCell<PaintBackend>>, html: &str) -> GpuEmailRenderer {
+    let mut r = GpuEmailRenderer::with_backend(Rc::clone(backend));
+    r.set_email(prepare_email_html(html).unwrap());
+    r
+}
+
+#[test]
+fn renderers_sharing_a_backend_keep_their_own_pictures() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let backend = Rc::default();
+    let (red, blue) = ([200, 30, 40], [20, 60, 210]);
+    let mut first = picture_renderer(&backend, &runtime, red);
+    let mut second = picture_renderer(&backend, &runtime, blue);
+    first.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    second.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    assert!(backend.borrow().cpu_painter.is_some());
+
+    // The painter's image cache now holds both pictures.
+    first.tiles.clear();
+    first.region_dirty = true;
+    first.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    for (r, color) in [(&first, red), (&second, blue)] {
+        let painted = middle_of_first_tile(r);
+        assert!(
+            painted.iter().zip(color).all(|(a, b)| a.abs_diff(b) <= 2),
+            "painted {painted:?} instead of {color:?}"
+        );
+    }
+}
+
+#[cfg(feature = "gpu-renderer")]
+#[test]
+fn giving_up_the_gpu_through_one_renderer_repaints_the_others() {
+    let backend = Rc::default();
+    let mut first = sharing(&backend, BODY);
+    let mut second = sharing(&backend, BODY);
+    first.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    second.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    assert!(!second.needs_repaint());
+    let (layouts, tiles) = (second.layout_count, second.tile_count);
+
+    // Its tiles may be textures on the device that was given up.
+    first.teardown_gpu();
+    assert!(second.needs_repaint());
+    second
+        .render_cpu_if_needed(520, 900, 1.0)
+        .unwrap()
+        .expect("the message is painted again");
+    assert_eq!(second.layout_count, layouts + 1);
+    assert_eq!(second.tile_count, tiles + second.tiles.len() as u64);
+    assert!(!second.needs_repaint());
+}
+
+#[test]
+fn suspending_through_one_renderer_stops_every_renderer() {
+    let backend = Rc::default();
+    let mut first = sharing(&backend, &long_message());
+    let mut second = sharing(&backend, &long_message());
+    first.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+    second.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap();
+
+    first.set_suspended(true);
+    assert!(second.set_visible_region(4000.0, 900.0));
+    assert!(!second.needs_repaint());
+    assert!(
+        second
+            .render_cpu_if_needed(520, 900, 1.0)
+            .unwrap()
+            .is_none()
+    );
+
+    first.set_suspended(false);
+    assert!(second.needs_repaint());
+    second
+        .render_cpu_if_needed(520, 900, 1.0)
+        .unwrap()
+        .expect("painting goes on once resumed");
+}
+
+#[test]
+fn memory_pressure_through_one_renderer_stops_overscan_for_every_renderer() {
+    let backend = Rc::default();
+    let mut first = sharing(&backend, &long_message());
+    let mut second = sharing(&backend, &long_message());
+    assert!(!first.release_caches(Instant::now() + Duration::from_secs(600)));
+    second.set_visible_region(2000.0, 900.0);
+    second.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    // Tiles 3 to 5 show 2000-2900, with no overscan around them.
+    assert_eq!(second.tiles.keys().copied().collect::<Vec<_>>(), [3, 4, 5]);
 }
