@@ -2871,7 +2871,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:864 ui/components/email-composer.slint:960
+#: ui/app.slint:864 ui/components/email-composer.slint:963
 msgid "Forwarded message"
 msgstr ""
 
@@ -3405,7 +3405,7 @@ msgstr ""
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2767 ui/components/email-composer.slint:1282
+#: ui/app.slint:2767 ui/components/email-composer.slint:1285
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
@@ -5337,75 +5337,75 @@ msgstr ""
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:960
+#: ui/components/email-composer.slint:963
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:966
+#: ui/components/email-composer.slint:969
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:966
+#: ui/components/email-composer.slint:969
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:977
+#: ui/components/email-composer.slint:980
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:988
+#: ui/components/email-composer.slint:991
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:988
+#: ui/components/email-composer.slint:991
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:1019
+#: ui/components/email-composer.slint:1022
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1019
+#: ui/components/email-composer.slint:1022
 msgid "Add the quoted text back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1179
+#: ui/components/email-composer.slint:1182
 msgid "Send without a subject?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1179
+#: ui/components/email-composer.slint:1182
 msgid "Did you mean to attach a file?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1181
+#: ui/components/email-composer.slint:1184
 msgid "People see the subject first, in their list of mail."
 msgstr ""
 
-#: ui/components/email-composer.slint:1182
+#: ui/components/email-composer.slint:1185
 msgid "The message mentions “{}”, but has no file attached."
 msgstr ""
 
-#: ui/components/email-composer.slint:1184
+#: ui/components/email-composer.slint:1187
 msgid "Send without subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1184
+#: ui/components/email-composer.slint:1187
 msgid "Send anyway"
 msgstr ""
 
-#: ui/components/email-composer.slint:1185
+#: ui/components/email-composer.slint:1188
 msgid "Add a subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1186
+#: ui/components/email-composer.slint:1189
 msgid "Attach files…"
 msgstr ""
 
-#: ui/components/email-composer.slint:1235
+#: ui/components/email-composer.slint:1238
 msgid "Send from"
 msgstr ""
 
-#: ui/components/email-composer.slint:1274
+#: ui/components/email-composer.slint:1277
 msgid "Drop to add to your message"
 msgstr ""
 
