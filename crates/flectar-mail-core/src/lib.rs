@@ -2228,19 +2228,26 @@ impl Core {
                     )));
                 }
                 let hidden_ids = repo::folders::hidden_ids(conn, Some(account_id))?;
+                // Only IMAP accounts sync folder by folder.
+                let imap = config.mail_protocol == MailProtocol::Imap;
                 let mut folders = repo::folders::list_info(conn, Some(account_id))?
                     .into_iter()
                     .map(|folder| {
-                        let always_shown =
-                            repo::folders::always_shown(&folder.path, folder.role.as_deref());
+                        let role = folder.role.as_deref();
+                        let always_shown = repo::folders::always_shown(&folder.path, role);
                         let hidden =
                             !always_shown && config.settings.hidden_folders.contains(&folder.path);
+                        let always_synced = repo::folders::always_synced(&folder.path, role);
                         AccountFolder {
                             id: folder.id,
                             names: folder_names(&folder),
                             always_shown,
                             hidden,
                             inside_hidden: !hidden && hidden_ids.contains(&folder.id),
+                            synced: always_synced
+                                || !config.settings.unsynced_folders.contains(&folder.path),
+                            always_synced,
+                            syncable: imap && folder.selectable && role != Some(roles::ALL),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -2292,6 +2299,73 @@ impl Core {
             handle.update_settings(settings);
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// Choose whether this device syncs a folder of an IMAP account in the
+    /// background (#253). One left out is checked when it's opened, and keeps
+    /// the mail it has. The Inbox, Sent and Drafts always sync.
+    pub async fn set_folder_synced(&self, folder_id: i64, synced: bool) -> Result<()> {
+        let (account_id, settings) = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let folder = repo::folders::get(&tx, folder_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+                let mut config = repo::accounts::get_config(&tx, folder.account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
+                if config.mail_protocol != MailProtocol::Imap {
+                    return Err(CoreError::Other(format!(
+                        "{} syncs all its folders together",
+                        config.email
+                    )));
+                }
+                if repo::folders::always_synced(&folder.path, folder.role.as_deref()) {
+                    return Err(CoreError::Other(
+                        "the Inbox, Sent and Drafts always sync".into(),
+                    ));
+                }
+                if synced {
+                    config.settings.unsynced_folders.remove(&folder.path);
+                } else {
+                    config.settings.unsynced_folders.insert(folder.path);
+                }
+                repo::accounts::set_settings(&tx, folder.account_id, &config.settings)?;
+                tx.commit()?;
+                Ok((folder.account_id, config.settings))
+            })
+            .await?;
+        // The worker syncs as the settings now say, catching a folder synced
+        // again up at once.
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        self.prefetch.notify_one();
+        Ok(())
+    }
+
+    /// Check a folder this device leaves out of its sync, as it's opened
+    /// (#253). Other folders sync anyway, so this does nothing for them.
+    pub async fn check_folder(&self, folder_id: i64) -> Result<()> {
+        let folder = self
+            .db
+            .read(move |conn| {
+                let Some(folder) = repo::folders::get(conn, folder_id)? else {
+                    return Ok(None);
+                };
+                let unsynced = repo::accounts::get_config(conn, folder.account_id)?
+                    .filter(|config| config.mail_protocol == MailProtocol::Imap)
+                    .is_some_and(|config| {
+                        !repo::folders::syncs(&folder, &config.settings.unsynced_folders)
+                    });
+                Ok(unsynced.then_some(folder))
+            })
+            .await?;
+        if let Some(folder) = folder
+            && let Some(handle) = self.handles.read().await.get(&folder.account_id).cloned()
+        {
+            handle.check_folder(folder.id);
+        }
         Ok(())
     }
 
@@ -17127,6 +17201,72 @@ mod hidden_folder_tests {
             .unwrap();
         assert!(core.set_folder_hidden(notes, true).await.is_err());
         assert!(core.account_folders(1).await.is_err());
+    }
+
+    /// An IMAP account leaves folders out of its sync, but for the Inbox,
+    /// Sent and Drafts, and others sync all their folders together (#253).
+    #[tokio::test]
+    async fn an_imap_account_chooses_the_folders_it_syncs() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let (sent, lists) = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok((
+                    repo::folders::upsert(conn, 1, "Sent", Some("/"), Some(roles::SENT))?,
+                    repo::folders::upsert(conn, 1, "Lists", Some("/"), None)?,
+                ))
+            })
+            .await
+            .unwrap();
+        let sync = || async {
+            core.account_folders(1)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|folder| {
+                    (
+                        folder.id,
+                        folder.synced,
+                        folder.always_synced,
+                        folder.syncable,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        core.set_folder_synced(lists, false).await.unwrap();
+        assert_eq!(
+            sync().await,
+            [
+                (1, true, true, true),
+                (lists, false, false, true),
+                (sent, true, true, true),
+            ]
+        );
+        for always in [1, sent] {
+            assert!(core.set_folder_synced(always, false).await.is_err());
+        }
+        // Opening it checks it, and doesn't change what syncs.
+        core.check_folder(lists).await.unwrap();
+        core.set_folder_synced(lists, true).await.unwrap();
+        assert!(sync().await.iter().all(|(_, synced, ..)| *synced));
+
+        core.db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(core.set_folder_synced(lists, false).await.is_err());
+        assert!(!sync().await.iter().any(|(_, _, _, syncable)| *syncable));
     }
 }
 

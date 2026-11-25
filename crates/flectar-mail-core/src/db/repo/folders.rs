@@ -242,8 +242,8 @@ pub fn rename_tree(
             }
         }
     })?;
-    update_hidden_folders(conn, account_id, |hidden| {
-        *hidden = std::mem::take(hidden)
+    update_folder_choices(conn, account_id, |paths| {
+        *paths = std::mem::take(paths)
             .into_iter()
             .map(|path| renamed_path(&path, old_prefix, new_prefix, delimiter).unwrap_or(path))
             .collect();
@@ -273,21 +273,38 @@ fn in_tree(path: &str, prefix: &str, delimiter: &str) -> bool {
                 .is_some_and(|rest| rest.starts_with(delimiter)))
 }
 
-/// Change the paths of the account's hidden folders as `change` says (#253).
-fn update_hidden_folders(
+/// Change the paths of the account's hidden folders, and of those it
+/// doesn't sync, as `change` says (#253).
+fn update_folder_choices(
     conn: &Connection,
     account_id: i64,
-    change: impl FnOnce(&mut BTreeSet<String>),
+    change: impl Fn(&mut BTreeSet<String>),
 ) -> Result<()> {
     let Some(mut config) = super::accounts::get_config(conn, account_id)? else {
         return Ok(());
     };
-    let before = config.settings.hidden_folders.clone();
+    let before = config.settings.clone();
     change(&mut config.settings.hidden_folders);
-    if config.settings.hidden_folders == before {
+    change(&mut config.settings.unsynced_folders);
+    if config.settings.hidden_folders == before.hidden_folders
+        && config.settings.unsynced_folders == before.unsynced_folders
+    {
         return Ok(());
     }
     super::accounts::set_settings(conn, account_id, &config.settings)
+}
+
+/// Whether a folder of an IMAP account always syncs: the Inbox, and Sent and
+/// Drafts, which Flectar Mail files its own mail in (#253).
+pub fn always_synced(path: &str, role: Option<&str>) -> bool {
+    path.eq_ignore_ascii_case("INBOX")
+        || matches!(role, Some(roles::INBOX | roles::SENT | roles::DRAFTS))
+}
+
+/// Whether this device syncs a folder in the background, which `unsynced`,
+/// by their paths, leaves out (#253).
+pub fn syncs(folder: &Folder, unsynced: &BTreeSet<String>) -> bool {
+    always_synced(&folder.path, folder.role.as_deref()) || !unsynced.contains(&folder.path)
 }
 
 /// Whether a folder always shows: the Inbox and the folders with a role.
@@ -487,8 +504,8 @@ pub fn delete_tree(
     update_chosen_roles(conn, account_id, |chosen| {
         chosen.retain(|_, path| !in_tree(path, prefix, delimiter));
     })?;
-    update_hidden_folders(conn, account_id, |hidden| {
-        hidden.retain(|path| !in_tree(path, prefix, delimiter));
+    update_folder_choices(conn, account_id, |paths| {
+        paths.retain(|path| !in_tree(path, prefix, delimiter));
     })
 }
 
@@ -1718,6 +1735,52 @@ mod tests {
         );
         delete_tree(&conn, 1, "Jottings", "/").unwrap();
         assert_eq!(hidden_paths(&conn), ["Notebook"]);
+    }
+
+    /// A folder left out of sync stays out under a new name and is forgotten
+    /// when deleted, and the Inbox, Sent and Drafts sync anyway (#253).
+    #[test]
+    fn unsynced_folders_follow_renames_and_the_inbox_always_syncs() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        upsert(&conn, 1, "Sent", Some("/"), Some(roles::SENT)).unwrap();
+        upsert(&conn, 1, "Lists", Some("/"), None).unwrap();
+        upsert(&conn, 1, "Lists/Rust", Some("/"), None).unwrap();
+        let mut config = super::super::accounts::get_config(&conn, 1)
+            .unwrap()
+            .unwrap();
+        config.settings.unsynced_folders = ["INBOX", "Sent", "Lists/Rust"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        super::super::accounts::set_settings(&conn, 1, &config.settings).unwrap();
+        let unsynced = |conn: &Connection| {
+            super::super::accounts::get_config(conn, 1)
+                .unwrap()
+                .unwrap()
+                .settings
+                .unsynced_folders
+        };
+        let synced = |conn: &Connection| {
+            let unsynced = unsynced(conn);
+            list(conn, Some(1))
+                .unwrap()
+                .into_iter()
+                .filter(|folder| syncs(folder, &unsynced))
+                .map(|folder| folder.path)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(synced(&conn), ["INBOX", "Sent", "Lists"]);
+
+        rename_tree(&conn, 1, "Lists", "Groups", "/").unwrap();
+        assert!(unsynced(&conn).contains("Groups/Rust"));
+        assert_eq!(synced(&conn), ["INBOX", "Sent", "Groups"]);
+        delete_tree(&conn, 1, "Groups", "/").unwrap();
+        assert!(
+            !unsynced(&conn)
+                .iter()
+                .any(|path| path.starts_with("Groups"))
+        );
     }
 
     #[test]

@@ -73,7 +73,9 @@ pub(crate) enum Uploaded {
     Refused(String),
 }
 
-/// The upload's connection to the server, made when first needed.
+/// The upload's connection to the server, made when first needed. The
+/// JMAP and Gmail connections are boxed, as they are much larger than an
+/// IMAP one.
 enum Remote {
     Imap {
         session: Option<imap::Session>,
@@ -82,10 +84,10 @@ enum Remote {
         first_uids: HashMap<i64, i64>,
     },
     Jmap {
-        client: Option<jmap::client::ConnectedClient>,
+        client: Option<Box<jmap::client::ConnectedClient>>,
     },
     Gmail {
-        uploader: sync::gmail::Uploader,
+        uploader: Box<sync::gmail::Uploader>,
         /// Insert the mail as it is, as IMAP APPEND does, rather than
         /// import it like mail that arrives.
         insert: bool,
@@ -115,7 +117,7 @@ impl crate::Core {
             },
             MailProtocol::Jmap => Remote::Jmap { client: None },
             MailProtocol::Gmail => Remote::Gmail {
-                uploader: sync::gmail::Uploader::new(self.sync_ctx(), config.clone())?,
+                uploader: Box::new(sync::gmail::Uploader::new(self.sync_ctx(), config.clone())?),
                 insert: false,
             },
             MailProtocol::Pop3 | MailProtocol::Local => {
@@ -282,7 +284,10 @@ impl crate::Core {
                     },
                     MailProtocol::Jmap => Remote::Jmap { client: None },
                     MailProtocol::Gmail => Remote::Gmail {
-                        uploader: sync::gmail::Uploader::new(self.sync_ctx(), config.clone())?,
+                        uploader: Box::new(sync::gmail::Uploader::new(
+                            self.sync_ctx(),
+                            config.clone(),
+                        )?),
                         insert: true,
                     },
                     MailProtocol::Pop3 | MailProtocol::Local => {
@@ -638,7 +643,7 @@ impl crate::Core {
     async fn jmap_upload(
         &self,
         config: &AccountConfig,
-        client: &mut Option<jmap::client::ConnectedClient>,
+        client: &mut Option<Box<jmap::client::ConnectedClient>>,
         message: &Incoming,
         target: &Target,
         message_id: Option<&str>,
@@ -750,7 +755,7 @@ impl crate::Core {
     async fn jmap_client<'a>(
         &self,
         config: &AccountConfig,
-        client: &'a mut Option<jmap::client::ConnectedClient>,
+        client: &'a mut Option<Box<jmap::client::ConnectedClient>>,
     ) -> Result<&'a mut jmap::client::ConnectedClient> {
         if client.is_none() {
             let secret = crate::accounts::credentials::load_async(
@@ -759,10 +764,10 @@ impl crate::Core {
                 crate::accounts::credentials::Slot::Password,
             )
             .await?;
-            *client = Some(jmap::client::connect(config, &secret).await?);
+            *client = Some(Box::new(jmap::client::connect(config, &secret).await?));
         }
         client
-            .as_mut()
+            .as_deref_mut()
             .ok_or_else(|| CoreError::Jmap("no JMAP session".into()))
     }
 

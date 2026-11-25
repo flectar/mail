@@ -1,6 +1,8 @@
 //! Folders (#253): which of an account's folders show in the sidebar and the
-//! Move to list. A hidden folder takes the folders in it along, and its mail
-//! still downloads. The Inbox and the folders with a role always show.
+//! Move to list, and for an IMAP account which ones this device syncs. A
+//! hidden folder takes the folders in it along, and its mail still
+//! downloads. The Inbox and the folders with a role always show, and the
+//! Inbox, Sent and Drafts always sync.
 
 use super::*;
 use flectar_mail_core::models::AccountFolder;
@@ -50,41 +52,78 @@ pub(super) fn install(
             }
         });
     }
+    {
+        let app = app.as_weak();
+        let state = Rc::clone(state);
+        let runtime = runtime.clone();
+        ui.on_set_shown(move |account_id, folder_id, shown| {
+            choose(
+                &app,
+                &state,
+                &runtime,
+                account_id,
+                Choice::Shown(i64::from(folder_id), shown),
+            );
+        });
+    }
     let app = app.as_weak();
     let state = Rc::clone(state);
     let runtime = runtime.clone();
-    ui.on_set_shown(move |account_id, folder_id, shown| {
-        let Some(app) = app.upgrade() else {
-            return;
-        };
-        if app.global::<FolderVisibility>().get_account_id() != account_id {
-            return;
-        }
-        if let Some(core) = state.borrow().core.clone() {
-            read(
-                &app,
-                &runtime,
-                core,
-                account_id,
-                Some((i64::from(folder_id), shown)),
-            );
-        }
+    ui.on_set_synced(move |account_id, folder_id, synced| {
+        choose(
+            &app,
+            &state,
+            &runtime,
+            account_id,
+            Choice::Synced(i64::from(folder_id), synced),
+        );
     });
 }
 
-/// List account `account_id`'s folders, first showing or hiding a folder as
-/// `choice` says, if any.
+/// What the user chose for a folder.
+#[derive(Clone, Copy)]
+enum Choice {
+    Shown(i64, bool),
+    Synced(i64, bool),
+}
+
+/// Save `choice` for a folder of account `account_id`, if the dialog still
+/// shows that account, and list its folders again.
+fn choose(
+    app: &slint::Weak<AppWindow>,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Handle,
+    account_id: i32,
+    choice: Choice,
+) {
+    let Some(app) = app.upgrade() else {
+        return;
+    };
+    if app.global::<FolderVisibility>().get_account_id() != account_id {
+        return;
+    }
+    if let Some(core) = state.borrow().core.clone() {
+        read(&app, runtime, core, account_id, Some(choice));
+    }
+}
+
+/// List account `account_id`'s folders, first saving `choice`, if any.
 fn read(
     app: &AppWindow,
     runtime: &tokio::runtime::Handle,
     core: CoreMailSource,
     account_id: i32,
-    choice: Option<(i64, bool)>,
+    choice: Option<Choice>,
 ) {
     let app = app.as_weak();
     runtime.spawn(async move {
         let saved = match choice {
-            Some((folder_id, shown)) => core.set_folder_hidden(folder_id, !shown).await,
+            Some(Choice::Shown(folder_id, shown)) => {
+                core.set_folder_hidden(folder_id, !shown).await
+            }
+            Some(Choice::Synced(folder_id, synced)) => {
+                core.set_folder_synced(folder_id, synced).await
+            }
             None => Ok(()),
         };
         // Read either way, so each switch shows what's so.
@@ -106,7 +145,7 @@ fn show(
     }
     ui.set_loading(false);
     let error = match (&saved, &listed) {
-        (Err(error), _) => Some(UiMessage::detail("Could not hide folder: {}", error)),
+        (Err(error), _) => Some(UiMessage::detail("Could not change the folder: {}", error)),
         (_, Err(error)) => Some(UiMessage::detail("Could not read the folders: {}", error)),
         _ => None,
     };
@@ -164,6 +203,9 @@ fn rows(folders: &[AccountFolder], query: &str, inbox: &str) -> (Vec<FolderShown
             shown: !folder.hidden,
             always_shown: folder.always_shown,
             inside_hidden: folder.inside_hidden,
+            synced: folder.synced,
+            always_synced: folder.always_synced,
+            syncable: folder.syncable,
         });
     }
     (rows, matches)
@@ -180,6 +222,9 @@ mod tests {
             always_shown: names == ["INBOX"],
             hidden,
             inside_hidden,
+            synced: true,
+            always_synced: names == ["INBOX"],
+            syncable: true,
         }
     }
 

@@ -1840,6 +1840,22 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Choose whether this device syncs an IMAP account's folder (#253).
+    pub async fn set_folder_synced(&self, folder_id: i64, synced: bool) -> Result<(), String> {
+        self.core
+            .set_folder_synced(folder_id, synced)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Check a folder this device doesn't sync, as it's opened (#253).
+    pub async fn check_folder(&self, folder_id: i64) -> Result<(), String> {
+        self.core
+            .check_folder(folder_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// An account's folders, to choose which show (#253).
     pub async fn account_folders(
         &self,

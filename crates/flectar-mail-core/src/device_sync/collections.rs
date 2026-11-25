@@ -232,6 +232,7 @@ fn entry(collection: &str, body: Value) -> Entry {
 const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &[
     "mailHistory",
     "download",
+    "unsyncedFolders",
     "keepOnServer",
     "checkInterval",
     "push",
@@ -1510,6 +1511,7 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
     let mut merged = AccountSettings {
         mail_history: current.mail_history,
         download: current.download,
+        unsynced_folders: current.unsynced_folders.clone(),
         keep_on_server: current.keep_on_server,
         check_interval: current.check_interval,
         push: current.push,
@@ -3052,9 +3054,11 @@ mod tests {
         config.settings.connection.proxy = AccountProxy::Direct;
         config.settings.connection.server_timeout_secs = Some(120);
         config.settings.download = crate::models::DownloadPolicy::Everything;
+        config.settings.unsynced_folders.insert("Archive".into());
         let body = account_body(&config, &Settings::default(), 0).unwrap();
         assert!(body["settings"].get("checkInterval").is_none(), "{body}");
         assert!(body["settings"].get("download").is_none(), "{body}");
+        assert!(body["settings"].get("unsyncedFolders").is_none(), "{body}");
         assert!(body["settings"].get("push").is_none(), "{body}");
         assert!(
             body["settings"]["connection"].get("proxy").is_none(),
@@ -3074,8 +3078,10 @@ mod tests {
         synced.connection.proxy = AccountProxy::App;
         synced.connection.server_timeout_secs = None;
         synced.download = crate::models::DownloadPolicy::Headers;
+        synced.unsynced_folders.clear();
         let merged = merged_account_settings(&config.settings, &synced);
         assert_eq!(merged.download, crate::models::DownloadPolicy::Everything);
+        assert_eq!(merged.unsynced_folders, config.settings.unsynced_folders);
         assert_eq!(merged.check_interval, CheckInterval::Minutes(30));
         assert!(!merged.push);
         assert_eq!(merged.connection.proxy, AccountProxy::Direct);
