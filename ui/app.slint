@@ -7,6 +7,7 @@ export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
 export { MessageSource } from "message-source.slint";
+export { FolderVisibility, FolderShownRow } from "folder-visibility.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -837,6 +838,8 @@ export global I18n {
         if (key == "Could not create folder: {}") { return @tr("Could not create folder: {}", argument); }
         if (key == "Could not rename folder: {}") { return @tr("Could not rename folder: {}", argument); }
         if (key == "Could not delete folder: {}") { return @tr("Could not delete folder: {}", argument); }
+        if (key == "Folder hidden. Show it again in Settings → Accounts.") { return @tr("Folder hidden. Show it again in Settings → Accounts."); }
+        if (key == "Could not hide folder: {}") { return @tr("Could not hide folder: {}", argument); }
         if (key == "Could not close preview: {}") { return @tr("Could not close preview: {}", argument); }
         if (key == "Opened the system print view.") { return @tr("Opened the system print view."); }
         if (key == "Could not print message: {}") { return @tr("Could not print message: {}", argument); }
@@ -1093,6 +1096,8 @@ export component AppWindow inherits Window {
     callback create_folder(int, int, string);
     callback rename_folder(int, string);
     callback delete_folder(int);
+    // Hide a folder from the sidebar and the Move to list (#253).
+    callback hide_folder(int);
     callback load_more();
     callback load_earlier_mail();
     callback sync_mail();
@@ -2151,6 +2156,7 @@ export component AppWindow inherits Window {
             }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
+            request_folder_hide(id) => { root.hide_folder(id); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
             request_label_delete(id, name, account, global, has-descendants) => {
                 root.open-label-delete(id, name, account, global, has-descendants);

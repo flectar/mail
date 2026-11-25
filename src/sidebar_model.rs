@@ -176,6 +176,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         can_create_children,
         can_rename,
         can_delete,
+        can_hide,
         label_has_emoji,
         label,
         scope,
@@ -208,6 +209,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *can_create_children == other.can_create_children
         && *can_rename == other.can_rename
         && *can_delete == other.can_delete
+        && *can_hide == other.can_hide
         && *label_has_emoji == other.label_has_emoji
         && *label == other.label
         && *scope == other.scope

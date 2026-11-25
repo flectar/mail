@@ -604,6 +604,11 @@ pub struct AccountSettings {
     /// keeps the fields a record leaves out as a newer version's.
     #[serde(default)]
     pub folder_roles: std::collections::BTreeMap<String, String>,
+    /// The folders hidden from the sidebar and the Move to list, with the
+    /// folders in them, by their paths (#253). Their mail still syncs. Always
+    /// written, empty too, as `folder_roles` is.
+    #[serde(default)]
+    pub hidden_folders: std::collections::BTreeSet<String>,
 }
 
 const fn plain_text_replies_default() -> bool {
@@ -633,6 +638,7 @@ impl AccountSettings {
             check_interval: CheckInterval::App,
             push: push_default(),
             folder_roles: std::collections::BTreeMap::new(),
+            hidden_folders: std::collections::BTreeSet::new(),
             copies: AutomaticCopies::default(),
             identity_copies: std::collections::BTreeMap::new(),
         }
@@ -830,6 +836,26 @@ mod account_settings_tests {
             );
         }
         assert_eq!(DownloadPolicy::from_storage("bodies"), None);
+    }
+
+    /// No folder starts hidden, and the hidden ones are always written, so
+    /// Flectar Mail Sync carries showing the last one again (#253).
+    #[test]
+    fn hidden_folders_start_empty_and_are_always_written() {
+        let mut settings: AccountSettings = serde_json::from_str(MINIMAL_SETTINGS).unwrap();
+        assert!(settings.hidden_folders.is_empty());
+        assert!(
+            serde_json::to_string(&settings)
+                .unwrap()
+                .contains(r#""hiddenFolders":[]"#)
+        );
+        settings.hidden_folders.insert("Notes".into());
+        let restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored.hidden_folders,
+            std::collections::BTreeSet::from(["Notes".to_owned()])
+        );
     }
 
     #[test]
@@ -2573,6 +2599,23 @@ pub struct FolderChoice {
     /// The folder's name after its parents' names, outermost first, as
     /// "Archive" and "2026".
     pub names: Vec<String>,
+}
+
+/// One of an account's folders as Settings lists them, to choose which show
+/// (#253). Parents come before the folders in them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountFolder {
+    pub id: i64,
+    /// The folder's name after its parents' names, outermost first, as
+    /// "Archive" and "2026".
+    pub names: Vec<String>,
+    /// The Inbox and the folders with a role such as Sent always show.
+    pub always_shown: bool,
+    /// Hidden by the user.
+    pub hidden: bool,
+    /// Hidden with a folder it's in.
+    pub inside_hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

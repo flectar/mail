@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::models::{FolderInfo, MailProtocol, now_ms, roles};
 use rusqlite::{Connection, OptionalExtension, Row, named_params, params};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The roles an IMAP account's folders can be chosen for by hand (#252).
 pub const CHOOSABLE_ROLES: [&str; 5] = [
@@ -233,19 +233,117 @@ pub fn rename_tree(
             params![id, format!("{new_prefix}{suffix}")],
         )?;
     }
-    // A role chosen for a folder of the tree follows it (#252).
+    // A role chosen for a folder of the tree follows it (#252), and so does
+    // hiding one (#253).
     update_chosen_roles(conn, account_id, |chosen| {
-        let inside = format!("{old_prefix}{delimiter}");
         for path in chosen.values_mut() {
-            if path == old_prefix {
-                *path = new_prefix.to_owned();
-            } else if let Some(rest) = path.strip_prefix(&inside)
-                && !delimiter.is_empty()
-            {
-                *path = format!("{new_prefix}{delimiter}{rest}");
+            if let Some(renamed) = renamed_path(path, old_prefix, new_prefix, delimiter) {
+                *path = renamed;
             }
         }
+    })?;
+    update_hidden_folders(conn, account_id, |hidden| {
+        *hidden = std::mem::take(hidden)
+            .into_iter()
+            .map(|path| renamed_path(&path, old_prefix, new_prefix, delimiter).unwrap_or(path))
+            .collect();
     })
+}
+
+/// `path` with the folder tree at `old_prefix` renamed to `new_prefix`, if
+/// it's in that tree.
+fn renamed_path(path: &str, old_prefix: &str, new_prefix: &str, delimiter: &str) -> Option<String> {
+    if path == old_prefix {
+        return Some(new_prefix.to_owned());
+    }
+    if delimiter.is_empty() {
+        return None;
+    }
+    path.strip_prefix(old_prefix)
+        .and_then(|rest| rest.strip_prefix(delimiter))
+        .map(|rest| format!("{new_prefix}{delimiter}{rest}"))
+}
+
+/// Whether `path` is the folder at `prefix` or in it.
+fn in_tree(path: &str, prefix: &str, delimiter: &str) -> bool {
+    path == prefix
+        || (!delimiter.is_empty()
+            && path
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with(delimiter)))
+}
+
+/// Change the paths of the account's hidden folders as `change` says (#253).
+fn update_hidden_folders(
+    conn: &Connection,
+    account_id: i64,
+    change: impl FnOnce(&mut BTreeSet<String>),
+) -> Result<()> {
+    let Some(mut config) = super::accounts::get_config(conn, account_id)? else {
+        return Ok(());
+    };
+    let before = config.settings.hidden_folders.clone();
+    change(&mut config.settings.hidden_folders);
+    if config.settings.hidden_folders == before {
+        return Ok(());
+    }
+    super::accounts::set_settings(conn, account_id, &config.settings)
+}
+
+/// Whether a folder always shows: the Inbox and the folders with a role.
+pub fn always_shown(path: &str, role: Option<&str>) -> bool {
+    role.is_some() || path.eq_ignore_ascii_case("INBOX")
+}
+
+/// The folders of `account_id`, or of every account, that the sidebar and
+/// the Move to list leave out (#253): those the account hides, by their
+/// paths, and the folders in them. The Inbox and folders with a role always
+/// show, and a hidden path of theirs hides none of the folders in them.
+pub fn hidden_ids(conn: &Connection, account_id: Option<i64>) -> Result<HashSet<i64>> {
+    let folders = list(conn, account_id)?;
+    let mut hidden = HashSet::new();
+    let mut accounts = folders
+        .iter()
+        .map(|folder| folder.account_id)
+        .collect::<Vec<_>>();
+    accounts.sort_unstable();
+    accounts.dedup();
+    for account in accounts {
+        let Some(config) = super::accounts::get_config(conn, account)? else {
+            continue;
+        };
+        if config.settings.hidden_folders.is_empty() {
+            continue;
+        }
+        let mine = folders
+            .iter()
+            .filter(|folder| folder.account_id == account)
+            .collect::<Vec<_>>();
+        let shown = mine
+            .iter()
+            .filter(|folder| always_shown(&folder.path, folder.role.as_deref()))
+            .map(|folder| folder.path.as_str())
+            .collect::<HashSet<_>>();
+        let roots = config
+            .settings
+            .hidden_folders
+            .iter()
+            .filter(|path| !shown.contains(path.as_str()))
+            .collect::<Vec<_>>();
+        for folder in mine {
+            if always_shown(&folder.path, folder.role.as_deref()) {
+                continue;
+            }
+            let delimiter = folder.delimiter.as_deref().unwrap_or_default();
+            if roots
+                .iter()
+                .any(|root| in_tree(&folder.path, root, delimiter))
+            {
+                hidden.insert(folder.id);
+            }
+        }
+    }
+    Ok(hidden)
 }
 
 /// Change the account's folders chosen by hand for roles (#252) as
@@ -385,12 +483,12 @@ pub fn delete_tree(
         params![account_id, prefix, pattern],
     )?;
     // A role chosen for a deleted folder goes back to the server's
-    // suggestion (#252).
-    let inside = format!("{prefix}{delimiter}");
+    // suggestion (#252), and a hidden one is forgotten (#253).
     update_chosen_roles(conn, account_id, |chosen| {
-        chosen.retain(|_, path| {
-            path != prefix && (delimiter.is_empty() || !path.starts_with(&inside))
-        });
+        chosen.retain(|_, path| !in_tree(path, prefix, delimiter));
+    })?;
+    update_hidden_folders(conn, account_id, |hidden| {
+        hidden.retain(|path| !in_tree(path, prefix, delimiter));
     })
 }
 
@@ -1565,6 +1663,61 @@ mod tests {
             by_role(&conn, 1, roles::ARCHIVE).unwrap().unwrap().id,
             older
         );
+    }
+
+    /// A hidden folder leaves out the folders in it, but not the Inbox or a
+    /// folder with a role, nor a folder whose name only starts the same.
+    /// Renamed here it stays hidden, and deleted here it's forgotten (#253).
+    #[test]
+    fn hidden_folders_hide_their_trees_and_follow_renames() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let archive = upsert(&conn, 1, "Archive", Some("/"), Some(roles::ARCHIVE)).unwrap();
+        let archived = upsert(&conn, 1, "Archive/2025", Some("/"), None).unwrap();
+        let notes = upsert(&conn, 1, "Notes", Some("/"), None).unwrap();
+        let ideas = upsert(&conn, 1, "Notes/Ideas", Some("/"), None).unwrap();
+        let notebook = upsert(&conn, 1, "Notebook", Some("/"), None).unwrap();
+        let hide = |paths: &[&str]| {
+            let mut config = super::super::accounts::get_config(&conn, 1)
+                .unwrap()
+                .unwrap();
+            config.settings.hidden_folders = paths.iter().map(|path| (*path).to_owned()).collect();
+            super::super::accounts::set_settings(&conn, 1, &config.settings).unwrap();
+        };
+        let hidden_paths = |conn: &Connection| {
+            super::super::accounts::get_config(conn, 1)
+                .unwrap()
+                .unwrap()
+                .settings
+                .hidden_folders
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+        assert!(hidden_ids(&conn, Some(1)).unwrap().is_empty());
+
+        hide(&["Notes", "INBOX", "Archive"]);
+        assert_eq!(
+            hidden_ids(&conn, None).unwrap(),
+            HashSet::from([notes, ideas])
+        );
+        for shown in [1, archive, archived, notebook] {
+            assert!(!hidden_ids(&conn, Some(1)).unwrap().contains(&shown));
+        }
+        hide(&["Archive/2025"]);
+        assert_eq!(
+            hidden_ids(&conn, Some(1)).unwrap(),
+            HashSet::from([archived])
+        );
+
+        hide(&["Notes/Ideas", "Notebook"]);
+        rename_tree(&conn, 1, "Notes", "Jottings", "/").unwrap();
+        assert_eq!(hidden_paths(&conn), ["Jottings/Ideas", "Notebook"]);
+        assert_eq!(
+            hidden_ids(&conn, Some(1)).unwrap(),
+            HashSet::from([ideas, notebook])
+        );
+        delete_tree(&conn, 1, "Jottings", "/").unwrap();
+        assert_eq!(hidden_paths(&conn), ["Notebook"]);
     }
 
     #[test]

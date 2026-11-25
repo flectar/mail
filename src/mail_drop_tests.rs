@@ -25,6 +25,7 @@ fn mailbox(scope: Scope, folder_id: i64, label: &str) -> MailboxEntry {
         can_create_children: false,
         can_rename: false,
         can_delete: false,
+        can_hide: false,
         label: label.into(),
         scope: Some(scope),
         context: "Person".into(),

@@ -148,6 +148,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback request-create-label(int, string, int, string);
     callback request-rename-folder(int, string);
     callback request-delete-folder(int, string);
+    callback request-hide-folder(int);
     callback request-empty-trash(int);
     // Mark all as read for a row: its scope and the name it shows (#234).
     callback request-mark-all-read(string, string);
@@ -731,6 +732,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         can-create-child: entry.mailbox.can_create_children;
                         can-rename: entry.mailbox.role == MailboxRole.none && entry.mailbox.can_rename;
                         can-delete: entry.mailbox.role == MailboxRole.none && entry.mailbox.can_delete;
+                        can-hide: entry.mailbox.can_hide;
                         can-empty-trash: entry.mailbox.role == MailboxRole.trash
                             && entry.mailbox.folder_id >= 0;
                         mail-drop-enabled: entry.mailbox.is_selectable
@@ -780,6 +782,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         }
                         rename-folder(folder-id, name) => { root.request-rename-folder(folder-id, name); }
                         delete-folder(folder-id, name) => { root.request-delete-folder(folder-id, name); }
+                        hide-folder(folder-id) => { root.request-hide-folder(folder-id); }
                         empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
 
