@@ -120,7 +120,13 @@ render() {
       + "), y: " + (.y | tostring) + ", height: " + (.height | tostring) + "}"]
     | "[" + join(", ") + "]"
   ' "$data_file")"
-  jq 'del(.email_tiles)' "$data_file" > "$data_file.tmp"
+  # Phone and tablet screenshots show the mobile app, which checks mail by
+  # pulling the list down rather than with a toolbar button.
+  local platform=""
+  [[ "$output_name" == desktop-* ]] || platform="android"
+  jq --arg platform "$platform" \
+    'del(.email_tiles) | if $platform == "" then . else .["AppIcon.platform"] = $platform end' \
+    "$data_file" > "$data_file.tmp"
   mv "$data_file.tmp" "$data_file"
 
   sed \
