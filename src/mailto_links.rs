@@ -261,6 +261,32 @@ fn compose(
     let Some(session) = composers.open_new(app, "") else {
         return false;
     };
+    fill(composers, &session, message, saved_previous)
+}
+
+/// A link clicked in a conversation's window: its message starts in a
+/// composer window of its own, as replies from there do (#254).
+#[cfg(desktop)]
+pub(super) fn open_from_window(app: &AppWindow, uri: &str) {
+    let Some(message) = mailto::parse(uri) else {
+        app.set_render_status(UiMessage::plain("This email link is too long to open."));
+        return;
+    };
+    let Some(composers) = LINKS.with(|links| links.borrow().composers.clone()) else {
+        return;
+    };
+    if let Some(session) = composers.open_new_window(app) {
+        fill(&composers, &session, &message, false);
+    }
+}
+
+/// Write what the link `message` says in the composer of `session`.
+fn fill(
+    composers: &Rc<composer::Composers>,
+    session: &Rc<composer::ComposeSession>,
+    message: &Mailto,
+    saved_previous: bool,
+) -> bool {
     let Some(host) = session.host() else {
         return false;
     };

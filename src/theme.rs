@@ -1,10 +1,10 @@
 //! Runtime helpers for the Slint theme editor.
 
-use crate::{AppWindow, ThemeUtilities};
-use slint::{Color, ComponentHandle};
+use crate::ThemeUtilities;
+use slint::Color;
 
-pub(crate) fn register_theme_utilities(app: &AppWindow) {
-    let utilities = app.global::<ThemeUtilities>();
+/// The color helpers a window's theme editor and label colors use.
+pub(crate) fn register_theme_utilities(utilities: &ThemeUtilities<'_>) {
     utilities.on_color_to_hex(|color| color_to_hex(color).into());
     utilities.on_valid_color(|value| parse_hex_color(value.as_str()).is_some());
     utilities.on_parse_color(|value, fallback| parse_hex_color(value.as_str()).unwrap_or(fallback));

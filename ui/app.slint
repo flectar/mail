@@ -4,7 +4,8 @@ import { MailAttachments } from "models.slint";
 import { ReaderUi } from "reader-ui.slint";
 import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint";
 export { MailAttachments, MailAttachment } from "models.slint";
-export { ReaderUi } from "reader-ui.slint";
+export { ReaderUi, ReaderWindows } from "reader-ui.slint";
+export { ReaderWindow } from "reader-window.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
@@ -101,6 +102,7 @@ export { ThemeDraft } from "components/theme-editor.slint";
 import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
 export { MessageColors } from "message-colors.slint";
+import { MessageColors } from "message-colors.slint";
 export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
 import { FilesView, FilesUi } from "views/files-view.slint";
 import { ContactsView } from "views/contacts-view.slint";
@@ -669,6 +671,7 @@ export global I18n {
         if (key == "Could not save the read receipt preference: {}") { return @tr("Could not save the read receipt preference: {}", argument); }
         if (key == "Could not answer the read receipt request: {}") { return @tr("Could not answer the read receipt request: {}", argument); }
         if (key == "Could not show the message: {}") { return @tr("Could not show the message: {}", argument); }
+        if (key == "Could not load the message: {}") { return @tr("Could not load the message: {}", argument); }
         if (key == "Could not save the translation setting: {}") { return @tr("Could not save the translation setting: {}", argument); }
         if (key == "Could not remove the key: {}") { return @tr("Could not remove the key: {}", argument); }
         if (key == "Could not save the prompts: {}") { return @tr("Could not save the prompts: {}", argument); }
@@ -855,6 +858,7 @@ export global I18n {
         if (key == "Could not open draft: invalid account identifier") { return @tr("Could not open draft: invalid account identifier"); }
         if (key == "Connected account") { return @tr("Connected account"); }
         if (key == "Could not open composer: {}") { return @tr("Could not open composer: {}", argument); }
+        if (key == "Could not open the conversation's window: {}") { return @tr("Could not open the conversation's window: {}", argument); }
         if (key == "Add an account to send mail.") { return @tr("Add an account to send mail."); }
         if (key == "On this device") { return @tr("On this device"); }
         if (key == "Could not open composer: invalid account identifier") { return @tr("Could not open composer: invalid account identifier"); }
@@ -994,7 +998,8 @@ export global I18n {
     }
 }
 
-// Everything a composer window copies from the main window's look.
+// Everything composer and conversation windows copy from the main window's
+// look.
 struct Appearance {
     mode: string,
     preset: string,
@@ -1003,6 +1008,7 @@ struct Appearance {
     motion: bool,
     motion-preference: string,
     motion-reduced: bool,
+    message-colors: string,
     light_primary: color,
     light_page: color,
     light_surface: color,
@@ -1869,13 +1875,14 @@ export component AppWindow inherits Window {
             : ColorScheme.unknown;
     }
 
-    // Composer windows have their own globals and follow this window's
-    // appearance through Rust.
+    // Composer and conversation windows have their own globals and follow
+    // this window's appearance through Rust.
     callback appearance-changed();
     private property <Appearance> appearance: {
         mode: root.theme-mode, preset: AppTheme.preset, icon: AppIcon.variant,
         text-size: root.interface-text-size, motion: MotionSettings.enabled,
         motion-preference: MotionSettings.preference, motion-reduced: MotionSettings.system-reduced,
+        message-colors: MessageColors.preference,
         light_primary: AppTheme.custom-light-primary, light_page: AppTheme.custom-light-page-bg,
         light_surface: AppTheme.custom-light-surface, light_text: AppTheme.custom-light-text,
         light_border: AppTheme.custom-light-border, dark_primary: AppTheme.custom-dark-primary,

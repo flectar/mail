@@ -35,13 +35,22 @@ pub(super) fn install(
             runtime: runtime.clone(),
         }));
     });
-    let ui = app.global::<BlockSender>();
-    ui.on_start(|| with_controller(|controller| controller.start()));
-    ui.on_confirm(|| with_controller(|controller| controller.confirm()));
-    ui.on_close(|| with_controller(|controller| controller.close()));
-    ui.on_unblock(|address| {
+    // Settings' list of blocked addresses.
+    app.global::<BlockSender>().on_unblock(|address| {
         with_controller(|controller| controller.unblock(address.to_string(), false));
     });
+    attach(&ReaderRef::main(app));
+}
+
+/// Block the sender of the message a reader shows, from its menu and dialog.
+pub(super) fn attach(reader: &ReaderRef) {
+    let ui = reader.global::<BlockSender>();
+    let host = reader.host();
+    ui.on_start(move || with_controller(|controller| controller.start(&host)));
+    let host = reader.host();
+    ui.on_confirm(move || with_controller(|controller| controller.confirm(&host)));
+    let host = reader.host();
+    ui.on_close(move || with_controller(|controller| controller.close(&host)));
 }
 
 /// Show the blocked addresses in Settings, once the core is there.
@@ -67,15 +76,15 @@ impl Controller {
 
     /// The menu: ask before blocking the sender of the open message, or
     /// unblock them.
-    fn start(&self) {
-        let Some(app) = self.app.upgrade() else {
+    fn start(&self, host: &ReaderHost) {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let ui = app.global::<BlockSender>();
+        let ui = reader.global::<BlockSender>();
         if !ui.get_stage().is_empty() || !ui.get_available() {
             return;
         }
-        let address = app.global::<ReaderUi>().get_selected_address().to_string();
+        let address = reader.ui().get_selected_address().to_string();
         if ui.get_blocked() {
             self.unblock(address, true);
             return;
@@ -83,12 +92,13 @@ impl Controller {
         let Some(core) = self.core() else {
             return;
         };
-        let name = app.global::<ReaderUi>().get_selected_sender().to_string();
-        self.spawn(
+        let name = reader.ui().get_selected_sender().to_string();
+        self.spawn_for(
+            host,
             async move { core.block_offer(&address).await },
-            move |app, result| match result {
+            move |reader, result| match result {
                 Ok(Some(offer)) => {
-                    let ui = app.global::<BlockSender>();
+                    let ui = reader.global::<BlockSender>();
                     // A sender known only by address is named by it once.
                     let name = if name.eq_ignore_ascii_case(&offer.address) {
                         String::new()
@@ -101,19 +111,20 @@ impl Controller {
                     ui.set_stage("confirm".into());
                 }
                 Ok(None) => {}
-                Err(error) => {
-                    crate::undo::tell(&app, UiMessage::detail("Could not block: {}", error))
-                }
+                Err(error) => crate::undo::tell(
+                    reader.app(),
+                    UiMessage::detail("Could not block: {}", error),
+                ),
             },
         );
     }
 
     /// The dialog's Block button.
-    fn confirm(&self) {
-        let Some(app) = self.app.upgrade() else {
+    fn confirm(&self, host: &ReaderHost) {
+        let Some(reader) = host.upgrade() else {
             return;
         };
-        let ui = app.global::<BlockSender>();
+        let ui = reader.global::<BlockSender>();
         if ui.get_stage() != "confirm" {
             return;
         }
@@ -122,26 +133,28 @@ impl Controller {
         };
         let address = ui.get_address().to_string();
         ui.set_stage("working".into());
-        self.spawn(
+        self.spawn_for(
+            host,
             async move { core.block_sender(&address).await },
-            |app, result| {
-                app.global::<BlockSender>().set_stage("".into());
+            |reader, result| {
+                reader.global::<BlockSender>().set_stage("".into());
                 match result {
                     Ok(blocked) => {
                         with_controller(|controller| controller.changed(&blocked.address, true));
-                        crate::undo::blocked(&app, blocked.address, blocked.action_ids);
+                        crate::undo::blocked(reader.app(), blocked.address, blocked.action_ids);
                     }
-                    Err(error) => {
-                        crate::undo::tell(&app, UiMessage::detail("Could not block: {}", error))
-                    }
+                    Err(error) => crate::undo::tell(
+                        reader.app(),
+                        UiMessage::detail("Could not block: {}", error),
+                    ),
                 }
             },
         );
     }
 
-    fn close(&self) {
-        if let Some(app) = self.app.upgrade() {
-            let ui = app.global::<BlockSender>();
+    fn close(&self, host: &ReaderHost) {
+        if let Some(reader) = host.upgrade() {
+            let ui = reader.global::<BlockSender>();
             if ui.get_stage() != "working" {
                 ui.set_stage("".into());
             }
@@ -173,20 +186,37 @@ impl Controller {
     /// The block list changed: the open message's menu, the loaded rows from
     /// that sender, and Settings follow.
     fn changed(&self, address: &str, blocked: bool) {
-        if let Some(app) = self.app.upgrade()
-            && app
-                .global::<ReaderUi>()
-                .get_selected_address()
-                .eq_ignore_ascii_case(address)
-        {
-            app.global::<BlockSender>().set_blocked(blocked);
+        if let Some(app) = self.app.upgrade() {
+            crate::reader_host::for_each_reader(&app, |reader| {
+                if reader
+                    .ui()
+                    .get_selected_address()
+                    .eq_ignore_ascii_case(address)
+                {
+                    reader.global::<BlockSender>().set_blocked(blocked);
+                }
+            });
         }
-        for message in self.state.borrow_mut().messages.iter_mut() {
-            if message.address.eq_ignore_ascii_case(address) {
+        let from = |message: &MailMessage| message.address.eq_ignore_ascii_case(address);
+        self.mark_blocked(|message| from(message).then_some(blocked));
+        self.refresh_list();
+    }
+
+    /// The loaded rows and the conversations the readers keep follow the
+    /// block list: `blocked` says what a message's sender is now, if it
+    /// changed.
+    fn mark_blocked(&self, blocked: impl Fn(&MailMessage) -> Option<bool>) {
+        let mut mark = |message: &mut MailMessage| {
+            if let Some(blocked) = blocked(message) {
                 message.sender_blocked = blocked;
             }
-        }
-        self.refresh_list();
+        };
+        self.state
+            .borrow_mut()
+            .messages
+            .iter_mut()
+            .for_each(&mut mark);
+        crate::reader_host::each_kept_message(&self.state, &mut mark);
     }
 
     fn reload(&self) {
@@ -201,15 +231,16 @@ impl Controller {
                 };
                 // Kept lowercase, as the list compares them.
                 let blocked = |address: &str| addresses.contains(&address.to_ascii_lowercase());
-                let selected = app.global::<ReaderUi>().get_selected_address();
-                if !selected.is_empty() {
-                    app.global::<BlockSender>()
-                        .set_blocked(blocked(selected.as_str()));
-                }
-                with_controller(|controller| {
-                    for message in controller.state.borrow_mut().messages.iter_mut() {
-                        message.sender_blocked = blocked(&message.address);
+                crate::reader_host::for_each_reader(&app, |reader| {
+                    let selected = reader.ui().get_selected_address();
+                    if !selected.is_empty() {
+                        reader
+                            .global::<BlockSender>()
+                            .set_blocked(blocked(selected.as_str()));
                     }
+                });
+                with_controller(|controller| {
+                    controller.mark_blocked(|message| Some(blocked(&message.address)));
                 });
                 app.global::<BlockSender>()
                     .set_addresses(ModelRc::new(VecModel::from(
@@ -239,6 +270,29 @@ impl Controller {
                 }
             },
         );
+    }
+
+    /// Run `work` on the runtime and `apply` its result to a reader on the
+    /// UI thread, while its window is open.
+    fn spawn_for<T: Send + 'static>(
+        &self,
+        host: &ReaderHost,
+        work: impl Future<Output = Result<T, String>> + Send + 'static,
+        apply: impl FnOnce(ReaderRef, Result<T, String>) + 'static,
+    ) {
+        let host = host.clone();
+        let task = self.runtime.spawn(work);
+        let abort = task.abort_handle();
+        if slint::spawn_local(async move {
+            let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
+            if let Some(reader) = host.upgrade() {
+                apply(reader, result);
+            }
+        })
+        .is_err()
+        {
+            abort.abort();
+        }
     }
 
     /// Run `work` on the runtime and `apply` its result on the UI thread.

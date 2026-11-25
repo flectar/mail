@@ -1,14 +1,14 @@
 //! Where the app's windows were (#254). The main window comes back at the
-//! size and place it had, and maximized again if it was, and a composer
-//! window opens at the size the last one had. Each device keeps its own, in
-//! `windows.json` beside the saved tabs.
+//! size and place it had, and maximized again if it was, and a composer or
+//! conversation window opens at the size the last one of its kind had. Each
+//! device keeps its own, in `windows.json` beside the saved tabs.
 //!
 //! Windows and macOS give the main window its place back once it is still on
 //! a screen, as Microsoft's and Apple's guidance for restoring windows has it.
 //! Linux leaves the place to the window manager: Wayland doesn't let an
 //! application place its windows, and GNOME's guidance is to leave it to the
-//! window manager on X11 as well. The system places composer windows
-//! everywhere. A window closed in full screen comes back maximized, so the app
+//! window manager on X11 as well. The system places composer and
+//! conversation windows everywhere. A window closed in full screen comes back maximized, so the app
 //! never starts covering the whole screen.
 
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,8 @@ const MAXIMIZE_DEADLINE: Duration = Duration::from_secs(10);
 pub(crate) enum Kind {
     Main,
     Composer,
+    /// A conversation's window.
+    Reader,
 }
 
 /// A window's place when it isn't maximized, and whether it was.
@@ -106,6 +108,8 @@ struct Saved {
     main: Option<Place>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     composer: Option<Place>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reader: Option<Place>,
 }
 
 impl Saved {
@@ -113,6 +117,7 @@ impl Saved {
         match kind {
             Kind::Main => self.main,
             Kind::Composer => self.composer,
+            Kind::Reader => self.reader,
         }
     }
 
@@ -120,6 +125,7 @@ impl Saved {
         match kind {
             Kind::Main => &mut self.main,
             Kind::Composer => &mut self.composer,
+            Kind::Reader => &mut self.reader,
         }
     }
 }
@@ -141,6 +147,7 @@ struct Places {
     written: RefCell<Saved>,
     main: Windows,
     composer: Windows,
+    reader: Windows,
     save_timer: Timer,
     writes: Cell<u64>,
     newest_write: Arc<Mutex<u64>>,
@@ -165,6 +172,7 @@ pub(crate) fn install(data_dir: &Path, runtime: &tokio::runtime::Handle) {
         saved: RefCell::new(saved),
         main: Windows::default(),
         composer: Windows::default(),
+        reader: Windows::default(),
         save_timer: Timer::default(),
         writes: Cell::new(0),
         newest_write: Arc::default(),
@@ -290,6 +298,7 @@ impl Places {
         match kind {
             Kind::Main => &self.main,
             Kind::Composer => &self.composer,
+            Kind::Reader => &self.reader,
         }
     }
 
@@ -534,6 +543,12 @@ mod tests {
                 position: None,
                 maximized: false,
             }),
+            reader: Some(Place {
+                width: 900.0,
+                height: 800.0,
+                position: None,
+                maximized: true,
+            }),
         };
         write_file(&path, &saved).unwrap();
         assert_eq!(read_file(&path), Some(saved));
@@ -545,7 +560,7 @@ mod tests {
         // Fields a later version adds don't keep the rest from loading.
         std::fs::write(
             &path,
-            br#"{"main":{"width":1000,"height":700,"maximized":false,"monitor":"DP-1"},"reader":{}}"#,
+            br#"{"main":{"width":1000,"height":700,"maximized":false,"monitor":"DP-1"},"viewer":{}}"#,
         )
         .unwrap();
         assert_eq!(

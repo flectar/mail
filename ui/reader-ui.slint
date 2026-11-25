@@ -52,6 +52,15 @@ export global ReaderUi {
     callback select-email-text();
 }
 
+// Conversations in windows of their own on the desktop (#254).
+export global ReaderWindows {
+    // Whether this window opens them: the main window of a desktop app.
+    in property <bool> available: false;
+    // Opens the list's conversation with this row id in a window of its
+    // own, or brings forward the window that already shows it.
+    callback open(int);
+}
+
 // The reading pane of a window's reader. The window places it, and handles
 // what is done to the message, which differs between the main window and a
 // window of its own.

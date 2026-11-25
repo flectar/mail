@@ -518,7 +518,7 @@ pub(super) fn render_current(
         // "View plain text" is a message action, not a global display mode.
         app.global::<ReaderUi>().set_text_mode(false);
         app.global::<ReaderUi>().set_source_mode(false);
-        crate::message_source::hide(app);
+        crate::message_source::hide(&ReaderRef::main(app));
         app.global::<ReaderUi>().set_rendering_info_open(false);
     }
 
@@ -623,11 +623,14 @@ pub(super) fn render_current(
         .set_selected(selected_email.as_ref().is_some_and(|email| {
             state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
         }));
-    apply_label_rows(app, &labels, selected_email.as_ref());
+    apply_label_rows(&ReaderRef::main(app), &labels, selected_email.as_ref());
     app.set_previous_email_id(previous_email_id);
     app.set_next_email_id(next_email_id);
     state.borrow().queue_warm_start_update();
     schedule_favicon_fetches(app, state, runtime, &visible_domains);
+    // Conversation windows show the labels the list's rows have now.
+    #[cfg(desktop)]
+    crate::reader_window::list_changed();
 
     if let Some(email) = selected_email {
         let email_id = email.id;
@@ -693,7 +696,10 @@ pub(super) fn render_current(
                     email_id
                 });
         }
-        apply_selected_favicon(app, favicon_icons.get(&display_email.domain));
+        apply_selected_favicon(
+            &ReaderRef::main(app),
+            favicon_icons.get(&display_email.domain),
+        );
         let reminder = app.global::<ReminderUi>();
         reminder.set_open_remind_time(
             display_email
@@ -733,7 +739,7 @@ pub(super) fn render_current(
         app.global::<ReaderUi>().set_selected_unread(false);
         app.global::<ReaderUi>()
             .set_selected_sender_verification("".into());
-        apply_selected_favicon(app, None);
+        apply_selected_favicon(&ReaderRef::main(app), None);
         app.global::<ReaderUi>()
             .set_email_tiles(ModelRc::new(VecModel::default()));
         app.global::<ReaderUi>().set_email_scroll_y(0.0);
@@ -742,9 +748,9 @@ pub(super) fn render_current(
         app.global::<ReaderUi>()
             .set_email_links(ModelRc::new(VecModel::default()));
         clear_reader_projection(&ReaderRef::main(app));
-        crate::attachment_controller::clear(app);
-        crate::translation::clear(app);
-        crate::ai_features::clear(app);
+        crate::attachment_controller::clear(&ReaderRef::main(app));
+        crate::translation::clear(&ReaderRef::main(app));
+        crate::ai_features::clear(&ReaderRef::main(app));
         app.global::<EmailReader>().set_message_id(-1);
         app.global::<EmailReader>().set_authored_text("".into());
         app.global::<EmailReader>().set_notice("".into());
@@ -779,12 +785,12 @@ pub(super) fn select_thread_message(
     }
     app.global::<ReaderUi>().set_text_mode(false);
     app.global::<ReaderUi>().set_source_mode(false);
-    crate::message_source::hide(app);
+    crate::message_source::hide(&ReaderRef::main(app));
     app.global::<ReaderUi>().set_rendering_info_open(false);
     render_current(app, state, runtime)
 }
 
-fn make_thread_rows(
+pub(super) fn make_thread_rows(
     messages: &[MailMessage],
     selected_index: usize,
     favicon_icons: &HashMap<String, FaviconImages>,
@@ -819,7 +825,7 @@ fn make_thread_rows(
 }
 
 pub(super) fn apply_label_rows(
-    app: &AppWindow,
+    host: &ReaderRef,
     labels: &[flectar_mail_core::models::Label],
     selected: Option<&MailMessage>,
 ) {
@@ -827,15 +833,13 @@ pub(super) fn apply_label_rows(
     let chip_rows = selected
         .map(|message| applied_label_rows(labels, &message.labels))
         .unwrap_or_default();
-    app.global::<ReaderUi>()
-        .set_selected_mail_label_count(chip_rows.len() as i32);
+    let ui = host.ui();
+    ui.set_selected_mail_label_count(chip_rows.len() as i32);
     // The header strip must only receive rendered chips. Supplying the whole
     // picker catalog and hiding unapplied entries left layout-sized gaps
     // before labels such as "Social".
-    app.global::<ReaderUi>()
-        .set_mail_labels(ModelRc::new(VecModel::from(chip_rows)));
-    app.global::<ReaderUi>()
-        .set_mail_label_results(ModelRc::new(VecModel::from(picker_rows)));
+    ui.set_mail_labels(ModelRc::new(VecModel::from(chip_rows)));
+    ui.set_mail_label_results(ModelRc::new(VecModel::from(picker_rows)));
 }
 
 pub(super) fn make_label_rows(
@@ -1307,10 +1311,10 @@ pub(super) fn slint_image(icon: &FaviconImage) -> Image {
     })
 }
 
-pub(super) fn apply_selected_favicon(app: &AppWindow, icons: Option<&FaviconImages>) {
-    app.global::<ReaderUi>()
-        .set_selected_has_favicon(icons.is_some());
-    app.global::<ReaderUi>().set_selected_favicon(
+pub(super) fn apply_selected_favicon(host: &ReaderRef, icons: Option<&FaviconImages>) {
+    let ui = host.ui();
+    ui.set_selected_has_favicon(icons.is_some());
+    ui.set_selected_favicon(
         icons
             .map(|icons| slint_image(&icons.regular))
             .unwrap_or_default(),
@@ -1433,7 +1437,7 @@ pub(super) fn refresh_rows_only(
         .set_selected(selected_email.as_ref().is_some_and(|email| {
             state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
         }));
-    apply_label_rows(app, &labels, selected_email.as_ref());
+    apply_label_rows(&ReaderRef::main(app), &labels, selected_email.as_ref());
     refresh_sidebar(state);
     let selected_domain = selected_email.as_ref().map(|email| {
         let state = state.borrow();
@@ -1450,7 +1454,7 @@ pub(super) fn refresh_rows_only(
     let selected_icon = selected_domain
         .as_deref()
         .and_then(|domain| favicon_icons.get(domain));
-    apply_selected_favicon(app, selected_icon);
+    apply_selected_favicon(&ReaderRef::main(app), selected_icon);
     let conversation_projection = {
         let state = state.borrow();
         (state.conversation_owner_id == selected_id && !state.conversation_messages.is_empty())
@@ -1474,6 +1478,9 @@ pub(super) fn refresh_rows_only(
         );
     }
     schedule_favicon_fetches(app, state, runtime, &visible_domains);
+    // Conversation windows show the labels the list's rows have now.
+    #[cfg(desktop)]
+    crate::reader_window::list_changed();
 }
 
 /// Rebuilds the mail text the date formats produce, after the language or the
@@ -1948,7 +1955,7 @@ fn is_spam_scope(scope: Scope) -> bool {
     )
 }
 
-fn is_trash_scope(scope: Scope) -> bool {
+pub(super) fn is_trash_scope(scope: Scope) -> bool {
     matches!(
         scope,
         Scope::Unified(StandardMailbox::Trash)

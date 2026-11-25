@@ -97,16 +97,19 @@ pub(super) fn register_renderer_input_callbacks(
             let (Some(host), Some(renderer)) = (reader.upgrade(), renderer.upgrade()) else {
                 return;
             };
-            let colors = crate::message_appearance::EmailAppearance::from_app(host.app());
+            let colors = crate::message_appearance::EmailAppearance::of(&host.colors());
             if renderer.borrow_mut().set_appearance(colors) {
                 repaint_reader(&host, &renderer, gpu);
             }
-            crate::composer::message_colors_changed(host.app());
+            // Quotes in composers follow the main window's colors.
+            if host.key() == ReaderKey::Main {
+                crate::composer::message_colors_changed(host.app());
+            }
         });
     });
     let reader = host.host();
     let r = renderer.clone();
-    host.app().on_open_email_link(move |url| {
+    host.on_open_link(move |url| {
         let Some(host) = reader.upgrade() else {
             return;
         };
@@ -122,7 +125,11 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         }
         if flectar_mail_core::mailto::is_mailto(&url) {
-            crate::mailto_links::open(host.app(), "message", [url.as_str()]);
+            match host.key() {
+                ReaderKey::Main => crate::mailto_links::open(host.app(), "message", [url.as_str()]),
+                #[cfg(desktop)]
+                ReaderKey::Window(_) => crate::mailto_links::open_from_window(host.app(), &url),
+            }
             return;
         }
         if let Err(error) = open_email_link(&opener, &url) {
@@ -150,7 +157,7 @@ pub(super) fn register_renderer_input_callbacks(
                 return;
             };
             if let Some(url) = activation {
-                host.app().invoke_open_email_link(url.into());
+                host.open_link(url.into());
             }
             if kind == "up" || kind == "cancel" {
                 update_email_selection(&host, &r);

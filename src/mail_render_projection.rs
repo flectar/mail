@@ -136,8 +136,8 @@ pub(super) fn clear_reader_projection(host: &ReaderRef) {
     let block = host.block_sender();
     block.set_available(false);
     block.set_blocked(false);
-    crate::invitation::clear(host.app());
-    crate::read_receipts::clear(host.app());
+    crate::invitation::clear(host);
+    crate::read_receipts::clear(host);
     let reader = host.email();
     reader.set_available(false);
     reader.set_body_pending(false);
@@ -253,10 +253,10 @@ pub(super) fn apply_email(
     let block = host.block_sender();
     block.set_available(email.can_block);
     block.set_blocked(email.sender_blocked);
-    crate::invitation::project(host.app(), &email);
-    crate::read_receipts::project(host.app(), &email);
-    crate::translation::project(host.app(), &email);
-    crate::ai_features::project(host.app(), &email);
+    crate::invitation::project(host, &email);
+    crate::read_receipts::project(host, &email);
+    crate::translation::project(host, &email);
+    crate::ai_features::project(host, &email);
     let reader = host.email();
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
@@ -278,7 +278,7 @@ pub(super) fn apply_email(
         reader.set_notice("".into());
         reader.set_destination("".into());
     }
-    crate::attachment_controller::project(host.app(), &email, same_message);
+    crate::attachment_controller::project(host, &email, same_message);
     ui.set_email_scroll_y(scroll);
 
     let preview = display_preview(&email.preview);
@@ -292,9 +292,11 @@ pub(super) fn apply_email(
         .as_deref()
         .or(email.html.as_deref())
         .unwrap_or(&fallback_html);
-    email_renderer.borrow_mut().set_appearance(
-        crate::message_appearance::EmailAppearance::from_app(host.app()),
-    );
+    email_renderer
+        .borrow_mut()
+        .set_appearance(crate::message_appearance::EmailAppearance::of(
+            &host.colors(),
+        ));
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     html.hash(&mut hash);

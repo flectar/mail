@@ -444,6 +444,9 @@ export component MailReadingPane inherits FocusScope {
     in property <bool> has_selected: true;
     in property <int> previous-email-id: -1;
     in property <int> next-email-id: -1;
+    // Previous and next conversation of the list, which a conversation's
+    // window of its own doesn't go through.
+    in property <bool> list-navigation: true;
     in property <bool> selected_starred: false;
     in property <bool> selected_unread: false;
     in property <bool> selected_is_draft: false;
@@ -610,7 +613,8 @@ export component MailReadingPane inherits FocusScope {
         && root.toolbar-room >= 7 * root.toolbar-slot;
     private property <int> compose-button-count: root.selected_is_draft ? 0
         : root.show-all-compose-actions ? 3 : 1;
-    private property <bool> show-navigation: root.toolbar-room >= (10 + root.compose-button-count) * root.toolbar-slot;
+    private property <bool> show-navigation: root.list-navigation
+        && root.toolbar-room >= (10 + root.compose-button-count) * root.toolbar-slot;
     // Compact pages never show navigation or spam, so read is the only
     // secondary action there.
     private property <int> secondary-button-count: (root.compact ? 7 : 8) + root.compose-button-count;

@@ -24,8 +24,8 @@ struct Controller {
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Rc<Controller>>> = const { RefCell::new(None) };
-    /// The message whose card shows, and the card.
-    static SHOWN: RefCell<Option<(i64, InvitationCard)>> = const { RefCell::new(None) };
+    /// The message whose card each reader shows, and the card.
+    static SHOWN: PerReader<(i64, InvitationCard)> = const { PerReader::new() };
 }
 
 fn with_controller(f: impl FnOnce(&Rc<Controller>)) {
@@ -35,8 +35,8 @@ fn with_controller(f: impl FnOnce(&Rc<Controller>)) {
     }
 }
 
-fn shown() -> Option<(i64, InvitationCard)> {
-    SHOWN.with(|shown| shown.borrow().clone())
+fn shown(key: ReaderKey) -> Option<(i64, InvitationCard)> {
+    SHOWN.with(|shown| shown.get(key))
 }
 
 pub(super) fn install(
@@ -53,44 +53,67 @@ pub(super) fn install(
             runtime: runtime.clone(),
         }));
     });
-    let ui = app.global::<Invitation>();
-    ui.on_answer(|response| {
-        with_controller(|controller| controller.answer(response.to_string()));
+    attach(&ReaderRef::main(app));
+}
+
+/// Answer from the card a reader shows.
+pub(super) fn attach(reader: &ReaderRef) {
+    let ui = reader.global::<Invitation>();
+    let host = reader.host();
+    ui.on_answer(move |response| {
+        with_controller(|controller| controller.answer(&host, response.to_string()));
     });
-    ui.on_remove(|| with_controller(|controller| controller.remove()));
-    ui.on_add(|| with_controller(|controller| controller.add()));
-    ui.on_show_in_calendar(|| with_controller(|controller| controller.show_in_calendar()));
-    let weak = app.as_weak();
+    let host = reader.host();
+    ui.on_remove(move || with_controller(|controller| controller.remove(&host)));
+    let host = reader.host();
+    ui.on_add(move || with_controller(|controller| controller.add(&host)));
+    let host = reader.host();
+    ui.on_show_in_calendar(move || {
+        with_controller(|controller| controller.show_in_calendar(&host));
+    });
+    let host = reader.host();
     ui.on_open_link(move |url| {
-        if let Some(app) = weak.upgrade() {
-            app.invoke_open_email_link(url);
+        if let Some(reader) = host.upgrade() {
+            reader.open_link(url);
         }
     });
 }
 
 /// Show the card of the message the reader shows, or take it away.
-pub(super) fn project(app: &AppWindow, email: &MailMessage) {
+pub(super) fn project(reader: &ReaderRef, email: &MailMessage) {
     let message_id = i64::from(email.id);
     match &email.invitation {
         Some(card) => {
-            SHOWN.with(|shown| *shown.borrow_mut() = Some((message_id, card.clone())));
-            apply(app, card);
+            SHOWN.with(|shown| shown.set(reader.key(), (message_id, card.clone())));
+            apply(reader, card);
         }
-        None => clear(app),
+        None => clear(reader),
     }
 }
 
 /// The reader shows no message.
-pub(super) fn clear(app: &AppWindow) {
-    SHOWN.with(|shown| *shown.borrow_mut() = None);
-    let ui = app.global::<Invitation>();
+pub(super) fn clear(reader: &ReaderRef) {
+    SHOWN.with(|shown| shown.remove(reader.key()));
+    let ui = reader.global::<Invitation>();
     ui.set_available(false);
     ui.set_working(false);
 }
 
-/// The calendar changed: the card shown follows it.
+/// A reader's window closed.
+#[cfg(desktop)]
+pub(super) fn forget(key: ReaderKey) {
+    SHOWN.with(|shown| shown.remove(key));
+}
+
+/// The calendar changed: the cards shown follow it.
 pub(super) fn refresh() {
-    with_controller(|controller| controller.reload());
+    with_controller(|controller| {
+        for key in SHOWN.with(PerReader::keys) {
+            if let Some(host) = key.host(&controller.app) {
+                controller.reload(&host);
+            }
+        }
+    });
 }
 
 impl Controller {
@@ -99,13 +122,13 @@ impl Controller {
     }
 
     /// Accept, Maybe or Decline.
-    fn answer(&self, response: String) {
-        let (Some(app), Some((message_id, card)), Some(core)) =
-            (self.app.upgrade(), shown(), self.core())
+    fn answer(&self, host: &ReaderHost, response: String) {
+        let (Some(reader), Some((message_id, card)), Some(core)) =
+            (host.upgrade(), shown(host.key()), self.core())
         else {
             return;
         };
-        let ui = app.global::<Invitation>();
+        let ui = reader.global::<Invitation>();
         if !ui.get_answerable() || ui.get_working() {
             return;
         }
@@ -114,54 +137,60 @@ impl Controller {
         // not in the calendar yet joins it with the answer.
         let occurrence = card.recurrence_id;
         self.spawn(
+            host,
             async move {
                 core.answer_invitation(message_id, &response, occurrence)
                     .await
             },
-            |app, result| {
+            |reader, result| {
                 if let Err(error) = result {
-                    app.global::<Invitation>().set_working(false);
-                    crate::undo::tell(&app, UiMessage::detail("Could not answer: {}", error));
+                    reader.global::<Invitation>().set_working(false);
+                    crate::undo::tell(
+                        reader.app(),
+                        UiMessage::detail("Could not answer: {}", error),
+                    );
                 }
-                with_controller(|controller| controller.reload());
+                with_controller(|controller| controller.reload(&reader.host()));
             },
         );
     }
 
     /// Add an event only shared with the user to their calendar.
-    fn add(&self) {
-        let (Some(app), Some((message_id, _)), Some(core)) =
-            (self.app.upgrade(), shown(), self.core())
+    fn add(&self, host: &ReaderHost) {
+        let (Some(reader), Some((message_id, _)), Some(core)) =
+            (host.upgrade(), shown(host.key()), self.core())
         else {
             return;
         };
-        let ui = app.global::<Invitation>();
+        let ui = reader.global::<Invitation>();
         if !ui.get_addable() || ui.get_working() {
             return;
         }
         ui.set_working(true);
         self.spawn(
+            host,
             async move { core.add_invitation(message_id).await },
-            |app, result| {
+            |reader, result| {
                 if let Err(error) = result {
-                    app.global::<Invitation>().set_working(false);
+                    reader.global::<Invitation>().set_working(false);
                     crate::undo::tell(
-                        &app,
+                        reader.app(),
                         UiMessage::detail("Could not add the event: {}", error),
                     );
                 }
-                with_controller(|controller| controller.reload());
+                with_controller(|controller| controller.reload(&reader.host()));
             },
         );
     }
 
     /// Take the cancelled event out of the calendar.
-    fn remove(&self) {
-        let (Some(app), Some((_, card)), Some(core)) = (self.app.upgrade(), shown(), self.core())
+    fn remove(&self, host: &ReaderHost) {
+        let (Some(reader), Some((_, card)), Some(core)) =
+            (host.upgrade(), shown(host.key()), self.core())
         else {
             return;
         };
-        let ui = app.global::<Invitation>();
+        let ui = reader.global::<Invitation>();
         let Some(event_id) = card.event_id.filter(|_| ui.get_removable()) else {
             return;
         };
@@ -170,23 +199,24 @@ impl Controller {
         }
         ui.set_working(true);
         self.spawn(
+            host,
             async move { core.delete_event(event_id).await },
-            |app, result| {
+            |reader, result| {
                 if let Err(error) = result {
-                    app.global::<Invitation>().set_working(false);
+                    reader.global::<Invitation>().set_working(false);
                     crate::undo::tell(
-                        &app,
+                        reader.app(),
                         UiMessage::detail("Could not remove the event: {}", error),
                     );
                 }
-                with_controller(|controller| controller.reload());
+                with_controller(|controller| controller.reload(&reader.host()));
             },
         );
     }
 
-    /// Open the calendar on the event, with its details.
-    fn show_in_calendar(&self) {
-        let (Some(app), Some((_, card))) = (self.app.upgrade(), shown()) else {
+    /// Open the calendar on the event, with its details, in the main window.
+    fn show_in_calendar(&self, host: &ReaderHost) {
+        let (Some(reader), Some((_, card))) = (host.upgrade(), shown(host.key())) else {
             return;
         };
         let Some(event_id) = card.event_id else {
@@ -199,58 +229,63 @@ impl Controller {
             calendar.visible_month = crate::calendar::first_of_month(date);
             calendar.reveal = Some(event_id);
         }
-        app.set_active_view("calendar".into());
+        reader.app().set_active_view("calendar".into());
+        reader.raise_main();
     }
 
-    /// Read the shown card again, and keep it with its message.
-    fn reload(&self) {
-        let (Some((message_id, _)), Some(core)) = (shown(), self.core()) else {
+    /// Read the card a reader shows again, and keep it with its message.
+    fn reload(&self, host: &ReaderHost) {
+        let key = host.key();
+        let (Some((message_id, _)), Some(core)) = (shown(key), self.core()) else {
             return;
         };
         let state = Rc::clone(&self.state);
         self.spawn(
+            host,
             async move { Ok::<_, String>(core.invitation_card(message_id).await) },
-            move |app, result| {
+            move |reader, result| {
                 let Ok(card) = result else {
                     return;
                 };
                 // Kept with the message, a later projection shows it too.
-                if let Some(message) = state
-                    .borrow_mut()
-                    .conversation_messages
-                    .iter_mut()
-                    .find(|message| i64::from(message.id) == message_id)
-                {
-                    message.invitation = card.clone();
-                }
+                crate::reader_host::with_messages(&state, key, |messages| {
+                    if let Some(message) = messages
+                        .iter_mut()
+                        .find(|message| i64::from(message.id) == message_id)
+                    {
+                        message.invitation = card.clone();
+                    }
+                });
                 // The reader may show another message by now.
-                if shown().is_none_or(|(shown_id, _)| shown_id != message_id) {
+                if shown(key).is_none_or(|(shown_id, _)| shown_id != message_id) {
                     return;
                 }
                 match card {
                     Some(card) => {
-                        SHOWN.with(|shown| *shown.borrow_mut() = Some((message_id, card.clone())));
-                        apply(&app, &card);
+                        SHOWN.with(|shown| shown.set(key, (message_id, card.clone())));
+                        apply(&reader, &card);
                     }
-                    None => clear(&app),
+                    None => clear(&reader),
                 }
             },
         );
     }
 
-    /// Run `work` on the runtime and `apply` its result on the UI thread.
+    /// Run `work` on the runtime and `apply` its result to the reader on the
+    /// UI thread, while its window is open.
     fn spawn<T: Send + 'static>(
         &self,
+        host: &ReaderHost,
         work: impl Future<Output = Result<T, String>> + Send + 'static,
-        apply: impl FnOnce(AppWindow, Result<T, String>) + 'static,
+        apply: impl FnOnce(ReaderRef, Result<T, String>) + 'static,
     ) {
-        let weak = self.app.clone();
+        let host = host.clone();
         let task = self.runtime.spawn(work);
         let abort = task.abort_handle();
         if slint::spawn_local(async move {
             let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
-            if let Some(app) = weak.upgrade() {
-                apply(app, result);
+            if let Some(reader) = host.upgrade() {
+                apply(reader, result);
             }
         })
         .is_err()
@@ -356,8 +391,9 @@ fn web_link(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "https" | "http"))
 }
 
-fn apply(app: &AppWindow, card: &InvitationCard) {
-    let ui = app.global::<Invitation>();
+fn apply(reader: &ReaderRef, card: &InvitationCard) {
+    let app = reader.app();
+    let ui = reader.global::<Invitation>();
     let formats = date_format::current();
     let when = when(app, &formats, card);
     let tile = (card.starts_at != 0)
@@ -470,7 +506,7 @@ fn apply(app: &AppWindow, card: &InvitationCard) {
     ui.set_occurrence(card.occurrence);
     // Local mail has no account to answer from. An invitation that isn't
     // in the calendar yet joins it when answered.
-    let local_mail = app.global::<LocalMailUi>().get_selected();
+    let local_mail = reader.global::<LocalMailUi>().get_selected();
     let answerable = card.kind == InvitationKind::Request
         && !card.organized
         && !card.cancelled

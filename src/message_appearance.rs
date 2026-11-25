@@ -48,7 +48,11 @@ impl Default for EmailAppearance {
 impl EmailAppearance {
     pub fn from_app(app: &crate::AppWindow) -> Self {
         use slint::ComponentHandle;
-        let colors = app.global::<crate::MessageColors>();
+        Self::of(&app.global::<crate::MessageColors>())
+    }
+
+    /// The colors a reader's window shows messages in.
+    pub fn of(colors: &crate::MessageColors<'_>) -> Self {
         let convert = |value: slint::Color| {
             Color::from_rgba8(value.red(), value.green(), value.blue(), value.alpha())
         };

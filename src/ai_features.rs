@@ -34,15 +34,50 @@ thread_local! {
     /// The models a server offered, in the order Settings lists them, and
     /// that server's address.
     static MODELS: RefCell<(String, Vec<String>)> = const { RefCell::new((String::new(), Vec::new())) };
+    /// Each reader's card.
+    static CARDS: PerReader<Card> = const { PerReader::new() };
+    /// Counts what the cards asked for, to tell an answer from those asked
+    /// for before.
+    static GENERATION: Cell<u64> = const { Cell::new(0) };
+}
+
+/// What a reader's card is about.
+#[derive(Clone, Default)]
+struct Card {
     /// The conversation the reader shows, and what tells it from others: its
     /// thread, or the message when it has none.
-    static SHOWN_THREAD: Cell<Option<i64>> = const { Cell::new(None) };
-    static SHOWN_KEY: Cell<Option<i64>> = const { Cell::new(None) };
-    /// The conversation the card is for, what it asked, and a count that
-    /// tells its answer from those it asked for before.
-    static CARD_KEY: Cell<Option<i64>> = const { Cell::new(None) };
-    static CARD_REQUEST: RefCell<Option<Request>> = const { RefCell::new(None) };
-    static CARD_GENERATION: Cell<u64> = const { Cell::new(0) };
+    shown_thread: Option<i64>,
+    shown_key: Option<i64>,
+    /// The conversation the card is for, what it asked, and which of the
+    /// cards' questions that was.
+    key: Option<i64>,
+    request: Option<Request>,
+    generation: u64,
+}
+
+fn card(key: ReaderKey) -> Card {
+    CARDS.with(|cards| cards.get(key)).unwrap_or_default()
+}
+
+fn update_card(key: ReaderKey, change: impl FnOnce(&mut Card)) {
+    let mut card = card(key);
+    change(&mut card);
+    CARDS.with(|cards| cards.set(key, card));
+}
+
+fn next_generation() -> u64 {
+    let generation = GENERATION.get() + 1;
+    GENERATION.set(generation);
+    generation
+}
+
+/// The reader `key`, while its window is open.
+fn reader_of(key: ReaderKey) -> Option<ReaderRef> {
+    ENV.with_borrow(|env| {
+        env.as_ref()
+            .and_then(|env| key.host(&env.app))
+            .and_then(|host| host.upgrade())
+    })
 }
 
 fn core(state: &Rc<RefCell<InboxState>>) -> Option<Arc<Core>> {
@@ -160,34 +195,48 @@ pub(super) fn instruction(index: i32) -> Option<String> {
 // ---- The card above the conversation ---------------------------------------
 
 /// The reader shows `message`: a card for another conversation goes.
-pub(super) fn project(app: &AppWindow, message: &MailMessage) {
-    let key = message.thread_id.unwrap_or(-i64::from(message.id));
-    SHOWN_THREAD.set(message.thread_id);
-    SHOWN_KEY.set(Some(key));
-    if CARD_KEY.get().is_some_and(|card| card != key) {
-        close_card(app);
+pub(super) fn project(reader: &ReaderRef, message: &MailMessage) {
+    let shown = message.thread_id.unwrap_or(-i64::from(message.id));
+    let mut stale = false;
+    update_card(reader.key(), |card| {
+        card.shown_thread = message.thread_id;
+        card.shown_key = Some(shown);
+        stale = card.key.is_some_and(|key| key != shown);
+    });
+    if stale {
+        close_card(reader);
     }
 }
 
 /// No message is shown.
-pub(super) fn clear(app: &AppWindow) {
-    SHOWN_THREAD.set(None);
-    SHOWN_KEY.set(None);
-    close_card(app);
+pub(super) fn clear(reader: &ReaderRef) {
+    update_card(reader.key(), |card| {
+        card.shown_thread = None;
+        card.shown_key = None;
+    });
+    close_card(reader);
 }
 
-fn close_card(app: &AppWindow) {
-    CARD_GENERATION.set(CARD_GENERATION.get() + 1);
-    CARD_KEY.set(None);
-    CARD_REQUEST.set(None);
-    let ui = app.global::<AiSummary>();
+/// A reader's window closed.
+#[cfg(desktop)]
+pub(super) fn forget(key: ReaderKey) {
+    CARDS.with(|cards| cards.remove(key));
+}
+
+fn close_card(reader: &ReaderRef) {
+    update_card(reader.key(), |card| {
+        card.generation = next_generation();
+        card.key = None;
+        card.request = None;
+    });
+    let ui = reader.global::<AiSummary>();
     ui.set_state("".into());
     ui.set_replies_state("".into());
     ui.set_replies(ModelRc::default());
 }
 
-fn card_failed(app: &AppWindow, error: &CoreError) {
-    let ui = app.global::<AiSummary>();
+fn card_failed(reader: &ReaderRef, error: &CoreError) {
+    let ui = reader.global::<AiSummary>();
     let (kind, detail) = match error {
         CoreError::AiNotConfigured => ("not-set-up", String::new()),
         other => failure(other),
@@ -196,13 +245,23 @@ fn card_failed(app: &AppWindow, error: &CoreError) {
     ui.set_detail(detail.into());
 }
 
+/// The reader `key` while it still waits for the answer to `generation`.
+fn waiting(key: ReaderKey, generation: u64) -> Option<ReaderRef> {
+    (card(key).generation == generation)
+        .then(|| reader_of(key))
+        .flatten()
+}
+
 /// Asks the server for `request`, in the card, in place of what it showed.
-fn ask_server(app: &AppWindow, request: Request) {
-    let generation = CARD_GENERATION.get() + 1;
-    CARD_GENERATION.set(generation);
-    CARD_KEY.set(SHOWN_KEY.get());
-    CARD_REQUEST.set(Some(request.clone()));
-    let ui = app.global::<AiSummary>();
+fn ask_server(reader: &ReaderRef, request: Request) {
+    let key = reader.key();
+    let generation = next_generation();
+    update_card(key, |card| {
+        card.generation = generation;
+        card.key = card.shown_key;
+        card.request = Some(request.clone());
+    });
+    let ui = reader.global::<AiSummary>();
     ui.set_mode(match request {
         Request::Summary(_) => "summary".into(),
         Request::Answer { .. } => "answer".into(),
@@ -211,15 +270,14 @@ fn ask_server(app: &AppWindow, request: Request) {
     ui.set_replies_state("".into());
     ui.set_replies(ModelRc::default());
     ui.set_unverified(ModelRc::default());
-    let current = move || CARD_GENERATION.get() == generation;
     match request {
         Request::Summary(thread_id) => with_core(
             move |core| Box::pin(async move { core.ai_summarize(thread_id).await }),
-            move |app, result| {
-                if !current() {
+            move |_, result| {
+                let Some(reader) = waiting(key, generation) else {
                     return;
-                }
-                let ui = app.global::<AiSummary>();
+                };
+                let ui = reader.global::<AiSummary>();
                 match result {
                     Ok(summary) => {
                         ui.set_key_points(strings(&summary.key_points));
@@ -231,7 +289,7 @@ fn ask_server(app: &AppWindow, request: Request) {
                         ui.set_state("shown".into());
                     }
                     Err(error) => {
-                        card_failed(app, &error);
+                        card_failed(&reader, &error);
                         ui.set_state("failed".into());
                     }
                 }
@@ -239,11 +297,11 @@ fn ask_server(app: &AppWindow, request: Request) {
         ),
         Request::Answer { instruction, text } => with_core(
             move |core| Box::pin(async move { core.ai_answer(text, instruction).await }),
-            move |app, result| {
-                if !current() {
+            move |_, result| {
+                let Some(reader) = waiting(key, generation) else {
                     return;
-                }
-                let ui = app.global::<AiSummary>();
+                };
+                let ui = reader.global::<AiSummary>();
                 match result {
                     Ok(answer) => {
                         ui.set_answer(answer.text.into());
@@ -251,7 +309,7 @@ fn ask_server(app: &AppWindow, request: Request) {
                         ui.set_state("shown".into());
                     }
                     Err(error) => {
-                        card_failed(app, &error);
+                        card_failed(&reader, &error);
                         ui.set_state("failed".into());
                     }
                 }
@@ -260,15 +318,15 @@ fn ask_server(app: &AppWindow, request: Request) {
     }
 }
 
-fn summarize(app: &AppWindow) {
-    if let Some(thread_id) = SHOWN_THREAD.get() {
-        ask_server(app, Request::Summary(thread_id));
+fn summarize(reader: &ReaderRef) {
+    if let Some(thread_id) = card(reader.key()).shown_thread {
+        ask_server(reader, Request::Summary(thread_id));
     }
 }
 
 /// Runs Explain, -1, or the user's prompt `index` on `text` the user selected
 /// in a message.
-fn ask(app: &AppWindow, index: i32, text: &str) {
+fn ask(reader: &ReaderRef, index: i32, text: &str) {
     let text = text.trim();
     let instruction = if index < 0 {
         Some(flectar_mail_core::ai::EXPLAIN.to_owned())
@@ -277,42 +335,88 @@ fn ask(app: &AppWindow, index: i32, text: &str) {
     };
     if let Some(instruction) = instruction.filter(|_| !text.is_empty()) {
         let text = text.to_owned();
-        ask_server(app, Request::Answer { instruction, text });
+        ask_server(reader, Request::Answer { instruction, text });
     }
 }
 
-fn retry(app: &AppWindow) {
-    if let Some(request) = CARD_REQUEST.with_borrow(Clone::clone) {
-        ask_server(app, request);
+fn retry(reader: &ReaderRef) {
+    if let Some(request) = card(reader.key()).request {
+        ask_server(reader, request);
     }
 }
 
-fn suggest_replies(app: &AppWindow) {
-    let Some(Request::Summary(thread_id)) = CARD_REQUEST.with_borrow(Clone::clone) else {
+fn suggest_replies(reader: &ReaderRef) {
+    let key = reader.key();
+    let card = card(key);
+    let Some(Request::Summary(thread_id)) = card.request else {
         return;
     };
-    let generation = CARD_GENERATION.get();
-    app.global::<AiSummary>()
+    let generation = card.generation;
+    reader
+        .global::<AiSummary>()
         .set_replies_state("loading".into());
     with_core(
         move |core| Box::pin(async move { core.ai_quick_replies(thread_id).await }),
-        move |app, result| {
-            if CARD_GENERATION.get() != generation {
+        move |_, result| {
+            let Some(reader) = waiting(key, generation) else {
                 return;
-            }
-            let ui = app.global::<AiSummary>();
+            };
+            let ui = reader.global::<AiSummary>();
             match result {
                 Ok(replies) => {
                     ui.set_replies(strings(&replies));
                     ui.set_replies_state("shown".into());
                 }
                 Err(error) => {
-                    card_failed(app, &error);
+                    card_failed(&reader, &error);
                     ui.set_replies_state("failed".into());
                 }
             }
         },
     );
+}
+
+/// The card's actions in a reader, and the prompts its selection menu lists.
+pub(super) fn attach(reader: &ReaderRef) {
+    let card = reader.global::<AiSummary>();
+    card.set_prompts(prompt_names());
+    let host = reader.host();
+    card.on_summarize(move || {
+        if let Some(reader) = host.upgrade() {
+            summarize(&reader);
+        }
+    });
+    let host = reader.host();
+    card.on_ask(move |index, text| {
+        if let Some(reader) = host.upgrade() {
+            ask(&reader, index, &text);
+        }
+    });
+    let host = reader.host();
+    card.on_retry(move || {
+        if let Some(reader) = host.upgrade() {
+            retry(&reader);
+        }
+    });
+    let host = reader.host();
+    card.on_close(move || {
+        if let Some(reader) = host.upgrade() {
+            close_card(&reader);
+        }
+    });
+    let host = reader.host();
+    card.on_suggest_replies(move || {
+        if let Some(reader) = host.upgrade() {
+            suggest_replies(&reader);
+        }
+    });
+    let host = reader.host();
+    card.on_open_settings(move || {
+        if let Some(reader) = host.upgrade() {
+            open_settings(reader.app());
+            reader.raise_main();
+        }
+    });
 }
 
 // ---- Settings → AI ---------------------------------------------------------
@@ -342,7 +446,9 @@ fn project_prompts(app: &AppWindow, prompts: &[AiPrompt]) {
 /// The saved settings changed: the reader's and composers' menus follow.
 fn settings_changed(app: &AppWindow, settings: AiSettings) {
     SETTINGS.set(settings);
-    app.global::<AiSummary>().set_prompts(prompt_names());
+    crate::reader_host::for_each_reader(app, |reader| {
+        reader.global::<AiSummary>().set_prompts(prompt_names());
+    });
     crate::composer::services_changed();
 }
 
@@ -592,41 +698,5 @@ pub(super) fn install(
         }
     });
 
-    let card = app.global::<AiSummary>();
-    let weak = app.as_weak();
-    card.on_summarize(move || {
-        if let Some(app) = weak.upgrade() {
-            summarize(&app);
-        }
-    });
-    let weak = app.as_weak();
-    card.on_ask(move |index, text| {
-        if let Some(app) = weak.upgrade() {
-            ask(&app, index, &text);
-        }
-    });
-    let weak = app.as_weak();
-    card.on_retry(move || {
-        if let Some(app) = weak.upgrade() {
-            retry(&app);
-        }
-    });
-    let weak = app.as_weak();
-    card.on_close(move || {
-        if let Some(app) = weak.upgrade() {
-            close_card(&app);
-        }
-    });
-    let weak = app.as_weak();
-    card.on_suggest_replies(move || {
-        if let Some(app) = weak.upgrade() {
-            suggest_replies(&app);
-        }
-    });
-    let weak = app.as_weak();
-    card.on_open_settings(move || {
-        if let Some(app) = weak.upgrade() {
-            open_settings(&app);
-        }
-    });
+    attach(&ReaderRef::main(app));
 }

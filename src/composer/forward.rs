@@ -5,9 +5,9 @@ use super::*;
 use flectar_mail_core::models::{ActionTarget, ForwardedMessage};
 
 impl Composers {
-    /// Forward the message the reader shows as an attachment.
-    pub(super) fn forward_shown_as_attachment(self: &Rc<Self>, app: &AppWindow) {
-        let (row, shown) = self.shown_message();
+    /// Forward the message `reader` shows as an attachment.
+    pub(super) fn forward_shown_as_attachment(self: &Rc<Self>, app: &AppWindow, reader: ReaderKey) {
+        let (row, shown) = self.shown_message(reader);
         let (target, latest) = match (shown, row) {
             (Some(id), _) => (ActionTarget::Messages(vec![id]), false),
             (None, Some(row)) => match (row.message_id, row.thread_id) {
@@ -30,7 +30,7 @@ impl Composers {
         if latest {
             messages.drain(..messages.len().saturating_sub(1));
         }
-        self.forward_messages(app, messages);
+        self.forward_messages(app, messages, reader);
     }
 
     /// Forward the messages of `targets` as attachments of a new message.
@@ -40,7 +40,7 @@ impl Composers {
         targets: Vec<ActionTarget>,
     ) {
         if let Some(messages) = self.forwarded_messages(app, targets) {
-            self.forward_messages(app, messages);
+            self.forward_messages(app, messages, ReaderKey::Main);
         }
     }
 
@@ -72,7 +72,12 @@ impl Composers {
 
     /// Open a new message with `messages` as its attachments, which opens at once: their
     /// originals reach it as they're fetched.
-    fn forward_messages(self: &Rc<Self>, app: &AppWindow, messages: Vec<ForwardedMessage>) {
+    fn forward_messages(
+        self: &Rc<Self>,
+        app: &AppWindow,
+        messages: Vec<ForwardedMessage>,
+        reader: ReaderKey,
+    ) {
         let Some(core) = self.core() else {
             return;
         };
@@ -100,7 +105,7 @@ impl Composers {
             return;
         };
         let subject = crate::compose_controller::prefixed_subject(&first.subject, "Fwd");
-        let Some(session) = self.start(app) else {
+        let Some(session) = self.start_for(app, reader) else {
             return;
         };
         let Some(host) = session.host() else {
@@ -133,24 +138,27 @@ impl Composers {
         session.attach_forwarded(&core, messages, &fallback);
     }
 
-    /// The message row the reader shows, and the message of its conversation it shows when the
+    /// The message row `reader` shows, and the message of its conversation it shows when the
     /// row is a conversation.
-    pub(super) fn shown_message(&self) -> (Option<MailMessage>, Option<i64>) {
-        let state = self.state.borrow();
-        let row = state
-            .selected_id
-            .and_then(|id| state.messages.iter().find(|message| message.id == id))
-            .cloned();
-        let shown = row.as_ref().and_then(|row| {
-            (state.conversation_owner_id == Some(row.id))
-                .then(|| {
-                    state
-                        .conversation_messages
-                        .get(state.conversation_selected_index)
-                        .map(|message| i64::from(message.id))
+    pub(super) fn shown_message(&self, reader: ReaderKey) -> (Option<MailMessage>, Option<i64>) {
+        let row = crate::reader_host::row(&self.state, reader);
+        let shown = match reader {
+            ReaderKey::Main => {
+                let state = self.state.borrow();
+                row.as_ref().and_then(|row| {
+                    (state.conversation_owner_id == Some(row.id))
+                        .then(|| {
+                            state
+                                .conversation_messages
+                                .get(state.conversation_selected_index)
+                                .map(|message| i64::from(message.id))
+                        })
+                        .flatten()
                 })
-                .flatten()
-        });
+            }
+            #[cfg(desktop)]
+            ReaderKey::Window(id) => crate::reader_window::shown_conversation_message(id),
+        };
         (row, shown)
     }
 }
