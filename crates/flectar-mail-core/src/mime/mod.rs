@@ -1644,45 +1644,91 @@ pub fn body_text<'a>(
         })
 }
 
-/// `src="cid:<id>"` / `src='cid:<id>'` in a body (id in group 2 or 3).
-static CID_SRC: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r#"(?i)src\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)')"#).unwrap());
+/// A `cid:` reference to an inline image in a body: an image's `src` or a
+/// `background` attribute (the attribute's name in group 1, the Content-ID
+/// in group 2 or 3), or a CSS `url()` (the Content-ID in groups 4 to 7), as
+/// in a style sheet or a `style` attribute, where serialized HTML writes a
+/// double quote as `&quot;`.
+static CID_REFERENCE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(
+        r#"(?i)(src|background)\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)')|url\(\s*(?:"cid:([^"]+)"|'cid:([^']+)'|&quot;cid:([^&]+)&quot;|cid:([^)\s"']+))"#,
+    )
+    .unwrap()
+});
+
+/// A `cid:` reference in a body: its Content-ID, and the range of the body
+/// that the image's URL replaces, with the text written before and after
+/// the URL. An attribute's whole value is replaced, quotes included.
+struct CidReference<'h> {
+    id: &'h str,
+    range: std::ops::Range<usize>,
+    before: &'static str,
+    after: &'static str,
+}
+
+fn cid_references(html: &str) -> impl Iterator<Item = CidReference<'_>> {
+    CID_REFERENCE.captures_iter(html).filter_map(|caps| {
+        if let Some(name) = caps.get(1) {
+            let id = caps.get(2).or_else(|| caps.get(3))?;
+            let before = if name.as_str().eq_ignore_ascii_case("src") {
+                "src=\""
+            } else {
+                "background=\""
+            };
+            Some(CidReference {
+                id: id.as_str(),
+                range: caps.get(0)?.range(),
+                before,
+                after: "\"",
+            })
+        } else {
+            let id = (4..=7).find_map(|group| caps.get(group))?;
+            Some(CidReference {
+                id: id.as_str(),
+                range: id.start() - "cid:".len()..id.end(),
+                before: "",
+                after: "",
+            })
+        }
+    })
+}
 
 /// Normalize a Content-ID / `cid:` reference for matching (drop `<>` + spaces).
 pub fn normalize_cid(id: &str) -> String {
     id.trim().trim_matches(|c| c == '<' || c == '>').to_string()
 }
 
-/// Normalized Content-IDs that are actually referenced by image sources.
-/// Callers use this before loading attachment blobs so unrelated inline parts
-/// never consume I/O or memory merely because they share the message.
+/// Normalized Content-IDs that are actually referenced by image sources and
+/// backgrounds. Callers use this before loading attachment blobs so unrelated
+/// inline parts never consume I/O or memory merely because they share the
+/// message.
 pub fn referenced_cids(html: &str) -> std::collections::HashSet<String> {
-    CID_SRC
-        .captures_iter(html)
-        .filter_map(|captures| captures.get(1).or_else(|| captures.get(2)))
-        .map(|value| normalize_cid(value.as_str()))
+    cid_references(html)
+        .map(|reference| normalize_cid(reference.id))
         .collect()
 }
 
-/// Rewrite inline `src="cid:<id>"` references to `data:` URIs using `map`
-/// (keyed by [`normalize_cid`]). Unknown cids are left untouched - the browser
-/// still can't fetch them, but nothing else is changed.
-pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, String>) -> String {
-    let data_for = |caps: &regex::Captures| {
-        let cid = caps.get(1).or_else(|| caps.get(2))?.as_str();
-        map.get(cid.trim().trim_matches(|c| c == '<' || c == '>'))
+/// Replace each `cid:` reference that `image` finds an image for with the
+/// image's URL, which is `url_len` bytes long and which `write_url` writes.
+fn rewrite_cid_references<V>(
+    html: &str,
+    image: impl Fn(&str) -> Option<V>,
+    url_len: impl Fn(&V) -> usize,
+    write_url: impl Fn(&mut String, &V),
+) -> String {
+    let image_for = |reference: &CidReference| {
+        image(reference.id.trim().trim_matches(|c| c == '<' || c == '>'))
     };
     let mut capacity = html.len();
     let mut found = false;
-    for caps in CID_SRC.captures_iter(html) {
-        let Some(data_uri) = data_for(&caps) else {
+    for reference in cid_references(html) {
+        let Some(image) = image_for(&reference) else {
             continue;
         };
         found = true;
         capacity = capacity
-            .checked_add("src=\"\"".len())
-            .and_then(|size| size.checked_add(data_uri.len()))
-            .and_then(|size| size.checked_sub(caps.get(0).unwrap().len()))
+            .checked_add(reference.before.len() + url_len(&image) + reference.after.len())
+            .and_then(|size| size.checked_sub(reference.range.len()))
             .expect("rewritten CID HTML length overflow");
     }
     if !found {
@@ -1690,20 +1736,30 @@ pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, Strin
     }
     let mut rewritten = String::with_capacity(capacity);
     let mut offset = 0;
-    for caps in CID_SRC.captures_iter(html) {
-        let whole = caps.get(0).unwrap();
-        rewritten.push_str(&html[offset..whole.start()]);
-        if let Some(data_uri) = data_for(&caps) {
-            rewritten.push_str("src=\"");
-            rewritten.push_str(data_uri);
-            rewritten.push('"');
-        } else {
-            rewritten.push_str(whole.as_str());
-        }
-        offset = whole.end();
+    for reference in cid_references(html) {
+        let Some(image) = image_for(&reference) else {
+            continue;
+        };
+        rewritten.push_str(&html[offset..reference.range.start]);
+        rewritten.push_str(reference.before);
+        write_url(&mut rewritten, &image);
+        rewritten.push_str(reference.after);
+        offset = reference.range.end;
     }
     rewritten.push_str(&html[offset..]);
     rewritten
+}
+
+/// Rewrite inline `cid:<id>` image sources and backgrounds to `data:` URIs
+/// using `map` (keyed by [`normalize_cid`]). Unknown cids are left untouched -
+/// the browser still can't fetch them, but nothing else is changed.
+pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, String>) -> String {
+    rewrite_cid_references(
+        html,
+        |id| map.get(id),
+        |data_uri| data_uri.len(),
+        |rewritten, data_uri| rewritten.push_str(data_uri),
+    )
 }
 
 /// Write cached CID image bytes directly into the final HTML. This avoids a
@@ -1714,46 +1770,21 @@ pub fn rewrite_cid_src_with_images(
 ) -> String {
     use base64::Engine;
 
-    let image_for = |caps: &regex::Captures| {
-        let cid = caps.get(1).or_else(|| caps.get(2))?.as_str();
-        map.get(cid.trim().trim_matches(|c| c == '<' || c == '>'))
-    };
-    let mut capacity = html.len();
-    let mut found = false;
-    for caps in CID_SRC.captures_iter(html) {
-        let Some((mime, bytes)) = image_for(&caps) else {
-            continue;
-        };
-        found = true;
-        let encoded_len = base64::encoded_len(bytes.len(), true)
-            .expect("bounded inline CID image cannot overflow base64 length");
-        let replacement_len = "src=\"data:;base64,\"".len() + mime.len() + encoded_len;
-        capacity = capacity
-            .checked_add(replacement_len)
-            .and_then(|size| size.checked_sub(caps.get(0).unwrap().len()))
-            .expect("rewritten CID HTML length overflow");
-    }
-    if !found {
-        return html.to_owned();
-    }
-    let mut rewritten = String::with_capacity(capacity);
-    let mut offset = 0;
-    for caps in CID_SRC.captures_iter(html) {
-        let whole = caps.get(0).unwrap();
-        rewritten.push_str(&html[offset..whole.start()]);
-        if let Some((mime, bytes)) = image_for(&caps) {
-            rewritten.push_str("src=\"data:");
+    rewrite_cid_references(
+        html,
+        |id| map.get(id),
+        |(mime, bytes)| {
+            let encoded_len = base64::encoded_len(bytes.len(), true)
+                .expect("bounded inline CID image cannot overflow base64 length");
+            "data:;base64,".len() + mime.len() + encoded_len
+        },
+        |rewritten, (mime, bytes)| {
+            rewritten.push_str("data:");
             rewritten.push_str(mime);
             rewritten.push_str(";base64,");
-            base64::engine::general_purpose::STANDARD.encode_string(bytes, &mut rewritten);
-            rewritten.push('"');
-        } else {
-            rewritten.push_str(whole.as_str());
-        }
-        offset = whole.end();
-    }
-    rewritten.push_str(&html[offset..]);
-    rewritten
+            base64::engine::general_purpose::STANDARD.encode_string(bytes, rewritten);
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1817,6 +1848,27 @@ mod cid_tests {
         );
         let out = rewrite_cid_src(r#"<img src="cid:abc@host">"#, &map);
         assert!(out.contains("data:image/gif;base64,BBBB"));
+    }
+
+    #[test]
+    fn rewrites_background_attributes_and_css_urls() {
+        let map = HashMap::from([("bg@x".to_string(), "data:image/png;base64,AA".to_string())]);
+        let html = concat!(
+            r#"<body BACKGROUND='cid:bg@x'><table background="cid:<bg@x>">"#,
+            r#"<td style="background:url(cid:bg@x) top;background-image:url(&quot;cid:bg@x&quot;)">"#,
+            r#"<style>p{background:url( 'cid:bg@x' )}i{background:url("cid:gone")}</style>"#,
+        );
+        assert_eq!(
+            rewrite_cid_src(html, &map),
+            concat!(
+                r#"<body background="data:image/png;base64,AA"><table background="data:image/png;base64,AA">"#,
+                r#"<td style="background:url(data:image/png;base64,AA) top;background-image:url(&quot;data:image/png;base64,AA&quot;)">"#,
+                r#"<style>p{background:url( 'data:image/png;base64,AA' )}i{background:url("cid:gone")}</style>"#,
+            )
+        );
+        let cids = referenced_cids(html);
+        assert_eq!(cids.len(), 2);
+        assert!(cids.contains("bg@x") && cids.contains("gone"));
     }
 }
 
