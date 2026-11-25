@@ -2431,3 +2431,74 @@ fn a_preserved_tab_advances_to_its_tab_stop_and_copies_as_a_tab() {
     doc.set_text_selection(a, 0, a, len);
     assert_eq!(doc.get_selected_text().as_deref(), Some("ab\tc"));
 }
+
+#[test]
+fn the_root_or_body_background_covers_the_canvas_once() {
+    // The root element's background, or the body's when the root has none,
+    // is the canvas background (CSS Backgrounds 3 section 2.11): it covers
+    // the body's margins and the canvas below the root's box, is tiled from
+    // the root's box, and isn't painted again in the element's own box.
+    let tile = image::RgbaImage::from_fn(10, 10, |x, _| {
+        image::Rgba(if x < 5 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 255, 255]
+        })
+    });
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::ImageRgba8(tile),
+    );
+    let paint = |html: &str| {
+        let images = std::sync::Arc::new(HeldImages::default());
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                net_provider: Some(images.clone()),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        for (url, handler) in images.0.lock().unwrap().drain(..) {
+            handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(&png));
+        }
+        doc.resolve(0.0);
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+            400,
+            300,
+        )
+    };
+    let at = |pixels: &[u8], x: usize, y: usize| -> [u8; 4] {
+        pixels[(y * 400 + x) * 4..][..4].try_into().unwrap()
+    };
+    let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+
+    let pixels = paint(
+        "<body style='margin:12px;background:url(https://example.com/tile.png)'>
+         <div style='height:50px'></div></body>",
+    );
+    assert_eq!(at(&pixels, 2, 2), red);
+    assert_eq!(at(&pixels, 7, 2), blue);
+    assert_eq!(at(&pixels, 2, 250), red);
+    // Tiled from the root's box at 0, not the body's at 12
+    assert_eq!(at(&pixels, 10, 20), red);
+    assert_eq!(at(&pixels, 15, 20), blue);
+
+    // A root background keeps the body's in the body's box
+    let pixels = paint(
+        "<html style='background:url(https://example.com/tile.png)'>
+         <body style='margin:20px;background:#0f0'><div style='height:50px'></div></body></html>",
+    );
+    assert_eq!(at(&pixels, 2, 2), red);
+    assert_eq!(at(&pixels, 30, 30), [0, 255, 0, 255]);
+    assert_eq!(at(&pixels, 2, 250), red);
+
+    // A translucent root background is painted once
+    let pixels = paint(
+        "<html style='background:rgba(255,0,0,0.5)'><body><div style='height:50px'></div></body></html>",
+    );
+    let alpha = at(&pixels, 5, 5)[3];
+    assert!((126..=130).contains(&alpha), "{alpha}");
+}
