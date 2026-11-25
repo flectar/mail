@@ -1,7 +1,7 @@
 import { VerticalBox } from "std-widgets.slint";
 import { Button } from "components/button.slint";
 import { LineEdit } from "components/controls.slint";
-import { SettingsSelectRow } from "components/settings-components.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-components.slint";
 import { TypeScale } from "typography.slint";
 
 // An account on the Network page, with its proxy choice.
@@ -15,7 +15,8 @@ export struct AccountProxyRow {
 }
 
 // Settings → Network (#250, src/network.rs): the proxy the app's
-// connections go through, and the accounts that go another way.
+// connections go through, the accounts that go another way, and what a
+// metered connection holds back (#253).
 export global Network {
     // ---- The app's proxy ----
 
@@ -66,6 +67,17 @@ export global Network {
     callback save-account(string);
     callback remove-account-password();
     callback cancel-account();
+
+    // ---- Metered connections (#253) ----
+
+    // On a metered connection, accounts check for mail but download
+    // messages only when they're opened. Each device keeps its own.
+    in-out property <bool> pause-when-metered;
+    // This device's system tells whether a connection is metered.
+    in property <bool> metered-known;
+    // This device is on a metered connection now, as its system tells.
+    in property <bool> metered;
+    callback save-pause-when-metered(bool);
 }
 
 // A field with its name above it, which stays when the field is filled.
@@ -436,6 +448,46 @@ export component NetworkPage inherits VerticalLayout {
                 if Network.editing-account == account.id && Network.account-state == "failed" : Text {
                     text: NetworkWords.failure(Network.account-failure, Network.account-failure-detail);
                     color: root.error-color;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+
+    // What a metered connection holds back (#253), where the system tells.
+    if Network.metered-known : Rectangle {
+        height: max(80px, metered-box.preferred-height);
+        background: root.surface;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.border-subtle;
+        metered-box := VerticalBox {
+            padding-top: 15px;
+            padding-right: 20px;
+            padding-bottom: 15px;
+            padding-left: 20px;
+            spacing: 8px;
+
+            Text { text: @tr("Metered connections"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+            SettingsSwitchRow {
+                compact: root.compact;
+                compact-description-height: 51px;
+                title: @tr("Pause downloads");
+                description: @tr("On a metered connection, such as mobile data or a hotspot, accounts still check for new mail, and messages and attachments download when you open them.");
+                checked <=> Network.pause-when-metered;
+                title-color: root.body-text;
+                description-color: root.faint-text;
+                toggled(checked) => { Network.save-pause-when-metered(checked); }
+            }
+            // Under the row's own texts.
+            if Network.metered : HorizontalLayout {
+                padding-left: 16px;
+                Text {
+                    text: Network.pause-when-metered
+                        ? @tr("This connection is metered, so downloads wait.")
+                        : @tr("This connection is metered.");
+                    color: root.faint-text;
                     font-size: TypeScale.caption;
                     wrap: word-wrap;
                 }

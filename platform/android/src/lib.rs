@@ -148,6 +148,9 @@ fn android_main(app: slint::android::AndroidApp) {
     if let Err(error) = motion::install(&app) {
         tracing::warn!(%error, "the system's reduce motion setting is unavailable");
     }
+    if let Err(error) = metered::install(&app) {
+        tracing::warn!(%error, "whether the network is metered is unavailable");
+    }
     let documents =
         documents::AndroidDocuments::new(&app).expect("failed to initialize document access");
     let mut platform = flectar_mail::PlatformContext::app_private(
@@ -190,6 +193,8 @@ mod documents;
 mod launcher_icon;
 #[cfg(target_os = "android")]
 mod memory;
+#[cfg(target_os = "android")]
+mod metered;
 #[cfg(target_os = "android")]
 mod motion;
 #[cfg(target_os = "android")]
