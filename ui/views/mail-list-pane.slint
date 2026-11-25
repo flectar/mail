@@ -27,6 +27,7 @@ import { ImportActivity } from "../dialogs/import-dialog.slint";
 import { AutoReplyActivity } from "../auto-replies.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
 import { SnoozeUi } from "../dialogs/when-dialog.slint";
+import { AppIcon } from "../app-icon.slint";
 
 // A chip on a message-list row that acts on what it shows instead of
 // opening the message. Other buttons act on the row, as anywhere else on it.
@@ -450,6 +451,10 @@ component EarlierMailRow inherits Rectangle {
 export component MailListPane inherits FocusScope {
     enabled: false;
     in property <bool> compact: false;
+    // Phones check mail by pulling the list down, so the toolbar needs no
+    // refresh button there.
+    private property <bool> pull-refreshes: root.compact
+        && (AppIcon.platform == "android" || AppIcon.platform == "ios" || AppIcon.platform == "ohos");
     // Single-surface navigation is also used by the desktop Minimal layout;
     // keep it separate from compact sizing so desktop controls stay dense.
     in property <bool> single-pane-navigation: root.compact;
@@ -874,6 +879,7 @@ export component MailListPane inherits FocusScope {
                             filter-accessible-id: "mail-filter-button";
                             show-save-search: true;
                             show-search-tips: true;
+                            show-refresh: !root.pull-refreshes;
                             refresh-enabled: !root.sync_in_progress;
                             refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Check for new mail");
                             refresh-accessible-id: "mail-refresh-button";

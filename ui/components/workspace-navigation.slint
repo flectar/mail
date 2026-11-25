@@ -254,7 +254,6 @@ export component CompactProductNav inherits Rectangle {
     in property <color> accent-background;
     in property <color> muted-color;
     in property <bool> interactive: true;
-    callback open-settings;
     callback select-view(string);
 
     height: LayoutMetrics.compact-navigation-height;
@@ -326,18 +325,6 @@ export component CompactProductNav inherits Rectangle {
             muted-color: root.muted-color;
             interactive: root.interactive;
             clicked => { root.select-view("contacts"); }
-        }
-        CompactProductNavItem {
-            horizontal-stretch: 1;
-            label: @tr("Settings");
-            outline-icon: @image-url("../icons/lucide/outline/gear.svg");
-            filled-icon: @image-url("../icons/lucide/filled/gear.svg");
-            active: root.active-view == "settings";
-            accent-color: root.accent-color;
-            active-background: root.accent-background;
-            muted-color: root.muted-color;
-            interactive: root.interactive;
-            clicked => { root.open-settings(); }
         }
     }
 }

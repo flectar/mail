@@ -581,3 +581,41 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         }
     }
 }
+
+// The foot of a phone drawer. Phones have no rail, so Settings stays here,
+// below the drawer's list however far it scrolls.
+export component DrawerSettingsItem inherits VerticalLayout {
+    in property <color> background-color: AppTheme.sidebar-bg;
+    in property <color> selection-background: AppTheme.accent-soft;
+    in property <color> accent-color: AppTheme.accent;
+    in property <color> body-color: AppTheme.body;
+    in property <color> muted-color: AppTheme.muted;
+    in property <color> divider-color: AppTheme.border;
+    // Lines the divider up with the drawer's own inset content.
+    in property <length> divider-inset: 0px;
+    callback clicked;
+
+    padding-bottom: 8px;
+    spacing: 4px;
+
+    HorizontalLayout {
+        padding-left: root.divider-inset;
+        padding-right: root.divider-inset;
+        Rectangle {
+            height: 1px;
+            background: root.divider-color;
+        }
+    }
+
+    SidebarItem {
+        label: @tr("Settings");
+        icon: @image-url("../icons/lucide/filled/gear.svg");
+        row-height: LayoutMetrics.touch-target;
+        sidebar-background: root.background-color;
+        selection-background: root.selection-background;
+        accent-color: root.accent-color;
+        body-color: root.body-color;
+        muted-color: root.muted-color;
+        clicked => { root.clicked(); }
+    }
+}

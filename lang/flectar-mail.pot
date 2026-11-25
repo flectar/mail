@@ -269,8 +269,8 @@ msgstr ""
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:657
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:657
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:665
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:665
 msgid "Save"
 msgstr ""
 
@@ -295,8 +295,8 @@ msgstr ""
 
 #: ui/ai.slint:258 ui/components/rule-editor.slint:354
 #: ui/ai.slint:258 ui/components/rule-editor.slint:354
-#: ui/ai.slint:258 ui/components/rule-editor.slint:354 ui/views/files-view.slint:579
-#: ui/ai.slint:258 ui/components/rule-editor.slint:354 ui/views/files-view.slint:579
+#: ui/ai.slint:258 ui/components/rule-editor.slint:354 ui/views/files-view.slint:587
+#: ui/ai.slint:258 ui/components/rule-editor.slint:354 ui/views/files-view.slint:587
 msgid "Name"
 msgstr ""
 
@@ -623,7 +623,7 @@ msgctxt "time of day"
 msgid "AM"
 msgstr ""
 
-#: ui/app.slint:237 ui/views/mail-list-pane.slint:820
+#: ui/app.slint:237 ui/views/mail-list-pane.slint:825
 msgid "Yesterday"
 msgstr ""
 
@@ -771,8 +771,8 @@ msgid "New message"
 msgstr ""
 
 #: ui/app.slint:279 ui/reader-window.slint:45
-#: ui/app.slint:279 ui/reader-window.slint:45 ui/views/mail-list-pane.slint:1493
-#: ui/app.slint:279 ui/reader-window.slint:45 ui/views/mail-list-pane.slint:1493
+#: ui/app.slint:279 ui/reader-window.slint:45 ui/views/mail-list-pane.slint:1499
+#: ui/app.slint:279 ui/reader-window.slint:45 ui/views/mail-list-pane.slint:1499
 msgid "(No subject)"
 msgstr ""
 
@@ -794,10 +794,10 @@ msgid "Open"
 msgstr ""
 
 #: ui/app.slint:288 ui/components/rule-editor.slint:68
-#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1046
-#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1046 ui/views/mail-reading-pane.slint:512
-#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1046 ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:572
-#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1046 ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:572 ui/views/mail-reading-pane.slint:1042
+#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1052
+#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1052 ui/views/mail-reading-pane.slint:512
+#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1052 ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:572
+#: ui/app.slint:288 ui/components/rule-editor.slint:68 ui/views/mail-list-pane.slint:1052 ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:572 ui/views/mail-reading-pane.slint:1042
 msgid "Mark as read"
 msgstr ""
 
@@ -816,8 +816,8 @@ msgstr[1] ""
 #. Local mail has no archive or spam.
 #: ui/app.slint:295 ui/components/rule-editor.slint:70
 #: ui/app.slint:295 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3870
-#: ui/app.slint:295 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3870 ui/views/mail-list-pane.slint:1746
-#: ui/app.slint:295 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3870 ui/views/mail-list-pane.slint:1746 ui/views/mail-reading-pane.slint:542
+#: ui/app.slint:295 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3870 ui/views/mail-list-pane.slint:1752
+#: ui/app.slint:295 ui/components/rule-editor.slint:70 ui/dialogs/settings-dialog.slint:3870 ui/views/mail-list-pane.slint:1752 ui/views/mail-reading-pane.slint:542
 msgid "Archive"
 msgstr ""
 
@@ -825,7 +825,7 @@ msgstr ""
 #: ui/app.slint:296 ui/components/account-mail-preferences.slint:464
 #: ui/app.slint:296 ui/components/account-mail-preferences.slint:464
 #: ui/app.slint:296 ui/components/account-mail-preferences.slint:464 ui/dialogs/saved-search-dialog.slint:121
-#: ui/app.slint:296 ui/components/account-mail-preferences.slint:464 ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:617
+#: ui/app.slint:296 ui/components/account-mail-preferences.slint:464 ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:625
 msgid "Delete"
 msgstr ""
 
@@ -1038,7 +1038,7 @@ msgstr ""
 msgid "{} asked to send this message. Check it, and send it only if it's right."
 msgstr ""
 
-#: ui/app.slint:382 ui/views/mail-list-pane.slint:222
+#: ui/app.slint:382 ui/views/mail-list-pane.slint:223
 msgid "{n} message"
 msgid_plural "{n} messages"
 msgstr[0] ""
@@ -2869,9 +2869,9 @@ msgstr ""
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:863 ui/components/sidebar.slint:687
-#: ui/app.slint:863 ui/components/sidebar.slint:687 ui/dialogs/settings-dialog.slint:2651
-#: ui/app.slint:863 ui/components/sidebar.slint:687 ui/dialogs/settings-dialog.slint:2651
+#: ui/app.slint:863 ui/components/sidebar.slint:688
+#: ui/app.slint:863 ui/components/sidebar.slint:688 ui/dialogs/settings-dialog.slint:2651
+#: ui/app.slint:863 ui/components/sidebar.slint:688 ui/dialogs/settings-dialog.slint:2651
 msgid "On this device"
 msgstr ""
 
@@ -3408,155 +3408,155 @@ msgstr ""
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:1083 ui/components/workspace-navigation.slint:787
-#: ui/app.slint:1083 ui/components/workspace-navigation.slint:787 ui/tray.slint:23 ui/tray.slint:24
-#: ui/app.slint:1083 ui/components/workspace-navigation.slint:787 ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26 ui/views/onboarding-view.slint:150
+#: ui/app.slint:1083 ui/components/workspace-navigation.slint:774
+#: ui/app.slint:1083 ui/components/workspace-navigation.slint:774 ui/tray.slint:23 ui/tray.slint:24
+#: ui/app.slint:1083 ui/components/workspace-navigation.slint:774 ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26 ui/views/onboarding-view.slint:150
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1788 ui/app.slint:1801
+#: ui/app.slint:1790 ui/app.slint:1803
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2701
+#: ui/app.slint:2704
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2709 ui/components/email-composer.slint:1272
+#: ui/app.slint:2712 ui/components/email-composer.slint:1272
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
-#: ui/app.slint:2775
+#: ui/app.slint:2778
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2775 ui/reader-window.slint:152 ui/views/files-view.slint:575
+#: ui/app.slint:2778 ui/reader-window.slint:152 ui/views/files-view.slint:583
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2779
+#: ui/app.slint:2782
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2780
+#: ui/app.slint:2783
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2782
+#: ui/app.slint:2785
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2783 ui/reader-window.slint:153
+#: ui/app.slint:2786 ui/reader-window.slint:153
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2784 ui/app.slint:2810 ui/components/calendar.slint:1262
-#: ui/app.slint:2784 ui/app.slint:2810 ui/components/calendar.slint:1262 ui/reader-window.slint:154
+#: ui/app.slint:2787 ui/app.slint:2813 ui/components/calendar.slint:1262
+#: ui/app.slint:2787 ui/app.slint:2813 ui/components/calendar.slint:1262 ui/reader-window.slint:154
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2785 ui/dialogs/settings-dialog.slint:2718
+#: ui/app.slint:2788 ui/dialogs/settings-dialog.slint:2718
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2785 ui/reader-window.slint:155 ui/views/files-view.slint:657
-#: ui/app.slint:2785 ui/reader-window.slint:155 ui/views/files-view.slint:657
+#: ui/app.slint:2788 ui/reader-window.slint:155 ui/views/files-view.slint:665
+#: ui/app.slint:2788 ui/reader-window.slint:155 ui/views/files-view.slint:665
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2807
+#: ui/app.slint:2810
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2809
+#: ui/app.slint:2812
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2811
+#: ui/app.slint:2814
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2829
+#: ui/app.slint:2832
 msgid "Run this rule on the Inbox?"
 msgstr ""
 
-#: ui/app.slint:2831
+#: ui/app.slint:2834
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2833
+#: ui/app.slint:2836
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2834
+#: ui/app.slint:2837
 msgid "Undo takes it back."
 msgstr ""
 
-#: ui/app.slint:2835
+#: ui/app.slint:2838
 msgid "Run rule"
 msgstr ""
 
-#: ui/app.slint:2854
+#: ui/app.slint:2857
 msgid "Replace changes made elsewhere?"
 msgstr ""
 
-#: ui/app.slint:2855
+#: ui/app.slint:2858
 msgid "Run replies before your filters?"
 msgstr ""
 
-#: ui/app.slint:2858
+#: ui/app.slint:2861
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
 msgstr ""
 
-#: ui/app.slint:2859
+#: ui/app.slint:2862
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
 msgstr ""
 
-#: ui/app.slint:2861
+#: ui/app.slint:2864
 msgid "Saving replaces those changes with what you set here."
 msgstr ""
 
-#: ui/app.slint:2862
+#: ui/app.slint:2865
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 
-#: ui/app.slint:2863
+#: ui/app.slint:2866
 msgid "Replace changes"
 msgstr ""
 
-#: ui/app.slint:2863
+#: ui/app.slint:2866
 msgid "Run both"
 msgstr ""
 
-#: ui/app.slint:3092
+#: ui/app.slint:3095
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:3098
+#: ui/app.slint:3101
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:3111
+#: ui/app.slint:3114
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:3114
+#: ui/app.slint:3117
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:3119
+#: ui/app.slint:3122
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:3127 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3130 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -3568,10 +3568,10 @@ msgstr ""
 msgid "Turn off"
 msgstr ""
 
-#: ui/auto-replies.slint:80 ui/components/tab-overview.slint:71
-#: ui/auto-replies.slint:80 ui/components/tab-overview.slint:71
-#: ui/auto-replies.slint:80 ui/components/tab-overview.slint:71
-#: ui/auto-replies.slint:80 ui/components/tab-overview.slint:71 ui/translation.slint:155
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:611
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:611
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:611
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:611 ui/translation.slint:155
 msgid "Settings"
 msgstr ""
 
@@ -3899,8 +3899,8 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196
 #: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120
 #: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120 ui/network.slint:433
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:469
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:469 ui/views/mail-reading-pane.slint:2525
+#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:470
+#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4544 ui/dialogs/settings-dialog.slint:4882 ui/dialogs/settings-dialog.slint:5196 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:470 ui/views/mail-reading-pane.slint:2525
 msgid "Cancel"
 msgstr ""
 
@@ -4197,9 +4197,9 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968
 #: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197
 #: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:555
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:555 ui/views/files-view.slint:721
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:555 ui/views/files-view.slint:721 ui/window-chrome.slint:238
+#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:556
+#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:556 ui/views/files-view.slint:729
+#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1412 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4625 ui/dialogs/settings-dialog.slint:4968 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:556 ui/views/files-view.slint:729 ui/window-chrome.slint:238
 msgid "Close"
 msgstr ""
 
@@ -4458,7 +4458,7 @@ msgid "Filters only affect this agenda."
 msgstr ""
 
 #: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:746
-#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:746 ui/views/mail-list-pane.slint:819
+#: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:746 ui/views/mail-list-pane.slint:824
 msgid "Today"
 msgstr ""
 
@@ -4503,7 +4503,7 @@ msgstr ""
 msgid "Create an event to start planning your month."
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:304 ui/views/files-view.slint:583
+#: ui/components/calendar-agenda.slint:304 ui/views/files-view.slint:591
 msgid "Reset filters"
 msgstr ""
 
@@ -5284,7 +5284,7 @@ msgstr ""
 msgid "Off"
 msgstr ""
 
-#: ui/components/controls.slint:162 ui/views/mail-list-pane.slint:954
+#: ui/components/controls.slint:162 ui/views/mail-list-pane.slint:960
 msgid "Clear selection"
 msgstr ""
 
@@ -6193,27 +6193,27 @@ msgid "Add label"
 msgstr ""
 
 #: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79
-#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1743
-#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530
-#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
-#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
+#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1749
+#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530
+#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
+#: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
 msgid "Star message"
 msgstr ""
 
 #: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81
 #: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81
-#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:994
-#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:994 ui/views/mail-reading-pane.slint:492
-#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:994 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551
-#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:994 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
-#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:994 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
+#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:1000
+#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:1000 ui/views/mail-reading-pane.slint:492
+#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:1000 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551
+#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:1000 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
+#: ui/components/rule-editor.slint:71 ui/components/rule-editor.slint:81 ui/views/mail-list-pane.slint:1000 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
 msgid "Move to trash"
 msgstr ""
 
 #: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82
-#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:985
-#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:985 ui/views/mail-reading-pane.slint:519
-#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:985 ui/views/mail-reading-pane.slint:519 ui/views/mail-reading-pane.slint:1051
+#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:991
+#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:991 ui/views/mail-reading-pane.slint:519
+#: ui/components/rule-editor.slint:72 ui/components/rule-editor.slint:82 ui/views/mail-list-pane.slint:991 ui/views/mail-reading-pane.slint:519 ui/views/mail-reading-pane.slint:1051
 msgid "Move to spam"
 msgstr ""
 
@@ -6221,7 +6221,7 @@ msgstr ""
 msgid "Show in category"
 msgstr ""
 
-#: ui/components/rule-editor.slint:84 ui/views/files-view.slint:575
+#: ui/components/rule-editor.slint:84 ui/views/files-view.slint:583
 msgid "Copy to folder"
 msgstr ""
 
@@ -6456,7 +6456,7 @@ msgstr ""
 msgid "Leave out what matches"
 msgstr ""
 
-#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:467
+#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:470
 msgid "Search tips"
 msgstr ""
 
@@ -6569,7 +6569,7 @@ msgstr ""
 
 #: ui/components/sidebar-controls.slint:485
 #: ui/components/sidebar-controls.slint:485 ui/dialogs/settings-dialog.slint:3261
-#: ui/components/sidebar-controls.slint:485 ui/dialogs/settings-dialog.slint:3261 ui/views/mail-list-pane.slint:878
+#: ui/components/sidebar-controls.slint:485 ui/dialogs/settings-dialog.slint:3261 ui/views/mail-list-pane.slint:884
 msgid "Check for new mail"
 msgstr ""
 
@@ -6589,77 +6589,77 @@ msgstr ""
 msgid "Hide until the next version"
 msgstr ""
 
-#: ui/components/sidebar.slint:193 ui/views/mail-list-pane.slint:1887
+#: ui/components/sidebar.slint:194 ui/views/mail-list-pane.slint:1893
 msgid "New email"
 msgstr ""
 
-#: ui/components/sidebar.slint:193
+#: ui/components/sidebar.slint:194
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:247 ui/components/sidebar.slint:256
-#: ui/components/sidebar.slint:247 ui/components/sidebar.slint:256 ui/components/sidebar.slint:276
+#: ui/components/sidebar.slint:248 ui/components/sidebar.slint:257
+#: ui/components/sidebar.slint:248 ui/components/sidebar.slint:257 ui/components/sidebar.slint:277
 msgid "Find folder or label"
 msgstr ""
 
-#: ui/components/sidebar.slint:293
+#: ui/components/sidebar.slint:294
 msgid "Clear folder filter"
 msgstr ""
 
-#: ui/components/sidebar.slint:309
+#: ui/components/sidebar.slint:310
 msgid "Add account"
 msgstr ""
 
-#: ui/components/sidebar.slint:358
+#: ui/components/sidebar.slint:359
 msgid "ALL ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:367
+#: ui/components/sidebar.slint:368
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:486
+#: ui/components/sidebar.slint:487
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:576 ui/components/sidebar.slint:794
-#: ui/components/sidebar.slint:576 ui/components/sidebar.slint:794
+#: ui/components/sidebar.slint:577 ui/components/sidebar.slint:795
+#: ui/components/sidebar.slint:577 ui/components/sidebar.slint:795
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:595
+#: ui/components/sidebar.slint:596
 msgid "Global label {}"
 msgstr ""
 
-#: ui/components/sidebar.slint:630
+#: ui/components/sidebar.slint:631
 msgid "Saved searches"
 msgstr ""
 
-#: ui/components/sidebar.slint:650
+#: ui/components/sidebar.slint:651
 msgid "Saved search {}"
 msgstr ""
 
-#: ui/components/sidebar.slint:674 ui/views/contacts-view.slint:222
-#: ui/components/sidebar.slint:674 ui/views/contacts-view.slint:222
+#: ui/components/sidebar.slint:675 ui/views/contacts-view.slint:222
+#: ui/components/sidebar.slint:675 ui/views/contacts-view.slint:222
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:814
+#: ui/components/sidebar.slint:815
 msgid "{} label, {} account"
 msgstr ""
 
-#: ui/components/sidebar.slint:859 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:859 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:351
-#: ui/components/sidebar.slint:859 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:351 ui/views/files-view.slint:575
+#: ui/components/sidebar.slint:860 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:860 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:352
+#: ui/components/sidebar.slint:860 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:352 ui/views/files-view.slint:583
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:876 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:876 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:877 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:877 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr ""
 
-#: ui/components/sidebar.slint:896
+#: ui/components/sidebar.slint:897
 msgid "No folders found"
 msgstr ""
 
@@ -6677,8 +6677,8 @@ msgstr[1] ""
 #: ui/components/tab-overview.slint:69
 #: ui/components/tab-overview.slint:69
 #: ui/components/tab-overview.slint:69
-#: ui/components/tab-overview.slint:69 ui/views/files-view.slint:396
-#: ui/components/tab-overview.slint:69 ui/views/files-view.slint:396
+#: ui/components/tab-overview.slint:69 ui/views/files-view.slint:397
+#: ui/components/tab-overview.slint:69 ui/views/files-view.slint:397
 msgid "Files"
 msgstr ""
 
@@ -6889,27 +6889,27 @@ msgstr ""
 msgid "Save palette"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:446
+#: ui/components/workspace-layout.slint:449
 msgid "Newest first"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:453
+#: ui/components/workspace-layout.slint:456
 msgid "Oldest first"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:461
+#: ui/components/workspace-layout.slint:464
 msgid "Save search…"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:263
+#: ui/components/workspace-navigation.slint:262
 msgid "Primary navigation"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:685
+#: ui/components/workspace-navigation.slint:672
 msgid "Close other tabs"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:690
+#: ui/components/workspace-navigation.slint:677
 msgid "Close tabs to the right"
 msgstr ""
 
@@ -7620,12 +7620,12 @@ msgstr ""
 
 #: ui/dialogs/attachment-preview-dialog.slint:39
 #: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4178
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4178 ui/views/files-view.slint:499
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4178 ui/views/files-view.slint:499
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4178 ui/views/files-view.slint:500
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/dialogs/settings-dialog.slint:4178 ui/views/files-view.slint:500
 msgid "Download"
 msgstr ""
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:511
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:512
 msgid "Loading preview…"
 msgstr ""
 
@@ -8420,8 +8420,8 @@ msgstr ""
 msgid "Show"
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:952 ui/views/files-view.slint:730
-#: ui/dialogs/import-dialog.slint:952 ui/views/files-view.slint:730
+#: ui/dialogs/import-dialog.slint:952 ui/views/files-view.slint:738
+#: ui/dialogs/import-dialog.slint:952 ui/views/files-view.slint:738
 msgid "Dismiss"
 msgstr ""
 
@@ -8678,7 +8678,7 @@ msgstr ""
 msgid "Calculating…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:229 ui/views/files-view.slint:310
+#: ui/dialogs/settings-dialog.slint:229 ui/views/files-view.slint:311
 msgid "Refresh"
 msgstr ""
 
@@ -8885,7 +8885,7 @@ msgstr ""
 msgid "1 year"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:860 ui/views/mail-list-pane.slint:862
+#: ui/dialogs/settings-dialog.slint:860 ui/views/mail-list-pane.slint:867
 msgid "All mail"
 msgstr ""
 
@@ -10421,7 +10421,7 @@ msgstr ""
 msgid "Check every account for new mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3869 ui/views/mail-list-pane.slint:860
+#: ui/dialogs/settings-dialog.slint:3869 ui/views/mail-list-pane.slint:865
 msgid "Search mail"
 msgstr ""
 
@@ -11353,7 +11353,7 @@ msgstr ""
 msgid "Inbox"
 msgstr ""
 
-#: ui/mailbox-words.slint:11 ui/views/mail-list-pane.slint:864
+#: ui/mailbox-words.slint:11 ui/views/mail-list-pane.slint:869
 msgid "Starred"
 msgstr ""
 
@@ -12151,7 +12151,7 @@ msgstr ""
 msgid "Email attachments"
 msgstr ""
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:691
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:699
 msgid "Connect storage"
 msgstr ""
 
@@ -12163,7 +12163,7 @@ msgstr ""
 msgid "STORAGE SPACE"
 msgstr ""
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:493
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:494
 msgid "Sharing activity"
 msgstr ""
 
@@ -12171,590 +12171,590 @@ msgstr ""
 msgid "Transfers"
 msgstr ""
 
-#: ui/views/files-view.slint:305 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:306 ui/views/files-view.slint:556
 msgid "File sources"
 msgstr ""
 
-#: ui/views/files-view.slint:308
+#: ui/views/files-view.slint:309
 msgid "Search files"
 msgstr ""
 
-#: ui/views/files-view.slint:311 ui/views/files-view.slint:318
-#: ui/views/files-view.slint:311 ui/views/files-view.slint:318
+#: ui/views/files-view.slint:312 ui/views/files-view.slint:319
+#: ui/views/files-view.slint:312 ui/views/files-view.slint:319
 msgid "Filter and sort files"
 msgstr ""
 
-#: ui/views/files-view.slint:314
+#: ui/views/files-view.slint:315
 msgid "Synchronized mail"
 msgstr ""
 
-#: ui/views/files-view.slint:315
+#: ui/views/files-view.slint:316
 msgid "All mail on server (JMAP)"
 msgstr ""
 
-#: ui/views/files-view.slint:316
+#: ui/views/files-view.slint:317
 msgid "Index cached text"
 msgstr ""
 
-#: ui/views/files-view.slint:344 ui/views/files-view.slint:456
+#: ui/views/files-view.slint:345 ui/views/files-view.slint:457
 msgid "Upload"
 msgstr ""
 
-#: ui/views/files-view.slint:382
+#: ui/views/files-view.slint:383
 msgid "No files to show"
 msgstr ""
 
-#: ui/views/files-view.slint:383
+#: ui/views/files-view.slint:384
 msgid "Attachments from synchronized messages will appear here."
 msgstr ""
 
-#: ui/views/files-view.slint:383
+#: ui/views/files-view.slint:384
 msgid "Upload a file or create a folder to get started."
 msgstr ""
 
-#: ui/views/files-view.slint:383
+#: ui/views/files-view.slint:384
 msgid "Select an account and connect its storage."
 msgstr ""
 
-#: ui/views/files-view.slint:448
+#: ui/views/files-view.slint:449
 msgid "Upload or create a folder"
 msgstr ""
 
-#: ui/views/files-view.slint:470
+#: ui/views/files-view.slint:471
 msgid "Load more"
 msgstr ""
 
-#: ui/views/files-view.slint:479
+#: ui/views/files-view.slint:480
 msgid "File list width"
 msgstr ""
 
-#: ui/views/files-view.slint:496
+#: ui/views/files-view.slint:497
 msgid "Back to files"
 msgstr ""
 
-#: ui/views/files-view.slint:498
+#: ui/views/files-view.slint:499
 msgid "Open folder"
 msgstr ""
 
-#: ui/views/files-view.slint:500
+#: ui/views/files-view.slint:501
 msgid "Preview"
 msgstr ""
 
-#: ui/views/files-view.slint:500
+#: ui/views/files-view.slint:501
 msgid "Details"
 msgstr ""
 
-#: ui/views/files-view.slint:508
+#: ui/views/files-view.slint:509
 msgid "Select a file to preview"
 msgstr ""
 
-#: ui/views/files-view.slint:509
+#: ui/views/files-view.slint:510
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr ""
 
-#: ui/views/files-view.slint:509
+#: ui/views/files-view.slint:510
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr ""
 
-#: ui/views/files-view.slint:512
+#: ui/views/files-view.slint:513
 msgid "Clear displayed activity"
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:583
 msgid "Share file or folder"
 msgstr ""
 
-#: ui/views/files-view.slint:575 ui/views/files-view.slint:589
+#: ui/views/files-view.slint:583 ui/views/files-view.slint:597
 msgid "Rename"
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:583
 msgid "File properties"
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:583
 msgid "Lock file or folder"
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:583
 msgid "Manage file"
 msgstr ""
 
-#: ui/views/files-view.slint:578
+#: ui/views/files-view.slint:586
 msgid "Files and folders"
 msgstr ""
 
-#: ui/views/files-view.slint:579
+#: ui/views/files-view.slint:587
 msgid "Size"
 msgstr ""
 
-#: ui/views/files-view.slint:579
+#: ui/views/files-view.slint:587
 msgid "Kind"
 msgstr ""
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:588
 msgid "Descending order"
 msgstr ""
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:589
 msgid "Minimum bytes"
 msgstr ""
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:589
 msgid "Minimum bytes (optional)"
 msgstr ""
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:590
 msgid "Maximum bytes"
 msgstr ""
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:590
 msgid "Maximum bytes (optional)"
 msgstr ""
 
-#: ui/views/files-view.slint:587
+#: ui/views/files-view.slint:595
 msgid "Keep offline"
 msgstr ""
 
-#: ui/views/files-view.slint:588
+#: ui/views/files-view.slint:596
 msgid "Release offline copy"
 msgstr ""
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:598
 msgid "Move…"
 msgstr ""
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:599
 msgid "Copy…"
 msgstr ""
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:600
 msgid "Replace content…"
 msgstr ""
 
-#: ui/views/files-view.slint:593
+#: ui/views/files-view.slint:601
 msgid "Properties…"
 msgstr ""
 
-#: ui/views/files-view.slint:594
+#: ui/views/files-view.slint:602
 msgid "Sharing…"
 msgstr ""
 
-#: ui/views/files-view.slint:595
+#: ui/views/files-view.slint:603
 msgid "Release lock"
 msgstr ""
 
-#: ui/views/files-view.slint:595
+#: ui/views/files-view.slint:603
 msgid "Lock…"
 msgstr ""
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:604
 msgid "Renew lock for 5 minutes"
 msgstr ""
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:607
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
 "cannot be undone."
 msgstr ""
 
-#: ui/views/files-view.slint:604
+#: ui/views/files-view.slint:612
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
 msgstr ""
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:613
 msgid "Destination folder"
 msgstr ""
 
-#: ui/views/files-view.slint:609
+#: ui/views/files-view.slint:617
 msgid "Enter the recipient’s principal URL on this server."
 msgstr ""
 
-#: ui/views/files-view.slint:609
+#: ui/views/files-view.slint:617
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr ""
 
-#: ui/views/files-view.slint:610
+#: ui/views/files-view.slint:618
 msgid "Recipient"
 msgstr ""
 
-#: ui/views/files-view.slint:611
+#: ui/views/files-view.slint:619
 msgid "Allow editing"
 msgstr ""
 
-#: ui/views/files-view.slint:611
+#: ui/views/files-view.slint:619
 msgid "Modify content"
 msgstr ""
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:622
 msgid "Modify properties"
 msgstr ""
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:623
 msgid "Add children"
 msgstr ""
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:624
 msgid "Rename and move"
 msgstr ""
 
-#: ui/views/files-view.slint:618
+#: ui/views/files-view.slint:626
 msgid "Manage sharing"
 msgstr ""
 
-#: ui/views/files-view.slint:620
+#: ui/views/files-view.slint:628
 msgid "Remove recipient’s access"
 msgstr ""
 
-#: ui/views/files-view.slint:624
+#: ui/views/files-view.slint:632
 msgid "Shared lock"
 msgstr ""
 
-#: ui/views/files-view.slint:625
+#: ui/views/files-view.slint:633
 msgid "Include folder contents"
 msgstr ""
 
-#: ui/views/files-view.slint:626
+#: ui/views/files-view.slint:634
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr ""
 
-#: ui/views/files-view.slint:630
+#: ui/views/files-view.slint:638
 msgid "If a name already exists"
 msgstr ""
 
-#: ui/views/files-view.slint:631
+#: ui/views/files-view.slint:639
 msgid "Stop and report conflict"
 msgstr ""
 
-#: ui/views/files-view.slint:631
+#: ui/views/files-view.slint:639
 msgid "Keep both with a new name"
 msgstr ""
 
-#: ui/views/files-view.slint:631
+#: ui/views/files-view.slint:639
 msgid "Replace existing"
 msgstr ""
 
-#: ui/views/files-view.slint:631
+#: ui/views/files-view.slint:639
 msgid "Keep newest"
 msgstr ""
 
-#: ui/views/files-view.slint:632
+#: ui/views/files-view.slint:640
 msgid "This can replace existing content at the destination."
 msgstr ""
 
-#: ui/views/files-view.slint:633
+#: ui/views/files-view.slint:641
 msgid "Compare names without case"
 msgstr ""
 
-#: ui/views/files-view.slint:639
+#: ui/views/files-view.slint:647
 msgid "Property namespace"
 msgstr ""
 
-#: ui/views/files-view.slint:640
+#: ui/views/files-view.slint:648
 msgid "Property name"
 msgstr ""
 
-#: ui/views/files-view.slint:641
+#: ui/views/files-view.slint:649
 msgid "Value"
 msgstr ""
 
-#: ui/views/files-view.slint:642
+#: ui/views/files-view.slint:650
 msgid "Remove property"
 msgstr ""
 
-#: ui/views/files-view.slint:646
+#: ui/views/files-view.slint:654
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr ""
 
-#: ui/views/files-view.slint:647
+#: ui/views/files-view.slint:655
 msgid "Created"
 msgstr ""
 
-#: ui/views/files-view.slint:648
+#: ui/views/files-view.slint:656
 msgid "Modified"
 msgstr ""
 
-#: ui/views/files-view.slint:649
+#: ui/views/files-view.slint:657
 msgid "Accessed"
 msgstr ""
 
-#: ui/views/files-view.slint:650
+#: ui/views/files-view.slint:658
 msgid "Executable"
 msgstr ""
 
-#: ui/views/files-view.slint:651
+#: ui/views/files-view.slint:659
 msgid "Subscription changes are unavailable on this server version."
 msgstr ""
 
-#: ui/views/files-view.slint:703
+#: ui/views/files-view.slint:711
 msgid "Uses the selected account’s saved credentials."
 msgstr ""
 
-#: ui/views/files-view.slint:707
+#: ui/views/files-view.slint:715
 msgid "Storage URL"
 msgstr ""
 
-#: ui/views/files-view.slint:721
+#: ui/views/files-view.slint:729
 msgid "Transfers and operations"
 msgstr ""
 
-#: ui/views/files-view.slint:722
+#: ui/views/files-view.slint:730
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
 "the destination first."
 msgstr ""
 
-#: ui/views/files-view.slint:729
+#: ui/views/files-view.slint:737
 msgid "Resume"
 msgstr ""
 
-#: ui/views/files-view.slint:731
+#: ui/views/files-view.slint:739
 msgid "Reviewed as completed"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:102 ui/views/mail-list-pane.slint:814
+#: ui/views/mail-list-pane.slint:103 ui/views/mail-list-pane.slint:819
 msgid "Copied verification code {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:103
+#: ui/views/mail-list-pane.slint:104
 msgid "Copy verification code {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:150
+#: ui/views/mail-list-pane.slint:151
 msgid "Preview {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:150
+#: ui/views/mail-list-pane.slint:151
 msgid "Download {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:151
+#: ui/views/mail-list-pane.slint:152
 msgid "{n} more file"
 msgid_plural "{n} more files"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/views/mail-list-pane.slint:334
+#: ui/views/mail-list-pane.slint:335
 msgid "{n} older unread message is only on the server."
 msgid_plural "{n} older unread messages are only on the server."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/views/mail-list-pane.slint:344
+#: ui/views/mail-list-pane.slint:345
 msgid "Change mail history"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:364
+#: ui/views/mail-list-pane.slint:365
 msgid "Couldn't search {}: {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:365
+#: ui/views/mail-list-pane.slint:366
 msgid "Couldn't search {n} account."
 msgid_plural "Couldn't search {n} accounts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/views/mail-list-pane.slint:367
+#: ui/views/mail-list-pane.slint:368
 msgid "Found {n} more on the server."
 msgid_plural "Found {n} more on the server."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/views/mail-list-pane.slint:368
+#: ui/views/mail-list-pane.slint:369
 msgid "Nothing more on the server."
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:370
+#: ui/views/mail-list-pane.slint:371
 msgid "Search on server"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:371
+#: ui/views/mail-list-pane.slint:372
 msgid "Search further"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:403
+#: ui/views/mail-list-pane.slint:404
 msgid "Searching the server…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:442
+#: ui/views/mail-list-pane.slint:443
 msgid "Show earlier mail"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:821
+#: ui/views/mail-list-pane.slint:826
 msgid "This week"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:822
+#: ui/views/mail-list-pane.slint:827
 msgid "Last week"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:823
+#: ui/views/mail-list-pane.slint:828
 msgid "This month"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:824
+#: ui/views/mail-list-pane.slint:829
 msgid "Last month"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:825
+#: ui/views/mail-list-pane.slint:830
 msgid "Earlier"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:854
+#: ui/views/mail-list-pane.slint:859
 msgid "Show folders"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:854
+#: ui/views/mail-list-pane.slint:859
 msgid "Hide folders"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:858
+#: ui/views/mail-list-pane.slint:863
 msgid "An account can't check mail"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:863
+#: ui/views/mail-list-pane.slint:868
 msgid "Unread"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:865 ui/views/mail-list-pane.slint:1202
+#: ui/views/mail-list-pane.slint:870 ui/views/mail-list-pane.slint:1208
 msgid "Has attachments"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:873
+#: ui/views/mail-list-pane.slint:878
 msgid "Filter and sort mail"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:878
+#: ui/views/mail-list-pane.slint:884
 msgid "Synchronizing mail"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:954
+#: ui/views/mail-list-pane.slint:960
 msgid "Select all messages on this page"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:976
+#: ui/views/mail-list-pane.slint:982
 msgid "Archive selected message"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:994
+#: ui/views/mail-list-pane.slint:1000
 msgid "Delete selected permanently"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1007 ui/views/mail-reading-pane.slint:1275
+#: ui/views/mail-list-pane.slint:1013 ui/views/mail-reading-pane.slint:1275
 msgid "More message actions"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1014
+#: ui/views/mail-list-pane.slint:1020
 msgid "Open in new tabs"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1014 ui/views/mail-list-pane.slint:1740
+#: ui/views/mail-list-pane.slint:1020 ui/views/mail-list-pane.slint:1746
 msgid "Open in new tab"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1758
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1758 ui/views/mail-reading-pane.slint:545
-#: ui/views/mail-list-pane.slint:1019 ui/views/mail-list-pane.slint:1758 ui/views/mail-reading-pane.slint:545 ui/views/mail-reading-pane.slint:595
+#: ui/views/mail-list-pane.slint:1025 ui/views/mail-list-pane.slint:1764
+#: ui/views/mail-list-pane.slint:1025 ui/views/mail-list-pane.slint:1764 ui/views/mail-reading-pane.slint:545
+#: ui/views/mail-list-pane.slint:1025 ui/views/mail-list-pane.slint:1764 ui/views/mail-reading-pane.slint:545 ui/views/mail-reading-pane.slint:595
 msgid "Move to…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1026 ui/views/mail-list-pane.slint:1765
-#: ui/views/mail-list-pane.slint:1026 ui/views/mail-list-pane.slint:1765 ui/views/mail-reading-pane.slint:546
-#: ui/views/mail-list-pane.slint:1026 ui/views/mail-list-pane.slint:1765 ui/views/mail-reading-pane.slint:546 ui/views/mail-reading-pane.slint:596
+#: ui/views/mail-list-pane.slint:1032 ui/views/mail-list-pane.slint:1771
+#: ui/views/mail-list-pane.slint:1032 ui/views/mail-list-pane.slint:1771 ui/views/mail-reading-pane.slint:546
+#: ui/views/mail-list-pane.slint:1032 ui/views/mail-list-pane.slint:1771 ui/views/mail-reading-pane.slint:546 ui/views/mail-reading-pane.slint:596
 msgid "Copy to…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1033 ui/views/mail-reading-pane.slint:498
-#: ui/views/mail-list-pane.slint:1033 ui/views/mail-reading-pane.slint:498 ui/views/mail-reading-pane.slint:558
-#: ui/views/mail-list-pane.slint:1033 ui/views/mail-reading-pane.slint:498 ui/views/mail-reading-pane.slint:558
+#: ui/views/mail-list-pane.slint:1039 ui/views/mail-reading-pane.slint:498
+#: ui/views/mail-list-pane.slint:1039 ui/views/mail-reading-pane.slint:498 ui/views/mail-reading-pane.slint:558
+#: ui/views/mail-list-pane.slint:1039 ui/views/mail-reading-pane.slint:498 ui/views/mail-reading-pane.slint:558
 msgid "Forward as attachment"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1037 ui/views/mail-list-pane.slint:1748
-#: ui/views/mail-list-pane.slint:1037 ui/views/mail-list-pane.slint:1748 ui/views/mail-reading-pane.slint:543
+#: ui/views/mail-list-pane.slint:1043 ui/views/mail-list-pane.slint:1754
+#: ui/views/mail-list-pane.slint:1043 ui/views/mail-list-pane.slint:1754 ui/views/mail-reading-pane.slint:543
 msgid "Unsnooze"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1037 ui/views/mail-list-pane.slint:1748
-#: ui/views/mail-list-pane.slint:1037 ui/views/mail-list-pane.slint:1748 ui/views/mail-reading-pane.slint:543
+#: ui/views/mail-list-pane.slint:1043 ui/views/mail-list-pane.slint:1754
+#: ui/views/mail-list-pane.slint:1043 ui/views/mail-list-pane.slint:1754 ui/views/mail-reading-pane.slint:543
 msgid "Snooze…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1047 ui/views/mail-list-pane.slint:1744
-#: ui/views/mail-list-pane.slint:1047 ui/views/mail-list-pane.slint:1744 ui/views/mail-reading-pane.slint:541
-#: ui/views/mail-list-pane.slint:1047 ui/views/mail-list-pane.slint:1744 ui/views/mail-reading-pane.slint:541 ui/views/mail-reading-pane.slint:594
-#: ui/views/mail-list-pane.slint:1047 ui/views/mail-list-pane.slint:1744 ui/views/mail-reading-pane.slint:541 ui/views/mail-reading-pane.slint:594
+#: ui/views/mail-list-pane.slint:1053 ui/views/mail-list-pane.slint:1750
+#: ui/views/mail-list-pane.slint:1053 ui/views/mail-list-pane.slint:1750 ui/views/mail-reading-pane.slint:541
+#: ui/views/mail-list-pane.slint:1053 ui/views/mail-list-pane.slint:1750 ui/views/mail-reading-pane.slint:541 ui/views/mail-reading-pane.slint:594
+#: ui/views/mail-list-pane.slint:1053 ui/views/mail-list-pane.slint:1750 ui/views/mail-reading-pane.slint:541 ui/views/mail-reading-pane.slint:594
 msgid "Mark as unread"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1049 ui/views/mail-list-pane.slint:1743
-#: ui/views/mail-list-pane.slint:1049 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530
-#: ui/views/mail-list-pane.slint:1049 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
-#: ui/views/mail-list-pane.slint:1049 ui/views/mail-list-pane.slint:1743 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
+#: ui/views/mail-list-pane.slint:1055 ui/views/mail-list-pane.slint:1749
+#: ui/views/mail-list-pane.slint:1055 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530
+#: ui/views/mail-list-pane.slint:1055 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
+#: ui/views/mail-list-pane.slint:1055 ui/views/mail-list-pane.slint:1749 ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:583
 msgid "Remove star"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1197
+#: ui/views/mail-list-pane.slint:1203
 msgid "Profile: {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1198
+#: ui/views/mail-list-pane.slint:1204
 msgid "{} messages"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1201
+#: ui/views/mail-list-pane.slint:1207
 msgid "Verification code {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1203
+#: ui/views/mail-list-pane.slint:1209
 msgid "Replied"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1204 ui/views/mail-reading-pane.slint:468
+#: ui/views/mail-list-pane.slint:1210 ui/views/mail-reading-pane.slint:468
 msgid "No reply yet"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1430
+#: ui/views/mail-list-pane.slint:1436
 msgid "{} messages in this conversation"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1523
+#: ui/views/mail-list-pane.slint:1529
 msgid "Account: {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1595
+#: ui/views/mail-list-pane.slint:1601
 msgid "No reply"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1732
+#: ui/views/mail-list-pane.slint:1738
 msgid "Deselect {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1741
+#: ui/views/mail-list-pane.slint:1747
 msgid "Open in new window"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1772 ui/views/mail-reading-pane.slint:492
-#: ui/views/mail-list-pane.slint:1772 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551
-#: ui/views/mail-list-pane.slint:1772 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
+#: ui/views/mail-list-pane.slint:1778 ui/views/mail-reading-pane.slint:492
+#: ui/views/mail-list-pane.slint:1778 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551
+#: ui/views/mail-list-pane.slint:1778 ui/views/mail-reading-pane.slint:492 ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:597
 msgid "Delete permanently…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1852 ui/views/onboarding-view.slint:162
+#: ui/views/mail-list-pane.slint:1858 ui/views/onboarding-view.slint:162
 msgid "Opening your mailbox…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1852
+#: ui/views/mail-list-pane.slint:1858
 msgid "Nothing here"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1854
+#: ui/views/mail-list-pane.slint:1860
 msgid "Try another folder or search term."
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1854
+#: ui/views/mail-list-pane.slint:1860
 msgid "No mail on this device matches."
 msgstr ""
 
@@ -13124,11 +13124,11 @@ msgstr ""
 msgid "Use across all accounts (local only)"
 msgstr ""
 
-#: ui/views/mail-view.slint:431
+#: ui/views/mail-view.slint:432
 msgid "Message list width"
 msgstr ""
 
-#: ui/views/mail-view.slint:705
+#: ui/views/mail-view.slint:706
 msgid "Close folders"
 msgstr ""
 

@@ -7,7 +7,7 @@ import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { AccountRow } from "../models.slint";
-import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -165,6 +165,7 @@ export component FilesView inherits Rectangle {
     in property <string> layout-mode: "default";
     in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
     callback list-pane-width-committed(length);
+    callback show-settings;
     in property <[AccountRow]> account-model;
     in-out property <bool> sidebar-collapsed: false;
     in-out property <bool> navigation-open <=> FilesUi.navigation-open;
@@ -556,6 +557,13 @@ export component FilesView inherits Rectangle {
                 FilesNavigation { vertical-stretch: 1; account-model: root.account-model;
                     navigate(action, value, scope) => { root.navigate(action, value, scope); }
                     setup => { root.navigation-open = false; root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
+                }
+                DrawerSettingsItem {
+                    divider-inset: 12px;
+                    clicked => {
+                        root.navigation-open = false;
+                        root.show-settings();
+                    }
                 }
             }
         }

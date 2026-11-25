@@ -187,12 +187,14 @@ server announces new mail, where it can, and otherwise every 5 minutes, or as
 often as **Check for new mail** in Settings → General says. To check now, press
 F5 for the accounts the mail view shows, or Shift+F5 or the refresh button
 beside the search field for every account. On a phone, pull the mail list down
-from its top to check the accounts it shows. An account's menu in the sidebar
-(right-click, or hold a finger on it on a phone) checks just that account.
+from its top to check the accounts it shows, or choose **Check for new mail** at
+the end of the search field's menu to check every account. An account's menu in
+the sidebar (right-click, or hold a finger on it on a phone) checks just that
+account.
 
 While a check runs for more than a moment, a small spinner turns beside the
-account's name in the sidebar; it holds still while motion is reduced. When the
-server doesn't accept an account's sign-in, or its checks keep failing for a
+account's name in the sidebar; while motion is reduced, it pulses in place. When
+the server doesn't accept an account's sign-in, or its checks keep failing for a
 minute, a red marker takes its place. Click or tap the marker to see why, with
 **Try again** to check right away, or **Sign in again** when the sign-in needs
 renewing. After a check you asked for, the marker shows at once. Flectar Mail
