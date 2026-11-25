@@ -199,6 +199,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
         tokens,
         credentials,
         pace: Default::default(),
+        metered: Default::default(),
     };
     let (mut config, action_id, inbox_id, archived_message_id) = ctx
         .db
@@ -529,6 +530,7 @@ async fn deleted_mail_context(port: u16) -> (tempfile::TempDir, SyncCtx, Account
         ),
         credentials,
         pace: Default::default(),
+        metered: Default::default(),
     };
     let (mut config, folder) = ctx
         .db

@@ -76,6 +76,10 @@ impl Core {
     /// everything and whose servers don't ask to wait, the one of the newest
     /// mail inside its account's mail history, but those in `failed`.
     async fn next_prefetch(&self, failed: &HashMap<i64, i64>) -> Result<Option<i64>> {
+        // On a metered connection, when the device chose so, they wait.
+        if self.metered.downloads_wait() {
+            return Ok(None);
+        }
         let mut next = None::<(i64, i64)>;
         for config in self.list_account_configs().await? {
             let everything = config.settings.download == DownloadPolicy::Everything
@@ -183,6 +187,27 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+        // So do all on a metered connection, when the device chose so.
+        let metered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = metered.clone();
+        core.set_metered_probe(std::sync::Arc::new(move || {
+            probe.load(std::sync::atomic::Ordering::SeqCst)
+        }))
+        .await;
+        let mut settings = core
+            .db
+            .read(|conn| db::repo::settings::get(conn))
+            .await
+            .unwrap();
+        settings.pause_downloads_when_metered = true;
+        core.set_settings(settings).await.unwrap();
+        assert!(core.downloads_wait());
+        assert_eq!(core.next_prefetch(&HashMap::new()).await.unwrap(), None);
+        metered.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            core.next_prefetch(&HashMap::new()).await.unwrap(),
+            Some(attachment)
         );
 
         // A JMAP server sends each attachment as its blob.

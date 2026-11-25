@@ -1033,6 +1033,9 @@ pub struct Core {
     transfers: Arc<tokio::sync::Notify>,
     /// Wakes the loop that downloads attachments ahead of time (#253).
     prefetch: Arc<tokio::sync::Notify>,
+    /// Whether downloading ahead of time waits on a metered connection
+    /// (#253).
+    metered: Arc<net::metered::Metered>,
     /// Flectar Mail Sync: this device's setup kept the same on the user's other
     /// devices.
     device_sync: Arc<device_sync::Service>,
@@ -1155,6 +1158,7 @@ impl Core {
             ai_router_lock: Arc::new(tokio::sync::Mutex::new(())),
             transfers: Arc::new(tokio::sync::Notify::new()),
             prefetch: Arc::new(tokio::sync::Notify::new()),
+            metered: Arc::default(),
             device_sync: Arc::new(device_sync::Service::new()),
             accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
             missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
@@ -1196,6 +1200,8 @@ impl Core {
         // needs a token refresh.
         let settings = core.db.read(|conn| repo::settings::get(conn)).await?;
         apply_oauth_settings(&settings);
+        core.metered
+            .set_pause(settings.pause_downloads_when_metered);
         // And the proxy settings before any connection opens.
         core.load_proxy_settings().await?;
 
@@ -1530,6 +1536,7 @@ impl Core {
             tokens: self.tokens.clone(),
             credentials: self.credentials.clone(),
             pace: self.pace.clone(),
+            metered: self.metered.clone(),
         }
     }
 
@@ -11397,7 +11404,47 @@ impl Core {
         if synced {
             self.device_sync_now();
         }
+        // Downloads that waited for an unmetered connection go on (#253).
+        if self
+            .metered
+            .set_pause(oauth_settings.pause_downloads_when_metered)
+        {
+            self.downloads_may_go_on().await;
+        }
         Ok(())
+    }
+
+    /// Tell how this device finds out whether its connection is metered,
+    /// such as a phone's mobile data (#253). Downloading ahead of time
+    /// waits on one when the device chose so.
+    pub async fn set_metered_probe(&self, probe: net::metered::Probe) {
+        self.metered.set_probe(probe);
+        self.downloads_may_go_on().await;
+    }
+
+    /// The platform says the connection changed between metered and not:
+    /// downloads that waited go on at once (#253).
+    pub async fn metered_changed(&self) {
+        self.downloads_may_go_on().await;
+    }
+
+    /// Whether downloading ahead of time waits now, on a metered connection.
+    pub fn downloads_wait(&self) -> bool {
+        self.metered.downloads_wait()
+    }
+
+    /// Whether this device's connection is metered, as its system tells.
+    pub fn connection_metered(&self) -> bool {
+        self.metered.is_metered()
+    }
+
+    /// Wakes the workers that download ahead of time, so ones that waited
+    /// for an unmetered connection look again.
+    async fn downloads_may_go_on(&self) {
+        self.prefetch.notify_one();
+        for handle in self.handles.read().await.values() {
+            handle.send(SyncCmd::SyncNow { complete: None });
+        }
     }
 
     /// Create or update a local mail profile without touching provider state.

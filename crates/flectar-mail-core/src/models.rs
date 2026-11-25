@@ -3289,6 +3289,11 @@ pub struct Settings {
     /// The interface's text size.
     #[serde(default)]
     pub interface_text_size: InterfaceTextSize,
+    /// On a metered connection, such as a phone's mobile data, accounts
+    /// check for mail but download messages only when they're opened
+    /// (#253). Each device keeps its own.
+    #[serde(default)]
+    pub pause_downloads_when_metered: bool,
     /// What to do when a message asks for a read receipt.
     #[serde(default)]
     pub read_receipts: ReadReceiptPolicy,
@@ -3785,6 +3790,7 @@ impl Default for Settings {
             message_appearance: MessageAppearance::default(),
             reduce_motion: ReduceMotion::default(),
             interface_text_size: InterfaceTextSize::default(),
+            pause_downloads_when_metered: false,
             read_receipts: ReadReceiptPolicy::default(),
             empty_trash_after_days: 0,
             empty_junk_after_days: 0,
