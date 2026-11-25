@@ -16,6 +16,17 @@ static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ohos";
 
+/// How the host reads the system's proxy settings; see
+/// [`configure_system_proxy`].
+pub use flectar_mail_core::net::proxy::SystemProxies;
+
+/// Supply the reader of the system's proxy settings, before the first
+/// connection. The first reader counts.
+pub fn configure_system_proxy(reader: impl SystemProxies + 'static) {
+    static CONFIGURED: std::sync::Once = std::sync::Once::new();
+    CONFIGURED.call_once(|| flectar_mail_core::net::proxy::set_system_source(reader));
+}
+
 /// The native window is the app while the page is showing; account changes
 /// that request notification permission come from that foreground session.
 pub(crate) fn app_is_active() -> bool {

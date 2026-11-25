@@ -24,6 +24,7 @@ use slint_ohos_backend::ffi::{self, napi_env, napi_value};
 
 mod bridge;
 mod documents;
+mod proxy;
 
 /// NAPI module name; must match the XComponent `libraryname` in the ArkTS page
 /// (the loader resolves it to `libflectar_mail_ohos.so`).
@@ -335,6 +336,9 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         han_families: &slint_ohos_backend::fonts::HAN_FAMILIES,
         fallback_scripts: &slint_ohos_backend::fonts::FALLBACK_SCRIPTS,
     });
+    // Read the system HTTP proxy before the first connection; the shared
+    // network layer applies it to HTTP(S) traffic.
+    proxy::install();
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())
