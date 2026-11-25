@@ -484,6 +484,14 @@ keeps the native traffic lights, Windows keeps Snap Layouts and the system menu,
 and Linux follows the button order and title-bar actions configured for GNOME or
 KDE.
 
+The window opens at the size it had when you last closed it, and maximized
+again if it was. Windows and macOS also put it back where it was, as long as
+that is still on a screen, while on Linux the window manager places it. A
+message moved into a window of its own opens at the size the last one had. With
+**Write in a new window** on in Settings → General → Writing, new messages,
+replies, forwards and drafts open in a window of their own, so your mail stays
+in view while you write.
+
 ## Calendar, contacts, and files
 
 Mail, calendars, and contacts sit side by side, synced over Google, Microsoft,

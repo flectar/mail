@@ -83,6 +83,7 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "previewLines",
     "composeFont",
     "composeTextSize",
+    "composeInWindow",
     "emptyTrashAfterDays",
     "emptyJunkAfterDays",
     "linkExpiryDays",
