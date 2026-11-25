@@ -1145,6 +1145,7 @@ export component AppWindow inherits Window {
     callback save_show_tabs(bool);
     callback save_spelling_enabled(bool);
     callback save_conversation_view(bool);
+    callback save_keep_messages_open(bool);
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
     callback clear_download_directory();
@@ -1529,6 +1530,8 @@ export component AppWindow inherits Window {
     in-out property <bool> group_mail_by_date: true;
     // Group replies into conversations; off lists each message on its own.
     in-out property <bool> conversation_view: true;
+    // Messages opened in a conversation stay open together (#435).
+    in-out property <bool> keep_messages_open: false;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
@@ -2406,6 +2409,7 @@ export component AppWindow inherits Window {
             spelling_system: root.spelling_system;
             group_mail_by_date <=> root.group_mail_by_date;
             conversation_view <=> root.conversation_view;
+            keep_messages_open <=> root.keep_messages_open;
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
@@ -2537,6 +2541,7 @@ export component AppWindow inherits Window {
             save_mark_read(choice) => { root.save_mark_read(choice); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
+            save_keep_messages_open(enabled) => { root.save_keep_messages_open(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
                 root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
             }
