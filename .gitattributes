@@ -2,6 +2,7 @@
 crates/i-slint-backend-winit/** linguist-vendored -whitespace
 crates/i-slint-backend-android-activity/** linguist-vendored -whitespace
 crates/i-slint-renderer-software/** linguist-vendored -whitespace
+crates/i-slint-core/** linguist-vendored -whitespace
 crates/smithay-clipboard/** linguist-vendored -whitespace
 crates/fontique/** linguist-vendored -whitespace
 crates/vello/** linguist-vendored -whitespace

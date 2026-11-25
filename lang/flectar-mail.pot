@@ -225,7 +225,7 @@ msgid ""
 "them."
 msgstr ""
 
-#: ui/ai.slint:127 ui/network.slint:128 ui/network.slint:144
+#: ui/ai.slint:127 ui/network.slint:140 ui/network.slint:156
 msgid "Server"
 msgstr ""
 
@@ -268,9 +268,9 @@ msgstr ""
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563
 #: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:313
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:313 ui/translation.slint:378 ui/views/files-view.slint:657
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:313 ui/translation.slint:378 ui/views/files-view.slint:657
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:657
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:563 ui/dialogs/folder-dialog.slint:135 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:657
 msgid "Save"
 msgstr ""
 
@@ -2859,7 +2859,7 @@ msgstr ""
 msgid "{} wrote:"
 msgstr ""
 
-#: ui/app.slint:860 ui/components/email-composer.slint:960
+#: ui/app.slint:860 ui/components/email-composer.slint:963
 msgid "Forwarded message"
 msgstr ""
 
@@ -3299,7 +3299,7 @@ msgstr ""
 msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr ""
 
-#: ui/app.slint:966 ui/network.slint:194
+#: ui/app.slint:966 ui/network.slint:206
 msgid "Saved."
 msgstr ""
 
@@ -3393,7 +3393,7 @@ msgstr ""
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2760 ui/components/email-composer.slint:1282
+#: ui/app.slint:2760 ui/components/email-composer.slint:1285
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
@@ -3869,9 +3869,9 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104
 #: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:421
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:469
-#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:421 ui/views/files-view.slint:469 ui/views/mail-reading-pane.slint:2521
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:433
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:469
+#: ui/components/account-mail-preferences.slint:421 ui/components/rule-editor.slint:516 ui/device-sync.slint:1412 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4473 ui/dialogs/settings-dialog.slint:4811 ui/dialogs/settings-dialog.slint:5104 ui/link-services.slint:120 ui/network.slint:433 ui/views/files-view.slint:469 ui/views/mail-reading-pane.slint:2521
 msgid "Cancel"
 msgstr ""
 
@@ -4029,7 +4029,7 @@ msgid "Senders from other domains get no reply."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:563
-#: ui/components/account-mail-preferences.slint:563 ui/network.slint:191
+#: ui/components/account-mail-preferences.slint:563 ui/network.slint:203
 msgid "Saving…"
 msgstr ""
 
@@ -5325,75 +5325,75 @@ msgstr ""
 msgid "No dictionaries installed"
 msgstr ""
 
-#: ui/components/email-composer.slint:960
+#: ui/components/email-composer.slint:963
 msgid "Quoted text"
 msgstr ""
 
-#: ui/components/email-composer.slint:966
+#: ui/components/email-composer.slint:969
 msgid "Hide the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:966
+#: ui/components/email-composer.slint:969
 msgid "Show the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:977
+#: ui/components/email-composer.slint:980
 msgid "Edit the quoted message as text"
 msgstr ""
 
-#: ui/components/email-composer.slint:988
+#: ui/components/email-composer.slint:991
 msgid "Remove the forwarded message"
 msgstr ""
 
-#: ui/components/email-composer.slint:988
+#: ui/components/email-composer.slint:991
 msgid "Remove the quoted message"
 msgstr ""
 
-#: ui/components/email-composer.slint:1019
+#: ui/components/email-composer.slint:1022
 msgid "Add the forwarded message back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1019
+#: ui/components/email-composer.slint:1022
 msgid "Add the quoted text back"
 msgstr ""
 
-#: ui/components/email-composer.slint:1179
+#: ui/components/email-composer.slint:1182
 msgid "Send without a subject?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1179
+#: ui/components/email-composer.slint:1182
 msgid "Did you mean to attach a file?"
 msgstr ""
 
-#: ui/components/email-composer.slint:1181
+#: ui/components/email-composer.slint:1184
 msgid "People see the subject first, in their list of mail."
 msgstr ""
 
-#: ui/components/email-composer.slint:1182
+#: ui/components/email-composer.slint:1185
 msgid "The message mentions “{}”, but has no file attached."
 msgstr ""
 
-#: ui/components/email-composer.slint:1184
+#: ui/components/email-composer.slint:1187
 msgid "Send without subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1184
+#: ui/components/email-composer.slint:1187
 msgid "Send anyway"
 msgstr ""
 
-#: ui/components/email-composer.slint:1185
+#: ui/components/email-composer.slint:1188
 msgid "Add a subject"
 msgstr ""
 
-#: ui/components/email-composer.slint:1186
+#: ui/components/email-composer.slint:1189
 msgid "Attach files…"
 msgstr ""
 
-#: ui/components/email-composer.slint:1235
+#: ui/components/email-composer.slint:1238
 msgid "Send from"
 msgstr ""
 
-#: ui/components/email-composer.slint:1274
+#: ui/components/email-composer.slint:1277
 msgid "Drop to add to your message"
 msgstr ""
 
@@ -10753,8 +10753,8 @@ msgid "imap.example.com"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4756
-#: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4756 ui/network.slint:151 ui/views/onboarding-view.slint:404
-#: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4756 ui/network.slint:151 ui/views/onboarding-view.slint:404
+#: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4756 ui/network.slint:163 ui/views/onboarding-view.slint:404
+#: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4756 ui/network.slint:163 ui/views/onboarding-view.slint:404
 msgid "Port"
 msgstr ""
 
@@ -11338,190 +11338,212 @@ msgstr ""
 msgid "Unified Drafts"
 msgstr ""
 
-#: ui/network.slint:114
+#: ui/network.slint:126
 msgid "Kind of proxy"
 msgstr ""
 
-#: ui/network.slint:116
+#: ui/network.slint:128
 msgid ""
 "The proxy looks up the servers' names too, so this computer's network "
 "doesn't see them."
 msgstr ""
 
-#: ui/network.slint:117
+#: ui/network.slint:129
 msgid ""
 "Many HTTP proxies only let web connections through, so mail servers may be "
 "refused."
 msgstr ""
 
-#: ui/network.slint:158
+#: ui/network.slint:170
 msgid "User name, if the proxy asks for one"
 msgstr ""
 
-#: ui/network.slint:167
+#: ui/network.slint:179
 msgid "A password is saved."
 msgstr ""
 
-#: ui/network.slint:174
+#: ui/network.slint:186
 msgid "Remove password"
 msgstr ""
 
-#: ui/network.slint:179
+#: ui/network.slint:191
 msgid "Password"
 msgstr ""
 
-#: ui/network.slint:192
+#: ui/network.slint:204
 msgid "Connecting through the proxy…"
 msgstr ""
 
-#: ui/network.slint:193
+#: ui/network.slint:205
 msgid "Your mail server answered through the proxy."
 msgstr ""
 
-#: ui/network.slint:201
+#: ui/network.slint:213
 msgid "Enter a port from 1 to 65535."
 msgstr ""
 
-#: ui/network.slint:202
+#: ui/network.slint:214
 msgid "The proxy can't be reached. Check its server and port."
 msgstr ""
 
-#: ui/network.slint:203
+#: ui/network.slint:215
 msgid "The proxy didn't answer in time."
 msgstr ""
 
-#: ui/network.slint:204
+#: ui/network.slint:216
 msgid "The proxy asks for a user name and password."
 msgstr ""
 
-#: ui/network.slint:205
+#: ui/network.slint:217
 msgid "The proxy didn't accept the user name and password."
 msgstr ""
 
-#: ui/network.slint:206
+#: ui/network.slint:218
 msgid "The proxy asks for {} sign-in, which Flectar Mail doesn't support."
 msgstr ""
 
-#: ui/network.slint:207
+#: ui/network.slint:219
 msgid ""
 "The proxy asks for a way of signing in that Flectar Mail doesn't support."
 msgstr ""
 
-#: ui/network.slint:208
+#: ui/network.slint:220
 msgid ""
 "The proxy didn't connect to your mail server. Many proxies only let web "
 "connections through."
 msgstr ""
 
-#: ui/network.slint:209
+#: ui/network.slint:221
 msgid ""
 "The proxy's answer can't be read. Check that it's the kind of proxy chosen "
 "above."
 msgstr ""
 
-#: ui/network.slint:210
+#: ui/network.slint:222
 msgid "Your mail server can't be reached through the proxy. {}"
 msgstr ""
 
-#: ui/network.slint:211
+#: ui/network.slint:223
 msgid "Your mail server can't be reached through the proxy."
 msgstr ""
 
-#: ui/network.slint:212
+#: ui/network.slint:224
 msgid ""
 "The password can't be saved, as the system's password storage isn't "
 "available."
 msgstr ""
 
-#: ui/network.slint:214
+#: ui/network.slint:226
 msgid "The proxy settings can't be saved."
 msgstr ""
 
-#: ui/network.slint:243
+#: ui/network.slint:255
 msgid ""
 "How Flectar Mail reaches mail servers and everything else it loads, such as "
 "pictures in messages."
 msgstr ""
 
-#: ui/network.slint:262
+#: ui/network.slint:274
 msgid "Proxy"
 msgstr ""
 
-#: ui/network.slint:265
+#: ui/network.slint:277
 msgid "Connect through"
 msgstr ""
 
-#: ui/network.slint:267
+#: ui/network.slint:279
 msgid ""
 "The proxy your system is set up with. Mail servers go through its SOCKS "
 "proxy only, as web proxies often refuse them."
 msgstr ""
 
-#: ui/network.slint:269
+#: ui/network.slint:281
 msgid "Every connection goes straight to its server."
 msgstr ""
 
-#: ui/network.slint:270
+#: ui/network.slint:282
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
 
-#: ui/network.slint:271
+#: ui/network.slint:283
 msgid "System settings"
 msgstr ""
 
-#: ui/network.slint:271 ui/network.slint:369
+#: ui/network.slint:283 ui/network.slint:381
 msgid "No proxy"
 msgstr ""
 
-#: ui/network.slint:271
+#: ui/network.slint:283
 msgid "This proxy"
 msgstr ""
 
-#: ui/network.slint:295
+#: ui/network.slint:307
 msgid "Don't use the proxy for"
 msgstr ""
 
-#: ui/network.slint:302
+#: ui/network.slint:314
 msgid ""
 "Separate names and addresses with commas. A name covers its subdomains. "
 "Servers on this computer never use the proxy."
 msgstr ""
 
-#: ui/network.slint:354
+#: ui/network.slint:366
 msgid ""
 "An account can connect without a proxy, or through one of its own, along "
 "with its calendars, contacts and files."
 msgstr ""
 
-#: ui/network.slint:365
+#: ui/network.slint:377
 msgid "The proxy above."
 msgstr ""
 
-#: ui/network.slint:366
+#: ui/network.slint:378
 msgid "No proxy."
 msgstr ""
 
-#: ui/network.slint:367
+#: ui/network.slint:379
 msgid "Its own proxy, {}."
 msgstr ""
 
-#: ui/network.slint:368
+#: ui/network.slint:380
 msgid "Its own proxy."
 msgstr ""
 
-#: ui/network.slint:369
+#: ui/network.slint:381
 msgid "Same as above"
 msgstr ""
 
-#: ui/network.slint:369
+#: ui/network.slint:381
 msgid "Its own proxy"
 msgstr ""
 
-#: ui/network.slint:383
+#: ui/network.slint:395
 msgid "Change proxy"
+msgstr ""
+
+#: ui/network.slint:472
+msgid "Metered connections"
+msgstr ""
+
+#: ui/network.slint:476
+msgid "Pause downloads"
+msgstr ""
+
+#: ui/network.slint:477
+msgid ""
+"On a metered connection, such as mobile data or a hotspot, accounts still "
+"check for new mail, and messages and attachments download when you open them."
+msgstr ""
+
+#: ui/network.slint:488
+msgid "This connection is metered, so downloads wait."
+msgstr ""
+
+#: ui/network.slint:489
+msgid "This connection is metered."
 msgstr ""
 
 #: ui/read-receipts.slint:47

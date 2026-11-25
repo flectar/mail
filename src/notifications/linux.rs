@@ -331,7 +331,10 @@ mod imp {
         APP_ID, Alert, AlertId, CALL_TIMEOUT, Failure, FixedWords, body_text, session_bus,
     };
     use crate::notifications::{Act, Response, respond};
-    use ashpd::{zbus, zvariant};
+    use ashpd::{
+        zbus::{self, names::OwnedUniqueName},
+        zvariant,
+    };
     use futures_util::StreamExt;
     use std::{
         collections::HashMap,
@@ -360,6 +363,11 @@ mod imp {
         /// Activation tokens the server sent ahead of the click they belong
         /// to.
         tokens: HashMap<u32, String>,
+        /// The connection that answered when the last notification was
+        /// shown, which sends the signals about it. Any client of the bus can
+        /// send signals that look like the server's, such as a click on a
+        /// button that deletes a message.
+        server: Option<OwnedUniqueName>,
     }
 
     impl Shown {
@@ -368,6 +376,48 @@ mod imp {
                 self.ids.remove(&alert.id);
             }
             self.tokens.remove(&id);
+        }
+
+        /// What a signal from the server asks for. Signals from any other
+        /// connection are ignored.
+        fn heard(&mut self, message: &zbus::Message) -> Option<Response> {
+            let header = message.header();
+            let from_server = match (header.sender(), &self.server) {
+                (Some(sender), Some(server)) => *server == *sender,
+                _ => false,
+            };
+            if !from_server {
+                return None;
+            }
+            let body = message.body();
+            match header.member()?.as_str() {
+                "ActivationToken" => {
+                    let (id, token) = body.deserialize::<(u32, String)>().ok()?;
+                    self.tokens.insert(id, token);
+                    None
+                }
+                "ActionInvoked" => {
+                    let (id, key) = body.deserialize::<(u32, String)>().ok()?;
+                    let act = if key == "default" {
+                        Some(Act::Open)
+                    } else {
+                        Act::parse(&key)
+                    };
+                    let activation_token = self.tokens.remove(&id);
+                    let route = self.alerts.get(&id)?.open;
+                    Some(Response {
+                        route,
+                        act: act?,
+                        activation_token,
+                    })
+                }
+                "NotificationClosed" => {
+                    let (id, _reason) = body.deserialize::<(u32, u32)>().ok()?;
+                    self.forget(id);
+                    None
+                }
+                _ => None,
+            }
         }
     }
 
@@ -447,9 +497,9 @@ mod imp {
                 hints,
                 -1_i32,
             );
-            let call = self.proxy.call::<_, _, u32>("Notify", &arguments);
-            let id = match tokio::time::timeout(CALL_TIMEOUT, call).await {
-                Ok(Ok(id)) => id,
+            let call = self.proxy.call_method("Notify", &arguments);
+            let reply = match tokio::time::timeout(CALL_TIMEOUT, call).await {
+                Ok(Ok(reply)) => reply,
                 Ok(Err(error)) => return Err(Failure::Retry(error.to_string())),
                 Err(_) => {
                     return Err(Failure::Retry(
@@ -457,7 +507,14 @@ mod imp {
                     ));
                 }
             };
+            let id = reply
+                .body()
+                .deserialize::<u32>()
+                .map_err(|error| Failure::Retry(error.to_string()))?;
             let mut shown = self.shown.lock().unwrap_or_else(PoisonError::into_inner);
+            // The bus names the connection that answered, and no other
+            // client can pose as it.
+            shown.server = reply.header().sender().cloned().map(OwnedUniqueName::from);
             if replaces != 0 && replaces != id {
                 shown.forget(replaces);
             }
@@ -490,8 +547,12 @@ mod imp {
     /// Follow the server's signals in the order it sends them: an activation
     /// token arrives just before the click it is for.
     async fn listen(connection: &zbus::Connection, shown: Arc<Mutex<Shown>>) -> Option<()> {
+        // The bus passes on a broadcast only from the name's owner, but a
+        // signal sent to this connection alone arrives whoever sent it.
         let rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
+            .sender(DESTINATION)
+            .ok()?
             .interface(DESTINATION)
             .ok()?
             .path(PATH)
@@ -502,49 +563,12 @@ mod imp {
             .ok()?;
         tokio::spawn(async move {
             while let Some(Ok(message)) = signals.next().await {
-                let header = message.header();
-                let body = message.body();
-                match header.member().map(|member| member.as_str()) {
-                    Some("ActivationToken") => {
-                        if let Ok((id, token)) = body.deserialize::<(u32, String)>() {
-                            shown
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .tokens
-                                .insert(id, token);
-                        }
-                    }
-                    Some("ActionInvoked") => {
-                        let Ok((id, key)) = body.deserialize::<(u32, String)>() else {
-                            continue;
-                        };
-                        let act = if key == "default" {
-                            Some(Act::Open)
-                        } else {
-                            Act::parse(&key)
-                        };
-                        let clicked = {
-                            let mut shown = shown.lock().unwrap_or_else(PoisonError::into_inner);
-                            let token = shown.tokens.remove(&id);
-                            shown.alerts.get(&id).map(|alert| (alert.open, token))
-                        };
-                        if let (Some(act), Some((route, activation_token))) = (act, clicked) {
-                            respond(Response {
-                                route,
-                                act,
-                                activation_token,
-                            });
-                        }
-                    }
-                    Some("NotificationClosed") => {
-                        if let Ok((id, _reason)) = body.deserialize::<(u32, u32)>() {
-                            shown
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .forget(id);
-                        }
-                    }
-                    _ => {}
+                let response = shown
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .heard(&message);
+                if let Some(response) = response {
+                    respond(response);
                 }
             }
         });
@@ -567,12 +591,89 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
+        use super::{
+            Act, Alert, AlertId, DESTINATION, OwnedUniqueName, PATH, Response, Shown, zbus,
+            zvariant,
+        };
+        use crate::notifications::Route;
+
         #[test]
         fn markup_from_the_sender_is_escaped() {
             assert_eq!(
                 super::escape_markup("Tom & <jerry@example.com>"),
                 "Tom &amp; &lt;jerry@example.com&gt;"
             );
+        }
+
+        fn signal<B>(sender: &str, member: &str, body: &B) -> zbus::Message
+        where
+            B: serde::Serialize + zvariant::DynamicType,
+        {
+            zbus::Message::signal(PATH, DESTINATION, member)
+                .unwrap()
+                .sender(sender)
+                .unwrap()
+                .build(body)
+                .unwrap()
+        }
+
+        /// Any client of the session bus, a sandboxed app among them, can
+        /// send what looks like the notification server's signals. Only the
+        /// connection that answered when the notification was shown is heard.
+        #[test]
+        fn only_the_server_that_showed_a_notification_is_heard() {
+            let open = Route {
+                account_id: 1,
+                thread_id: Some(2),
+                message_id: Some(3),
+            };
+            let mut shown = Shown {
+                server: OwnedUniqueName::try_from(":1.2").ok(),
+                ..Shown::default()
+            };
+            shown.alerts.insert(
+                7,
+                Alert {
+                    id: AlertId::Message {
+                        account_id: 1,
+                        message_id: 3,
+                    },
+                    count: 1,
+                    title: "Ada".into(),
+                    body: "Hello".into(),
+                    preview: None,
+                    account: None,
+                    received_at: 0,
+                    sound: false,
+                    open,
+                    actions: Vec::new(),
+                },
+            );
+
+            assert_eq!(
+                shown.heard(&signal(":1.2", "ActivationToken", &(7_u32, "token"))),
+                None
+            );
+            for forged in [
+                signal(":1.9", "ActivationToken", &(7_u32, "forged")),
+                signal(":1.9", "NotificationClosed", &(7_u32, 2_u32)),
+                signal(":1.9", "ActionInvoked", &(7_u32, "delete")),
+            ] {
+                assert_eq!(shown.heard(&forged), None);
+            }
+            assert_eq!(
+                shown.heard(&signal(":1.2", "ActionInvoked", &(7_u32, "archive"))),
+                Some(Response {
+                    route: open,
+                    act: Act::Archive,
+                    activation_token: Some("token".into()),
+                })
+            );
+            assert_eq!(
+                shown.heard(&signal(":1.2", "NotificationClosed", &(7_u32, 2_u32))),
+                None
+            );
+            assert!(shown.alerts.is_empty());
         }
     }
 }
