@@ -102,9 +102,6 @@ const EMAIL_FONT_FALLBACK_STYLE: &str = r#"
   html, body {
     font-family: Arial, "Liberation Sans", "Noto Sans", sans-serif;
   }
-  pre, code, kbd, samp {
-    font-family: "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace;
-  }
 </style>
 "#;
 
@@ -2118,6 +2115,25 @@ fn create_email_font_ctx_with_han_fallback(system_fonts: bool) -> EmailFontCtx {
         .collection
         .set_generic_families(GenericFamily::SansSerif, sans_families.into_iter());
 
+    // `pre`, `code`, `kbd` and `samp` are plain `monospace`, as in browsers,
+    // which then size them at 13px where text is 16px; a named family would
+    // keep them at 16px. The generic family prefers these fonts instead.
+    let mut mono_families: Vec<_> = ["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
+        .into_iter()
+        .filter_map(|name| font_ctx.collection.family_id(name))
+        .collect();
+    for family in font_ctx
+        .collection
+        .generic_families(GenericFamily::Monospace)
+    {
+        if !mono_families.contains(&family) {
+            mono_families.push(family);
+        }
+    }
+    font_ctx
+        .collection
+        .set_generic_families(GenericFamily::Monospace, mono_families.into_iter());
+
     // Runs with only an unavailable named family resolve through script
     // fallback. Cover Latin plus Common, which contains digits and punctuation.
     for script in [*b"Latn", *b"Zyyy"] {
@@ -2573,6 +2589,45 @@ mod tests {
             .generic_families(GenericFamily::SansSerif)
             .next();
         assert_eq!(first, Some(helvetica_neue));
+    }
+
+    #[test]
+    fn code_is_sized_like_browsers_size_monospace() {
+        use parley::fontique::GenericFamily;
+
+        // Browsers size plain `monospace` text at 13px where other text is
+        // 16px, unless the family list names more than that one generic.
+        let mut prepared = prepare_email_html(
+            r#"<pre id="pre">x</pre><p><code id="code">y</code></p><p><code id="named" style="font-family: monospace, monospace">z</code></p>"#,
+        )
+        .unwrap();
+        prepared.document.resolve(0.0);
+        let font_size = |id: &str| {
+            let node_id = prepared
+                .document
+                .query_selector(&format!("#{id}"))
+                .unwrap()
+                .unwrap();
+            let node = prepared.document.get_node(node_id).unwrap();
+            node.primary_styles()
+                .unwrap()
+                .get_font()
+                .font_size
+                .computed_size()
+                .px()
+        };
+        assert_eq!(font_size("pre"), 13.0);
+        assert_eq!(font_size("code"), 13.0);
+        assert_eq!(font_size("named"), 16.0);
+
+        let mut font_ctx = super::build_email_font_ctx();
+        if let Some(dejavu) = font_ctx.collection.family_id("DejaVu Sans Mono") {
+            let first = font_ctx
+                .collection
+                .generic_families(GenericFamily::Monospace)
+                .next();
+            assert_eq!(first, Some(dejavu));
+        }
     }
 
     #[test]
