@@ -1,15 +1,16 @@
 //! Whether the device's connection costs by the byte (#253), as the system
 //! tells: Windows from the connection's data plan, macOS and iOS from an
 //! expensive path or Low Data Mode, Android from its connectivity manager,
-//! and Linux from the desktop portal's network monitor or NetworkManager.
-//! Each watcher reports the answer at once and again whenever it changes.
+//! HarmonyOS from Network Kit, and Linux from the desktop portal's network
+//! monitor or NetworkManager. Each watcher reports the answer at once and
+//! again whenever it changes.
 
-#[cfg(target_os = "android")]
-mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
 #[cfg(linux_desktop)]
 mod linux;
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+mod polled;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -36,15 +37,16 @@ pub(crate) fn watch(
         apple::watch(changed);
         true
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
     {
-        android::watch(changed, runtime)
+        polled::watch(changed, runtime)
     }
     #[cfg(not(any(
         linux_desktop,
         target_os = "windows",
         target_vendor = "apple",
-        target_os = "android"
+        target_os = "android",
+        target_env = "ohos"
     )))]
     {
         let _ = (changed, runtime);

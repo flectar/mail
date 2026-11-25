@@ -24,11 +24,14 @@
         skills: [{ entities: ['entity.system.home'], actions: ['ohos.want.action.home'] }],
       },
     ],
-    // Socket access for IMAP/SMTP/OAuth, plus the ACL permission that lets
-    // the app read the clipboard for paste. The packaging step in
-    // scripts/build-hap.sh re-asserts this list (deduped).
+    // Socket access for IMAP/SMTP/OAuth, whether the network is metered,
+    // plus the ACL permission that lets the app read the clipboard for paste.
+    // The packaging step in scripts/build-hap.sh re-asserts this list
+    // (deduped).
     requestPermissions: [
       { name: 'ohos.permission.INTERNET' },
+      // A normal permission the system grants at install, without asking.
+      { name: 'ohos.permission.GET_NETWORK_INFO' },
       {
         name: 'ohos.permission.READ_PASTEBOARD',
         reason: '$string:pasteboard_permission_reason',
