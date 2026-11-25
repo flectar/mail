@@ -126,11 +126,28 @@ pub(crate) fn sells_sync() -> bool {
     false
 }
 
-/// How this device appears in Flectar Mail Sync's device list.
+/// The device's market name, which the host reads before the app starts.
+static DEVICE_NAME: OnceLock<String> = OnceLock::new();
+
+/// Supply the device's market name, such as "HUAWEI MateBook Pro", before the
+/// application starts. A blank name leaves the shared default.
+pub fn configure_device_name(name: &str) {
+    let name = name.trim();
+    if !name.is_empty() {
+        let _ = DEVICE_NAME.set(name.to_owned());
+    }
+}
+
+/// How this device appears in Flectar Mail Sync's device list: by its market
+/// name, as Android uses its model name, or else by the shared default.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    let name = match DEVICE_NAME.get() {
+        Some(name) => name.clone(),
+        None => flectar_mail_core::device_sync::DeviceDescription::default().name,
+    };
     flectar_mail_core::device_sync::DeviceDescription {
+        name,
         platform: "harmonyos".to_owned(),
-        ..Default::default()
     }
 }
 

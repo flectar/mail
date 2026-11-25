@@ -23,6 +23,7 @@ use flectar_mail::flectar_mail_core::error::{CoreError, Result as CoreResult};
 use slint_ohos_backend::ffi::{self, napi_env, napi_value};
 
 mod bridge;
+mod device;
 mod documents;
 mod proxy;
 
@@ -329,6 +330,10 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     });
     bridge::install_app_language(app_language.clone());
     platform.app_language = app_language;
+    // Flectar Mail Sync lists this device by its market name.
+    if let Some(name) = device::name() {
+        flectar_mail::platform::configure_device_name(&name);
+    }
     // Mail content and the composer fall back to the same system faces as the
     // Slint UI the backend set up.
     flectar_mail::platform::configure_email_fonts(flectar_mail::platform::EmailFonts {

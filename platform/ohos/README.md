@@ -191,6 +191,10 @@ handled (and asserted) in the script, do not "simplify" them away:
   path. Import/export goes through the system document picker via the host
   `DocumentProvider`, and credentials live in the system Asset Store, never
   in plain files.
+- **Sync device name**: before the app starts, the host reads the market name
+  (`OH_GetMarketName`, or `OH_GetProductModel` when there is none), so Flectar
+  Mail Sync lists this device by a name people know instead of "Unnamed
+  device".
 
 ## Lint
 
