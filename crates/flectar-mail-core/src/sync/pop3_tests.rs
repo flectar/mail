@@ -252,6 +252,7 @@ async fn fixture(maildrop: Vec<Stored>) -> Fixture {
         ),
         credentials,
         pace: Default::default(),
+        metered: Default::default(),
     };
     let mut settings = AccountSettings::new(MailConnectionSettings::new(
         ConnectionSecurity::None,

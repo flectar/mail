@@ -2146,7 +2146,7 @@ async fn download_bodies(
     c: &ConnectedClient,
     budget: &mut i64,
 ) -> Result<bool> {
-    if config.settings.download == DownloadPolicy::Headers {
+    if config.settings.download == DownloadPolicy::Headers || ctx.metered.downloads_wait() {
         return Ok(false);
     }
     let account_id = config.id;

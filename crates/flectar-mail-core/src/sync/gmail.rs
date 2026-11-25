@@ -5162,6 +5162,7 @@ mod tests {
             ),
             credentials,
             pace: Default::default(),
+            metered: Default::default(),
         };
         let config = ctx
             .db

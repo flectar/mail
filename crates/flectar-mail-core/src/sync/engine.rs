@@ -406,6 +406,9 @@ pub struct SyncCtx {
     /// When each account's server asked to be left alone until, and how
     /// many connections it takes (#251).
     pub pace: Arc<super::pacing::Pace>,
+    /// Whether downloading ahead of time waits on a metered connection
+    /// (#253).
+    pub metered: Arc<crate::net::metered::Metered>,
 }
 
 pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
@@ -2761,6 +2764,11 @@ async fn run_history_backfill(
             if settings_rx.has_changed().unwrap_or(true) {
                 break 'work;
             }
+            // Older mail waits for an unmetered connection, when the device
+            // chose so (#253).
+            if ctx.metered.downloads_wait() {
+                break 'work;
+            }
             let mut progressed = match retry_one_header_failure(&ctx, &config, &mut session).await {
                 Ok(progressed) => progressed,
                 Err(e) => {
@@ -4419,9 +4427,9 @@ async fn drain_missing_bodies(
             let settings = settings_rx.borrow_and_update();
             (settings.mail_history, settings.download)
         };
-        // Only the headers are wanted: messages download when they're
-        // opened (#253).
-        if download == crate::models::DownloadPolicy::Headers {
+        // Only the headers are wanted, or the device waits for an unmetered
+        // connection: messages download when they're opened (#253).
+        if download == crate::models::DownloadPolicy::Headers || ctx.metered.downloads_wait() {
             return Ok(());
         }
         let cutoff_ms = mail_history.cutoff_ms_at(now_ms());
