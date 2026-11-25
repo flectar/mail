@@ -142,6 +142,8 @@ mod updates;
 mod when_picker;
 mod window_chrome;
 mod window_controller;
+#[cfg(desktop)]
+mod window_places;
 mod word_diff;
 
 slint::include_modules!();
@@ -2016,6 +2018,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    // The window comes back at the size and place it had (#254).
+    #[cfg(desktop)]
+    {
+        window_places::install(&platform.paths.data_dir, &runtime);
+        window_places::restore(window_places::Kind::Main, &app);
+    }
     motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
@@ -2064,6 +2072,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         startup_metrics.emit("started_in_tray", serde_json::Value::Null);
     } else {
         renderer_preferences::initialize_step(use_wgpu, || app.show())?;
+        #[cfg(desktop)]
+        window_places::shown(window_places::Kind::Main, &app);
         startup_metrics.emit(
             "window_shown",
             serde_json::json!({
@@ -8103,6 +8113,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     };
     // Timers stop with the event loop, so a pending tab save is written now.
     app.global::<TabsUi>().invoke_flush();
+    // And where the windows were.
+    #[cfg(desktop)]
+    window_places::flush();
     // So are the messages still being written.
     composer::save_open_messages();
     // Messages sent with an undo delay leave now, not at the next start.

@@ -574,6 +574,8 @@ fn new_window(app: &AppWindow) -> Option<Host> {
         }
     };
     copy_appearance(app, &window);
+    // At the size the last message's window had (#254).
+    crate::window_places::restore(crate::window_places::Kind::Composer, &window);
     window.set_attachment_picker_supported(app.get_document_apis_supported());
     let weak = window.as_weak();
     window.window().on_close_requested(move || {
@@ -760,6 +762,22 @@ impl Composers {
         self.start_session(app, Host::Main(app.as_weak()))
     }
 
+    /// Whether messages are written in windows of their own, as Settings can
+    /// choose on the desktop (#254).
+    fn writes_in_windows(&self, app: &AppWindow) -> bool {
+        self.pop_out && app.get_compose_in_window()
+    }
+
+    /// A new composer where messages are written: a window of its own when
+    /// Settings says so, else the main window's.
+    fn start(self: &Rc<Self>, app: &AppWindow) -> Option<Rc<ComposeSession>> {
+        if self.writes_in_windows(app) {
+            let host = new_window(app)?;
+            return self.start_session(app, host);
+        }
+        self.open(app)
+    }
+
     /// A new, empty composer in `host`.
     fn start_session(self: &Rc<Self>, app: &AppWindow, host: Host) -> Option<Rc<ComposeSession>> {
         let session = Rc::new_cyclic(|this| ComposeSession {
@@ -865,7 +883,11 @@ impl Composers {
         app: &AppWindow,
         to: &str,
     ) -> Option<Rc<ComposeSession>> {
-        if let Some(open) = self.in_app() {
+        // Each new message gets a window of its own when messages are
+        // written in windows.
+        if !self.writes_in_windows(app)
+            && let Some(open) = self.in_app()
+        {
             return Some(open);
         }
         // Only local mail is here: nothing could send it.
@@ -873,11 +895,13 @@ impl Composers {
             app.set_render_status(UiMessage::plain("Add an account to send mail."));
             return None;
         }
-        let session = self.open(app)?;
+        let session = self.start(app)?;
         if let Some(host) = session.host() {
             host.ui().set_to(to.into());
         }
         session.show("new", None);
+        #[cfg(desktop)]
+        session.show_window();
         Some(session)
     }
 
@@ -999,7 +1023,7 @@ impl Composers {
             return None;
         };
 
-        let session = self.open(app)?;
+        let session = self.start(app)?;
         let host = session.host()?;
         let ui = host.ui();
         ui.set_account_id(account_id);
@@ -1052,6 +1076,8 @@ impl Composers {
         }
         *session.intent.borrow_mut() = prepared.intent;
         session.show(action, Some(prepared.sender_email));
+        #[cfg(desktop)]
+        session.show_window();
         // A forward, and a message edited as new, carry the original's files.
         if matches!(action, "forward" | "edit_as_new") {
             session.attach_original_files(&core, source.attachments);
@@ -1250,7 +1276,7 @@ impl Composers {
 
         let session = match window {
             Some(window) => self.start_session(app, window),
-            None => self.open(app),
+            None => self.start(app),
         }?;
         let host = session.host()?;
         let ui = host.ui();
@@ -1323,6 +1349,8 @@ impl Composers {
             draft_id: draft.draft_id,
         };
         session.show(mode, Some(draft_sender_email));
+        #[cfg(desktop)]
+        session.show_window();
         Some(session)
     }
 
@@ -1673,22 +1701,10 @@ impl ComposeSession {
         self.host_id.set(self.host_id.get().wrapping_add(1));
         *self.host.borrow_mut() = window_host;
         self.connect();
-        #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window {
-            self.watch_window(handle);
-        }
         self.clear_fields(&main);
         main.ui().set_open(false);
-
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &window
-            && let Err(error) = handle.show()
-        {
-            window.ui().set_notice(
-                UiMessage::detail("Could not open composer: {}", error),
-                true,
-            );
-        }
+        self.show_window();
         // A window that never appears would keep the message out of reach.
         #[cfg(desktop)]
         if app.window().has_winit_window() {
@@ -1762,6 +1778,29 @@ impl ComposeSession {
         window_controller::composer_closed();
     }
 
+    /// Show the window this message is in and look after it, as each window
+    /// a message opens in needs.
+    #[cfg(desktop)]
+    fn show_window(self: &Rc<Self>) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let HostRef::Window(handle) = &host else {
+            return;
+        };
+        if handle.window().is_visible() {
+            return;
+        }
+        self.watch_window(handle);
+        match handle.show() {
+            Ok(()) => crate::window_places::shown(crate::window_places::Kind::Composer, handle),
+            Err(error) => host.ui().set_notice(
+                UiMessage::detail("Could not open composer: {}", error),
+                true,
+            ),
+        }
+    }
+
     /// A message's own window returns the memory input leaves behind once
     /// it goes still, as the main window does, keeps no pixels while it is
     /// minimized, hands its help to the keyboard on a key press as the main
@@ -1811,6 +1850,11 @@ impl ComposeSession {
                     }
                 }
                 _ => {}
+            }
+            if matches!(event, WindowEvent::Resized(_))
+                && let Some(window) = help.upgrade()
+            {
+                crate::window_places::changed(crate::window_places::Kind::Composer, &window);
             }
             if matches!(
                 event,
@@ -4507,15 +4551,7 @@ impl ComposeSession {
         self.start_format(false);
         self.show("signature", None);
         #[cfg(desktop)]
-        if let HostRef::Window(handle) = &host {
-            self.watch_window(handle);
-            if let Err(error) = handle.show() {
-                ui.set_notice(
-                    UiMessage::detail("Could not open composer: {}", error),
-                    true,
-                );
-            }
-        }
+        self.show_window();
     }
 
     /// Saves the signature being written to Settings, and closes it once saved.
@@ -4793,6 +4829,71 @@ mod tests {
         }
     }
 
+    /// With "Write in a new window" on, each new message and each draft
+    /// opens in a window of its own, shown at once, and the main window's
+    /// composer stays closed. Turned off, messages are written there again.
+    #[test]
+    fn messages_open_in_windows_of_their_own_when_settings_say_so() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let main = app.global::<ComposerUi>();
+        app.set_compose_in_window(true);
+
+        app.invoke_open_compose("first@example.com".into());
+        app.invoke_open_compose("second@example.com".into());
+        composers.show_draft(
+            &app,
+            SaveDraftArgs {
+                draft_id: Some(7),
+                account_id: 1,
+                from: None,
+                to: vec![Address {
+                    name: None,
+                    email: "third@example.com".into(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Saved".into(),
+                body_text: "Started earlier.".into(),
+                body_html: None,
+                mode: "new".into(),
+                in_reply_to_message_id: None,
+                in_reply_to_header: None,
+                attachments: Vec::new(),
+                request_read_receipt: false,
+                importance: Default::default(),
+            },
+        );
+        assert!(!main.get_open());
+        assert_eq!(open_windows(), 3);
+        let sessions = composers.sessions.borrow().clone();
+        let recipients = [
+            "first@example.com",
+            "second@example.com",
+            "third@example.com",
+        ];
+        assert_eq!(sessions.len(), recipients.len());
+        for (session, to) in sessions.iter().zip(recipients) {
+            let host = session.host().unwrap();
+            assert!(matches!(host, HostRef::Window(_)));
+            assert!(host.window().is_visible());
+            assert!(host.ui().get_open());
+            assert_eq!(host.ui().get_to(), to);
+        }
+        let draft = composers.holding_draft(7).unwrap().host().unwrap();
+        assert_eq!(draft.ui().get_subject(), "Saved");
+
+        app.set_compose_in_window(false);
+        app.invoke_open_compose("fourth@example.com".into());
+        assert!(main.get_open());
+        assert_eq!(main.get_to(), "fourth@example.com");
+        assert_eq!(open_windows(), 3);
+    }
+
     #[test]
     fn a_draft_an_agent_asks_to_send_opens_in_a_window_of_its_own() {
         let Setup {
@@ -4830,6 +4931,7 @@ mod tests {
         assert_eq!(open_windows(), 1);
         let review = composers.holding_draft(42).unwrap();
         let host = review.host().unwrap();
+        assert!(host.window().is_visible());
         let ui = host.ui();
         assert_eq!(ui.get_subject(), "Plans");
         assert_eq!(ui.get_to(), "priya@example.com");

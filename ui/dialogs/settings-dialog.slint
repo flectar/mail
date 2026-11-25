@@ -535,6 +535,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <int> undo_send_seconds: 10;
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
+    in-out property <bool> compose_in_window: false;
     in-out property <string> compose_text_size: "normal";
     // When an opened unread message counts as read: "immediately",
     // "afterTwoSeconds", "afterFiveSeconds" or "never".
@@ -678,6 +679,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
+    callback save_compose_in_window(bool);
     callback save_mark_read(string);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -1835,6 +1837,20 @@ export component SettingsDialog inherits Rectangle {
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-compose-size(index); }
+                                    }
+                                    // Phones have one window.
+                                    if WindowChrome.available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if WindowChrome.available : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Write in a new window");
+                                        description: @tr("New messages, replies, forwards and drafts open in a window of their own, so your mail stays in view.");
+                                        checked: root.compose_in_window;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.compose_in_window = checked;
+                                            root.save_compose_in_window(checked);
+                                        }
                                     }
                                 }
                             }
