@@ -52,6 +52,8 @@ pub(crate) mod windows_security;
 
 /// The operating system's proxy settings.
 mod system_proxy;
+// Whether the connection is metered (#253).
+pub(crate) mod metered;
 pub(crate) use system_proxy::install as install_system_proxy;
 
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
