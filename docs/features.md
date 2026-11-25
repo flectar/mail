@@ -215,6 +215,14 @@ also downloads attachments up to 25 MB, one at a time, so they open offline
 too. Larger ones download when you open them, and each device keeps its own
 choice.
 
+On a metered connection, such as mobile data or a hotspot, downloading ahead of
+time can wait. With **Pause downloads** on in Settings → Network, accounts
+still check for new mail, and messages and attachments download when you open
+them until the connection isn't metered anymore. Each device keeps its own
+choice. Windows tells from the connection's data plan, macOS and iOS from
+cellular data, a hotspot or Low Data Mode, Android from mobile data or a
+network marked as metered, and Linux from the desktop portal or NetworkManager.
+
 A server can ask Flectar Mail to slow down, when an account has too many
 connections open or makes too many requests, or while another app is using a
 POP3 mailbox. Flectar Mail then waits before it asks that server again, for as
@@ -307,10 +315,11 @@ An account can send from more addresses than the one it signs in with. Gmail's
 send-as addresses and a JMAP server's identities come from the provider, and for
 other servers you add the aliases they let you send from in the account's
 **Signatures** tab in Settings → Accounts, which also chooses the one new
-messages start from. An account keeps up to 1,000. Past ten, the composer's
-**From** and **Default sender identity** open a picker that finds an address by
-its name or address as you type, and Settings lists 50 at a time with a search
-for the others.
+messages start from. In the composer, the **From** menu lists your accounts and
+then the chosen account's addresses. An account keeps up to 1,000. Past ten, the
+menu's **Choose another address…** and Settings' **Default sender identity** open
+a picker that finds an address by its name or address as you type, and Settings
+lists 50 at a time with a search for the others.
 
 ## Automatic Cc and Bcc
 
@@ -419,7 +428,8 @@ three-pane layout, switch to a streamlined minimal view, choose a light or dark
 theme, select a built-in color palette or create a custom one, and show or hide
 sender avatars. You can also give the app icon a different color: on the
 taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
-and iOS home screens.
+and iOS home screens. On Windows, Flectar Mail's Start menu shortcut, taskbar
+pins and desktop shortcuts change color with it.
 
 The full workspace keeps your folders, message list, and selected email visible
 together. The minimal layout reduces visual noise and gives each part of your

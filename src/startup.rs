@@ -645,11 +645,10 @@ pub(crate) struct DeviceSyncUpdates {
     pub(crate) pairing: Vec<(u64, flectar_mail_core::device_sync::PairingEvent)>,
     /// Another device changed synced preferences.
     pub(crate) settings_changed: bool,
-    /// Another device changed accounts; these were removed.
+    /// Another device changed accounts.
     pub(crate) accounts_changed: bool,
     /// Another device blocked a sender, or stopped blocking one.
     pub(crate) blocked_changed: bool,
-    pub(crate) removed_accounts: Vec<i64>,
     /// Events were lost, so the accounts are read again, without saying
     /// another device changed them.
     pub(crate) accounts_reread: bool,
@@ -930,15 +929,15 @@ pub(crate) fn spawn_core_event_listener(
                         .blocked_changed = true;
                     true
                 }
-                Ok(CoreEvent::AccountsChanged { removed }) => {
+                Ok(CoreEvent::AccountsChanged) => {
                     // Before the window reads the accounts again, so a
-                    // snapshot read earlier can't bring the old ones back.
+                    // snapshot read earlier can't put back what changed.
                     accounts_changed.note();
-                    let mut pending = pending
+                    pending
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    pending.device_sync.accounts_changed = true;
-                    pending.device_sync.removed_accounts.extend(removed);
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .device_sync
+                        .accounts_changed = true;
                     true
                 }
                 Err(RecvError::Lagged(_)) => {

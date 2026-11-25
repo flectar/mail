@@ -1,0 +1,665 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+/*!
+This module contains path related types and functions for the run-time library.
+*/
+
+use crate::debug_log;
+use crate::items::{ImageFit, PathEvent};
+use crate::lengths::{LogicalPx, LogicalVector};
+#[cfg(feature = "rtti")]
+use crate::rtti::*;
+use const_field_offset::FieldOffsets;
+use euclid::Point2D;
+use i_slint_core_macros::*;
+
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement, Clone, Debug, PartialEq)]
+#[pin]
+/// PathMoveTo describes the event of setting the cursor on the path to use as starting
+/// point for sub-sequent events, such as `LineTo`. Moving the cursor also implicitly closes
+/// sub-paths and therefore beings a new sub-path.
+pub struct PathMoveTo {
+    #[rtti_field]
+    /// The x coordinate where the current position should be.
+    pub x: f32,
+    #[rtti_field]
+    /// The y coordinate where the current position should be.
+    pub y: f32,
+}
+
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement, Clone, Debug, PartialEq)]
+#[pin]
+/// PathLineTo describes the event of moving the cursor on the path to the specified location
+/// along a straight line.
+pub struct PathLineTo {
+    #[rtti_field]
+    /// The x coordinate where the line should go to.
+    pub x: f32,
+    #[rtti_field]
+    /// The y coordinate where the line should go to.
+    pub y: f32,
+}
+
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement, Clone, Debug, PartialEq)]
+#[pin]
+/// PathArcTo describes the event of moving the cursor on the path across an arc to the specified
+/// x/y coordinates, with the specified x/y radius and additional properties.
+pub struct PathArcTo {
+    #[rtti_field]
+    /// The x coordinate where the arc should end up.
+    pub x: f32,
+    #[rtti_field]
+    /// The y coordinate where the arc should end up.
+    pub y: f32,
+    #[rtti_field]
+    /// The radius on the x-axis of the arc.
+    pub radius_x: f32,
+    #[rtti_field]
+    /// The radius on the y-axis of the arc.
+    pub radius_y: f32,
+    #[rtti_field]
+    /// The rotation along the x-axis of the arc in degrees.
+    pub x_rotation: f32,
+    #[rtti_field]
+    /// large_arc indicates whether to take the long or the shorter path to complete the arc.
+    pub large_arc: bool,
+    #[rtti_field]
+    /// sweep indicates the direction of the arc. If true, a clockwise direction is chosen,
+    /// otherwise counter-clockwise.
+    pub sweep: bool,
+}
+
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement, Clone, Debug, PartialEq)]
+#[pin]
+/// PathCubicTo describes a smooth Bézier curve from the path's current position
+/// to the specified x/y location, using two control points.
+pub struct PathCubicTo {
+    #[rtti_field]
+    /// The x coordinate of the curve's end point.
+    pub x: f32,
+    #[rtti_field]
+    /// The y coordinate of the curve's end point.
+    pub y: f32,
+    #[rtti_field]
+    /// The x coordinate of the curve's first control point.
+    pub control_1_x: f32,
+    #[rtti_field]
+    /// The y coordinate of the curve's first control point.
+    pub control_1_y: f32,
+    #[rtti_field]
+    /// The x coordinate of the curve's second control point.
+    pub control_2_x: f32,
+    #[rtti_field]
+    /// The y coordinate of the curve's second control point.
+    pub control_2_y: f32,
+}
+
+#[repr(C)]
+#[derive(FieldOffsets, Default, SlintElement, Clone, Debug, PartialEq)]
+#[pin]
+/// PathCubicTo describes a smooth Bézier curve from the path's current position
+/// to the specified x/y location, using one control points.
+pub struct PathQuadraticTo {
+    #[rtti_field]
+    /// The x coordinate of the curve's end point.
+    pub x: f32,
+    #[rtti_field]
+    /// The y coordinate of the curve's end point.
+    pub y: f32,
+    #[rtti_field]
+    /// The x coordinate of the curve's control point.
+    pub control_x: f32,
+    #[rtti_field]
+    /// The y coordinate of the curve's control point.
+    pub control_y: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq, derive_more::From)]
+/// PathElement describes a single element on a path, such as move-to, line-to, etc.
+pub enum PathElement {
+    /// The MoveTo variant sets the current position on the path.
+    MoveTo(PathMoveTo),
+    /// The LineTo variant describes a line.
+    LineTo(PathLineTo),
+    /// The PathArcTo variant describes an arc.
+    ArcTo(PathArcTo),
+    /// The CubicTo variant describes a Bézier curve with two control points.
+    CubicTo(PathCubicTo),
+    /// The QuadraticTo variant describes a Bézier curve with one control point.
+    QuadraticTo(PathQuadraticTo),
+    /// Indicates that the path should be closed now by connecting to the starting point.
+    Close,
+}
+
+struct ToLyonPathEventIterator<'a> {
+    events_it: core::slice::Iter<'a, PathEvent>,
+    coordinates_it: core::slice::Iter<'a, lyon_path::math::Point>,
+    first: Option<&'a lyon_path::math::Point>,
+    last: Option<&'a lyon_path::math::Point>,
+}
+
+impl Iterator for ToLyonPathEventIterator<'_> {
+    type Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>;
+    fn next(&mut self) -> Option<Self::Item> {
+        use lyon_path::Event;
+
+        self.events_it.next().map(|event| match event {
+            PathEvent::Begin => Event::Begin { at: *self.coordinates_it.next().unwrap() },
+            PathEvent::Line => Event::Line {
+                from: *self.coordinates_it.next().unwrap(),
+                to: *self.coordinates_it.next().unwrap(),
+            },
+            PathEvent::Quadratic => Event::Quadratic {
+                from: *self.coordinates_it.next().unwrap(),
+                ctrl: *self.coordinates_it.next().unwrap(),
+                to: *self.coordinates_it.next().unwrap(),
+            },
+            PathEvent::Cubic => Event::Cubic {
+                from: *self.coordinates_it.next().unwrap(),
+                ctrl1: *self.coordinates_it.next().unwrap(),
+                ctrl2: *self.coordinates_it.next().unwrap(),
+                to: *self.coordinates_it.next().unwrap(),
+            },
+            PathEvent::EndOpen => {
+                Event::End { first: *self.first.unwrap(), last: *self.last.unwrap(), close: false }
+            }
+            PathEvent::EndClosed => {
+                Event::End { first: *self.first.unwrap(), last: *self.last.unwrap(), close: true }
+            }
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.events_it.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ToLyonPathEventIterator<'_> {}
+
+struct TransformedLyonPathIterator<EventIt> {
+    it: EventIt,
+    transform: lyon_path::math::Transform,
+}
+
+impl<EventIt: Iterator<Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>>>
+    Iterator for TransformedLyonPathIterator<EventIt>
+{
+    type Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.it.next().map(|ev| ev.transformed(&self.transform))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.it.size_hint()
+    }
+}
+
+impl<EventIt: Iterator<Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>>>
+    ExactSizeIterator for TransformedLyonPathIterator<EventIt>
+{
+}
+
+/// The two sources of lyon path events a `PathDataIterator` can iterate over, unified into
+/// one type so that `PathDataIterator::iter()` doesn't need to box its return value.
+enum LyonPathEventIterator<'a> {
+    FromPath(lyon_path::path::Iter<'a>),
+    FromEvents(ToLyonPathEventIterator<'a>),
+}
+
+impl Iterator for LyonPathEventIterator<'_> {
+    type Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::FromPath(it) => it.next(),
+            Self::FromEvents(it) => it.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::FromPath(it) => it.size_hint(),
+            Self::FromEvents(it) => it.size_hint(),
+        }
+    }
+}
+
+/// PathDataIterator is a data structure that acts as starting point for iterating
+/// through the low-level events of a path. If the path was constructed from said
+/// events, then it is a very thin abstraction. If the path was created from higher-level
+/// elements, then an intermediate lyon path is required/built.
+pub struct PathDataIterator {
+    it: LyonPathIteratorVariant,
+    transform: lyon_path::math::Transform,
+}
+
+enum LyonPathIteratorVariant {
+    FromPath(lyon_path::Path),
+    FromEvents(crate::SharedVector<PathEvent>, crate::SharedVector<lyon_path::math::Point>),
+}
+
+impl PathDataIterator {
+    /// Create a new iterator for path traversal.
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = lyon_path::Event<lyon_path::math::Point, lyon_path::math::Point>> + '_
+    {
+        TransformedLyonPathIterator {
+            it: match &self.it {
+                LyonPathIteratorVariant::FromPath(path) => {
+                    LyonPathEventIterator::FromPath(path.iter())
+                }
+                LyonPathIteratorVariant::FromEvents(events, coordinates) => {
+                    LyonPathEventIterator::FromEvents(ToLyonPathEventIterator {
+                        events_it: events.iter(),
+                        coordinates_it: coordinates.iter(),
+                        first: coordinates.first(),
+                        last: coordinates.last(),
+                    })
+                }
+            },
+            transform: self.transform,
+        }
+    }
+
+    /// Applies a transformation on the elements this iterator provides that tries to fit everything
+    /// into the specified width/height, respecting the provided viewbox. If no viewbox is specified,
+    /// the bounding rectangle of the path is used.
+    pub fn fit(
+        &mut self,
+        width: f32,
+        height: f32,
+        viewbox: Option<lyon_path::math::Box2D>,
+        style: ImageFit,
+    ) {
+        if width > 0. || height > 0. {
+            let fit_style = match style {
+                ImageFit::Contain => lyon_algorithms::fit::FitStyle::Min,
+                ImageFit::Cover => lyon_algorithms::fit::FitStyle::Max,
+                ImageFit::Fill => lyon_algorithms::fit::FitStyle::Stretch,
+                ImageFit::Preserve => return,
+            };
+            let viewbox =
+                viewbox.unwrap_or_else(|| lyon_algorithms::aabb::bounding_box(self.iter()));
+            self.transform = lyon_algorithms::fit::fit_box(
+                &viewbox,
+                &lyon_path::math::Box2D::from_size(lyon_path::math::Size::new(width, height)),
+                fit_style,
+            );
+        }
+    }
+
+    fn to_lyon_path(&self) -> lyon_path::Path {
+        match &self.it {
+            LyonPathIteratorVariant::FromPath(path) => path.clone().transformed(&self.transform),
+            LyonPathIteratorVariant::FromEvents(..) => self.iter().collect(),
+        }
+    }
+
+    /// Builds the lyon path together with its length measurements
+    pub fn to_fitted_path(&self, offset: LogicalVector) -> FittedPath {
+        use lyon_algorithms::measure::PathMeasurements;
+
+        let path = self.to_lyon_path();
+        // the number of path segments is proportional to 1/sqrt(tolerance)
+        // Tolerance is the distance between the curve and the approximation
+        // in the paths element coordinates (without the offset applied yet)
+        let measurements = PathMeasurements::from_path(&path, 1e-3);
+        FittedPath { path, offset, measurements }
+    }
+}
+
+/// A path and measurements so they don't need to be recalculated every call to sample
+pub struct FittedPath {
+    path: lyon_path::Path,
+    offset: LogicalVector,
+    measurements: lyon_algorithms::measure::PathMeasurements,
+}
+
+impl FittedPath {
+    /// Samples the fitted path at a given `t`. Returns None if the path length is 0
+    pub fn sample_at(&self, t: f32) -> Option<(Point2D<f32, LogicalPx>, f32)> {
+        use lyon_algorithms::measure::SampleType;
+
+        let mut rem = num_traits::Euclid::rem_euclid(&t, &1.);
+        if rem == 0.0 && t != 0.0 {
+            // This makes the path end at the end and not the start
+            rem = 1.0;
+        }
+        if self.measurements.length() <= 0. {
+            return None;
+        }
+        let mut sampler = self.measurements.create_sampler(&self.path, SampleType::Normalized);
+        let sample = sampler.sample(rem);
+        let pos = Point2D::new(sample.position().x, sample.position().y);
+        let angle = sample.tangent().angle_from_x_axis().to_degrees();
+        Some((pos + self.offset.cast(), angle))
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+/// PathData represents a path described by either high-level elements or low-level
+/// events and coordinates.
+#[derive(Default)]
+pub enum PathData {
+    /// None is the variant when the path is empty.
+    #[default]
+    None,
+    /// The Elements variant is used to make a Path from shared arrays of elements.
+    Elements(crate::SharedVector<PathElement>),
+    /// The Events variant describes the path as a series of low-level events and
+    /// associated coordinates.
+    Events(crate::SharedVector<PathEvent>, crate::SharedVector<lyon_path::math::Point>),
+    /// The Commands variant describes the path as a series of SVG encoded path commands.
+    Commands(crate::SharedString),
+}
+
+impl PathData {
+    /// This function returns an iterator that allows traversing the path by means of lyon events.
+    pub fn iter(self) -> Option<PathDataIterator> {
+        PathDataIterator {
+            it: match self {
+                PathData::None => return None,
+                PathData::Elements(elements) => LyonPathIteratorVariant::FromPath(
+                    PathData::build_path(elements.as_slice().iter()),
+                ),
+                PathData::Events(events, coordinates) => {
+                    LyonPathIteratorVariant::FromEvents(events, coordinates)
+                }
+                PathData::Commands(commands) => {
+                    let mut builder = lyon_path::Path::builder();
+                    let mut parser = lyon_extra::parser::PathParser::new();
+                    match parser.parse(
+                        &lyon_extra::parser::ParserOptions::DEFAULT,
+                        &mut lyon_extra::parser::Source::new(commands.chars()),
+                        &mut builder,
+                    ) {
+                        Ok(()) => LyonPathIteratorVariant::FromPath(builder.build()),
+                        Err(e) => {
+                            debug_log!("Error while parsing path commands '{commands}': {e:?}");
+                            LyonPathIteratorVariant::FromPath(Default::default())
+                        }
+                    }
+                }
+            },
+            transform: Default::default(),
+        }
+        .into()
+    }
+
+    fn build_path(element_it: core::slice::Iter<PathElement>) -> lyon_path::Path {
+        use lyon_geom::SvgArc;
+        use lyon_path::ArcFlags;
+        use lyon_path::math::{Angle, Point, Vector};
+        use lyon_path::traits::SvgPathBuilder;
+
+        let mut path_builder = lyon_path::Path::builder().with_svg();
+        for element in element_it {
+            match element {
+                PathElement::MoveTo(PathMoveTo { x, y }) => {
+                    path_builder.move_to(Point::new(*x, *y));
+                }
+                PathElement::LineTo(PathLineTo { x, y }) => {
+                    path_builder.line_to(Point::new(*x, *y));
+                }
+                PathElement::ArcTo(PathArcTo {
+                    x,
+                    y,
+                    radius_x,
+                    radius_y,
+                    x_rotation,
+                    large_arc,
+                    sweep,
+                }) => {
+                    let radii = Vector::new(*radius_x, *radius_y);
+                    let x_rotation = Angle::degrees(*x_rotation);
+                    let flags = ArcFlags { large_arc: *large_arc, sweep: *sweep };
+                    let to = Point::new(*x, *y);
+
+                    let svg_arc = SvgArc {
+                        from: path_builder.current_position(),
+                        radii,
+                        x_rotation,
+                        flags,
+                        to,
+                    };
+
+                    if svg_arc.is_straight_line() {
+                        path_builder.line_to(to);
+                    } else {
+                        path_builder.arc_to(radii, x_rotation, flags, to)
+                    }
+                }
+                PathElement::CubicTo(PathCubicTo {
+                    x,
+                    y,
+                    control_1_x,
+                    control_1_y,
+                    control_2_x,
+                    control_2_y,
+                }) => {
+                    path_builder.cubic_bezier_to(
+                        Point::new(*control_1_x, *control_1_y),
+                        Point::new(*control_2_x, *control_2_y),
+                        Point::new(*x, *y),
+                    );
+                }
+                PathElement::QuadraticTo(PathQuadraticTo { x, y, control_x, control_y }) => {
+                    path_builder.quadratic_bezier_to(
+                        Point::new(*control_x, *control_y),
+                        Point::new(*x, *y),
+                    );
+                }
+                PathElement::Close => path_builder.close(),
+            }
+        }
+
+        path_builder.build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lengths::LogicalLength;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use lyon_path::math::{Point, Transform};
+
+    // Two equivalent representations of the same L-shaped path (Begin, Line, Line, EndOpen):
+    // one built from high-level elements, one from low-level events/coordinates. Used to check
+    // that `PathDataIterator::to_lyon_path` applies `self.transform` the same way regardless of
+    // which `LyonPathIteratorVariant` backs it.
+    fn elements_path() -> PathData {
+        PathData::Elements(
+            [
+                PathElement::MoveTo(PathMoveTo { x: 0., y: 0. }),
+                PathElement::LineTo(PathLineTo { x: 10., y: 0. }),
+                PathElement::LineTo(PathLineTo { x: 10., y: 10. }),
+            ]
+            .as_slice()
+            .into(),
+        )
+    }
+
+    fn events_path() -> PathData {
+        let events: crate::SharedVector<PathEvent> =
+            [PathEvent::Begin, PathEvent::Line, PathEvent::Line, PathEvent::EndOpen]
+                .as_slice()
+                .into();
+        let coordinates: crate::SharedVector<Point> = [
+            Point::new(0., 0.),
+            Point::new(0., 0.),
+            Point::new(10., 0.),
+            Point::new(10., 0.),
+            Point::new(10., 10.),
+        ]
+        .as_slice()
+        .into();
+        PathData::Events(events, coordinates)
+    }
+
+    fn line_path() -> PathData {
+        PathData::Elements(
+            [
+                PathElement::MoveTo(PathMoveTo { x: 0., y: 0. }),
+                PathElement::LineTo(PathLineTo { x: 10., y: 0. }),
+            ]
+            .as_slice()
+            .into(),
+        )
+    }
+
+    fn points_of(path: &lyon_path::Path) -> Vec<Point> {
+        path.iter()
+            .flat_map(|ev| match ev {
+                lyon_path::Event::Begin { at } => vec![at],
+                lyon_path::Event::Line { from, to } => vec![from, to],
+                lyon_path::Event::Quadratic { from, ctrl, to } => vec![from, ctrl, to],
+                lyon_path::Event::Cubic { from, ctrl1, ctrl2, to } => vec![from, ctrl1, ctrl2, to],
+                lyon_path::Event::End { .. } => vec![],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn to_lyon_path_applies_transform_for_elements_variant() {
+        let mut it = elements_path().iter().unwrap();
+        it.transform = Transform::translation(5., 7.);
+        assert_eq!(
+            points_of(&it.to_lyon_path()),
+            vec![
+                Point::new(5., 7.),
+                Point::new(5., 7.),
+                Point::new(15., 7.),
+                Point::new(15., 7.),
+                Point::new(15., 17.),
+            ]
+        );
+    }
+
+    #[test]
+    fn to_lyon_path_applies_transform_for_events_variant() {
+        let mut it = events_path().iter().unwrap();
+        it.transform = Transform::translation(5., 7.);
+        assert_eq!(
+            points_of(&it.to_lyon_path()),
+            vec![
+                Point::new(5., 7.),
+                Point::new(5., 7.),
+                Point::new(15., 7.),
+                Point::new(15., 7.),
+                Point::new(15., 17.),
+            ]
+        );
+    }
+
+    #[test]
+    fn to_lyon_path_transform_stays_consistent_across_variants_after_fit() {
+        let mut elements_it = elements_path().iter().unwrap();
+        let mut events_it = events_path().iter().unwrap();
+
+        // fit() derives a scale+translate transform from the (untransformed) bounding box;
+        // both variants describe the same geometry so they must end up with the same transform.
+        elements_it.fit(100., 50., None, ImageFit::Contain);
+        events_it.fit(100., 50., None, ImageFit::Contain);
+
+        assert_ne!(elements_it.transform, Transform::identity());
+        assert_eq!(elements_it.transform, events_it.transform);
+        assert_eq!(points_of(&elements_it.to_lyon_path()), points_of(&events_it.to_lyon_path()));
+    }
+
+    #[test]
+    fn fitted_path_sample_at_adds_offset_to_position() {
+        let it = line_path().iter().unwrap();
+        let offset = LogicalVector::from_lengths(LogicalLength::new(3.), LogicalLength::new(4.));
+        let fitted = it.to_fitted_path(offset);
+
+        let (start, _) = fitted.sample_at(0.0).unwrap();
+        assert_eq!(start, Point2D::new(3., 4.));
+
+        let (end, _) = fitted.sample_at(1.0).unwrap();
+        assert_eq!(end, Point2D::new(13., 4.));
+    }
+
+    #[test]
+    fn fitted_path_sample_at_wraps_percent_for_open_path() {
+        let it = line_path().iter().unwrap();
+        let fitted = it.to_fitted_path(LogicalVector::default());
+
+        // 1.0 is a special case (sampled directly, not wrapped) and must land on the actual
+        // end of the path, not back at the start the way rem_euclid(1.0, 1.0) == 0.0 would.
+        let (end, _) = fitted.sample_at(1.0).unwrap();
+        assert_eq!(end, Point2D::new(10., 0.));
+
+        let (mid, _) = fitted.sample_at(0.5).unwrap();
+        assert_eq!(mid, Point2D::new(5., 0.));
+
+        // Percentages outside of [0, 1) wrap around via rem_euclid.
+        let (wrapped_up, _) = fitted.sample_at(1.5).unwrap();
+        assert_eq!(wrapped_up, mid);
+        let (wrapped_down, _) = fitted.sample_at(-0.5).unwrap();
+        assert_eq!(wrapped_down, mid);
+    }
+
+    #[test]
+    fn fitted_path_sample_at_returns_none_for_zero_length_path() {
+        let elements = PathData::Elements(
+            [PathElement::MoveTo(PathMoveTo { x: 0., y: 0. })].as_slice().into(),
+        );
+        let it = elements.iter().unwrap();
+        let fitted = it.to_fitted_path(LogicalVector::default());
+
+        assert!(fitted.sample_at(0.0).is_none());
+        assert!(fitted.sample_at(0.5).is_none());
+    }
+}
+
+#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
+pub(crate) mod ffi {
+    #![allow(unsafe_code)]
+
+    use super::super::*;
+    use super::*;
+    use core::ffi::c_void;
+
+    #[unsafe(no_mangle)]
+    /// This function is used for the low-level C++ interface to allocate the backing vector for a shared path element array.
+    pub unsafe extern "C" fn slint_new_path_elements(
+        out: *mut c_void,
+        first_element: *const PathElement,
+        count: usize,
+    ) {
+        let arr =
+            crate::SharedVector::from(unsafe { core::slice::from_raw_parts(first_element, count) });
+        unsafe { core::ptr::write(out as *mut crate::SharedVector<PathElement>, arr) };
+    }
+
+    #[unsafe(no_mangle)]
+    /// This function is used for the low-level C++ interface to allocate the backing vector for a shared path event array.
+    pub unsafe extern "C" fn slint_new_path_events(
+        out_events: *mut c_void,
+        out_coordinates: *mut c_void,
+        first_event: *const PathEvent,
+        event_count: usize,
+        first_coordinate: *const Point,
+        coordinate_count: usize,
+    ) {
+        let events = crate::SharedVector::from(unsafe {
+            core::slice::from_raw_parts(first_event, event_count)
+        });
+        unsafe { core::ptr::write(out_events as *mut crate::SharedVector<PathEvent>, events) };
+        let coordinates = crate::SharedVector::from(unsafe {
+            core::slice::from_raw_parts(first_coordinate, coordinate_count)
+        });
+        unsafe {
+            core::ptr::write(out_coordinates as *mut crate::SharedVector<Point>, coordinates)
+        };
+    }
+}

@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/flectar-spell", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-renderer-software", "crates/jmap-client", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-android-activity", "crates/i-slint-backend-winit", "crates/i-slint-core", "crates/i-slint-renderer-software", "crates/jmap-client", "crates/smithay-clipboard", "crates/spellbook", "crates/vello"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -23,6 +23,9 @@ smithay-clipboard = { path = "crates/smithay-clipboard" }
 # Slint 1.19's software renderer panics on a rounded clip far out of view; see
 # patches/slint-renderer-software/README.md.
 i-slint-renderer-software = { path = "crates/i-slint-renderer-software" }
+# Slint 1.19 stops a fling when the system asks for less motion, so lists
+# stop dead where the finger lifts; see patches/slint-core/README.md.
+i-slint-core = { path = "crates/i-slint-core" }
 # Fontique 0.12 slants italics from a font's `slnt` axis the wrong way, so
 # variable fonts without an italic face, such as the bundled Google Sans Flex,
 # stay upright; see patches/fontique/README.md.
@@ -160,6 +163,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Security_Isolation",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Packaging_Appx",
@@ -177,8 +181,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The Microsoft Store build's startup task and new-mail toasts are WinRT
-# APIs, as are the accent colours of the taskbar's unread count; the toast
-# activator is a COM server. Slint and wgpu already build
+# APIs, as are the accent colours of the taskbar's unread count and the
+# connection's cost (src/platform/metered); the toast activator is a COM
+# server. Slint and wgpu already build
 # this version of the crate.
 windows = { version = "0.62", default-features = false, features = [
     "std",
@@ -186,13 +191,19 @@ windows = { version = "0.62", default-features = false, features = [
     "Data_Xml_Dom",
     "Foundation",
     "Foundation_Collections",
+    "Networking_Connectivity",
     "UI_Notifications",
     "UI_ViewManagement",
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }
 # `windows::core::implement` expands to paths in this crate.

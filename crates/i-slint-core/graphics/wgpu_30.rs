@@ -1,0 +1,621 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+// cSpell: ignore surfaceless
+
+#![warn(missing_docs)]
+
+/*!
+This module contains types that are public and re-exported in the slint-rs as well as the slint-interpreter crate as public API,
+in particular the `BackendSelector` type, to configure the WGPU-based renderer(s).
+*/
+
+use alloc::boxed::Box;
+
+pub use wgpu_30 as wgpu;
+
+/// Get the default backend options given WGPU environment variables. Includes an override
+/// to default to a swapchain type that supports transparency under dx12.
+pub fn default_backend_options() -> wgpu::BackendOptions {
+    #[allow(unused_mut)]
+    let mut options = wgpu::BackendOptions::from_env_or_default();
+
+    // on windows with DX12, a composition swapchain is the only kind that supports transparency
+    #[cfg(target_family = "windows")]
+    if wgpu::Dx12SwapchainKind::from_env().is_none() {
+        options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
+    }
+    options
+}
+
+#[cfg(feature = "unstable-wgpu-30")]
+pub mod api {
+    /*!
+    This module contains types that are public and re-exported in the slint-rs as well as the slint-interpreter crate as public API.
+    */
+
+    #[doc(no_inline)]
+    pub use super::wgpu;
+
+    /// This data structure provides settings for initializing WGPU renderers.
+    #[derive(Clone, Debug)]
+    #[non_exhaustive]
+    pub struct WGPUSettings {
+        /// The backends to use for the WGPU instance.
+        pub backends: wgpu_30::Backends,
+        /// The different options that are given to the selected backends.
+        pub backend_options: wgpu_30::BackendOptions,
+        /// The flags to fine-tune behavior of the WGPU instance.
+        pub instance_flags: wgpu_30::InstanceFlags,
+        /// Memory budget thresholds used by some backends.
+        pub instance_memory_budget_thresholds: wgpu_30::MemoryBudgetThresholds,
+
+        /// The power preference is used to influence the WGPU adapter selection.
+        pub power_preference: wgpu_30::PowerPreference,
+
+        /// The label for the device. This is used to identify the device in debugging tools.
+        pub device_label: Option<std::borrow::Cow<'static, str>>,
+        /// The features that your application requires.
+        /// If the adapter lacks one of them, creating the device fails.
+        /// Slint also enables every other non-experimental feature that the adapter supports.
+        /// To use an optional feature, check that [`wgpu::Device::features()`] contains it.
+        pub device_required_features: wgpu_30::Features,
+        /// The required limits for the device.
+        pub device_required_limits: wgpu_30::Limits,
+        /// The experimental features for the device.
+        pub device_experimental_features: wgpu_30::ExperimentalFeatures,
+        /// The memory hints for the device.
+        pub device_memory_hints: wgpu_30::MemoryHints,
+    }
+
+    impl Default for WGPUSettings {
+        fn default() -> Self {
+            let backends = wgpu_30::Backends::from_env().unwrap_or_default();
+
+            Self {
+                backends,
+                backend_options: super::default_backend_options(),
+                instance_flags: wgpu_30::InstanceFlags::from_build_config().with_env(),
+                instance_memory_budget_thresholds: wgpu_30::MemoryBudgetThresholds::default(),
+
+                power_preference: wgpu_30::PowerPreference::from_env().unwrap_or_default(),
+
+                device_label: None,
+                device_required_features: wgpu_30::Features::empty(),
+                device_required_limits: wgpu_30::Limits::downlevel_webgl2_defaults(),
+                device_experimental_features: wgpu_30::ExperimentalFeatures::disabled(),
+                device_memory_hints: wgpu_30::MemoryHints::MemoryUsage,
+            }
+        }
+    }
+
+    /// This enum describes the different ways to configure WGPU for rendering.
+    #[derive(Clone, Debug)]
+    #[non_exhaustive]
+    #[allow(clippy::large_enum_variant)]
+    pub enum WGPUConfiguration {
+        /// Use `Manual` if you've initialized WGPU and want to supply the instance, adapter,
+        /// device, and queue for use.
+        Manual {
+            /// The WGPU instance to use.
+            instance: wgpu_30::Instance,
+            /// The WGPU adapter to use.
+            adapter: wgpu_30::Adapter,
+            /// The WGPU device to use.
+            device: wgpu_30::Device,
+            /// The WGPU queue to use.
+            queue: wgpu_30::Queue,
+        },
+        /// Use `Automatic` if you want to let Slint select the WGPU instance, adapter, and
+        /// device, but fine-tune aspects such as memory limits or features.
+        Automatic(WGPUSettings),
+    }
+
+    impl Default for WGPUConfiguration {
+        fn default() -> Self {
+            Self::Automatic(WGPUSettings::default())
+        }
+    }
+
+    impl TryFrom<wgpu_30::Texture> for super::super::Image {
+        type Error = TextureImportError;
+
+        fn try_from(texture: wgpu_30::Texture) -> Result<Self, Self::Error> {
+            if texture.format() != wgpu_30::TextureFormat::Rgba8Unorm
+                && texture.format() != wgpu_30::TextureFormat::Rgba8UnormSrgb
+            {
+                return Err(Self::Error::InvalidFormat);
+            }
+            let usages = texture.usage();
+            if !usages.contains(wgpu_30::TextureUsages::TEXTURE_BINDING)
+                || !usages.contains(wgpu_30::TextureUsages::RENDER_ATTACHMENT)
+            {
+                return Err(Self::Error::InvalidUsage);
+            }
+            Ok(Self(super::super::ImageInner::WGPUTexture(vtable::VRc::new(
+                super::super::WGPUTexture::WGPU30Texture(texture),
+            ))))
+        }
+    }
+
+    #[derive(Debug, derive_more::Error)]
+    #[non_exhaustive]
+    /// This enum describes the possible errors that can occur when importing a WGPU texture,
+    /// via [`Image::try_from()`](super::super::Image::try_from()).
+    pub enum TextureImportError {
+        /// The texture format is not supported. The only supported format is Rgba8Unorm and Rgba8UnormSrgb.
+        InvalidFormat,
+        /// The texture usage must include TEXTURE_BINDING as well as RENDER_ATTACHMENT.
+        InvalidUsage,
+    }
+
+    impl core::fmt::Display for TextureImportError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            match self {
+            TextureImportError::InvalidFormat => f.write_str(
+                "The texture format is not supported. The only supported format is Rgba8Unorm and Rgba8UnormSrgb",
+            ),
+            TextureImportError::InvalidUsage => f.write_str(
+                "The texture usage must include TEXTURE_BINDING as well as RENDER_ATTACHMENT",
+            ),
+        }
+        }
+    }
+}
+
+use super::RequestedGraphicsAPI;
+
+/// Backends the WGPU renderers do not use on this platform.
+/// Subtracted at instance creation so unused driver stacks are not loaded.
+#[doc(hidden)]
+pub fn default_backends_to_avoid() -> wgpu::Backends {
+    let mut avoid = wgpu::Backends::GL;
+    #[cfg(not(target_vendor = "apple"))]
+    avoid.insert(wgpu::Backends::METAL);
+    #[cfg(not(target_family = "windows"))]
+    avoid.insert(wgpu::Backends::DX12);
+    avoid
+}
+
+/// Subtract `backends_to_avoid` from `requested`.
+/// If that would leave no backends, keep `requested`.
+/// That honors an explicit choice such as `WGPU_BACKEND=gl`.
+#[doc(hidden)]
+pub fn mask_backends(
+    requested: wgpu::Backends,
+    backends_to_avoid: wgpu::Backends,
+) -> wgpu::Backends {
+    let masked = requested & !backends_to_avoid;
+    if masked.is_empty() { requested } else { masked }
+}
+
+fn backends_for_request(
+    native_api: Option<&RequestedGraphicsAPI>,
+    backends_to_avoid: wgpu::Backends,
+) -> wgpu::Backends {
+    match native_api {
+        Some(RequestedGraphicsAPI::Metal) => wgpu::Backends::METAL & !backends_to_avoid,
+        Some(RequestedGraphicsAPI::Vulkan) => wgpu::Backends::VULKAN & !backends_to_avoid,
+        Some(RequestedGraphicsAPI::Direct3D) => wgpu::Backends::DX12 & !backends_to_avoid,
+        _ => mask_backends(wgpu::Backends::from_env().unwrap_or_default(), backends_to_avoid),
+    }
+}
+
+/// Internal helper to see if there are any GPU adapters for hardware accelerated rendering.
+/// This is used to determine if we should fall back to software rendering (instead of using WGPU
+/// software rendering, such as DX12's Warp adapter).
+///
+/// `backends_to_avoid` is subtracted from the instance backends the same way as in
+/// [`init_instance_adapter_device_queue_surface`].
+/// The throwaway probe then does not load stacks the renderer will not use.
+pub fn any_wgpu30_adapters_with_gpu(
+    requested_graphics_api: Option<RequestedGraphicsAPI>,
+    backends_to_avoid: wgpu::Backends,
+) -> bool {
+    // On WASM the wgpu init path uses
+    // `wgpu::util::new_instance_with_webgpu_detection`, which probes
+    // `navigator.gpu.requestAdapter()` asynchronously and falls through
+    // to the WebGL backend (compiled in via the wgpu-30 `webgl` feature)
+    // when no WebGPU adapter is reachable. So a hardware-accelerated
+    // adapter is effectively always available; assume yes here and
+    // let the actual init surface a real error if both fail.
+    if cfg!(target_family = "wasm") {
+        return true;
+    }
+    let allow_cpu = std::env::var("SLINT_WGPU_CPU").is_ok();
+    if allow_cpu {
+        return true;
+    }
+    let (instance, backends) = match requested_graphics_api {
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Manual { instance, .. })) => {
+            (instance, wgpu::Backends::all())
+        }
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Automatic(wgpu30_settings))) => {
+            let backends = mask_backends(wgpu30_settings.backends, backends_to_avoid);
+            (
+                wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends,
+                    flags: wgpu30_settings.instance_flags,
+                    backend_options: wgpu30_settings.backend_options,
+                    memory_budget_thresholds: wgpu30_settings.instance_memory_budget_thresholds,
+                    display: None,
+                }),
+                backends,
+            )
+        }
+        maybe_native_api @ (None
+        | Some(
+            RequestedGraphicsAPI::Metal
+            | RequestedGraphicsAPI::Vulkan
+            | RequestedGraphicsAPI::Direct3D,
+        )) => {
+            let backends = backends_for_request(maybe_native_api.as_ref(), backends_to_avoid);
+
+            (
+                wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends,
+                    flags: wgpu::InstanceFlags::from_build_config().with_env(),
+                    backend_options: default_backend_options(),
+                    memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+                    display: None,
+                }),
+                backends,
+            )
+        }
+        Some(_) => return false,
+    };
+    if backends.is_empty() {
+        return false;
+    }
+    poll_once(instance.enumerate_adapters(backends))
+        .unwrap()
+        .into_iter()
+        .any(|adapter| adapter.get_info().device_type != wgpu::DeviceType::Cpu)
+}
+
+/// Enum to represent different surface targets for WGPU initialization.
+pub enum SurfaceTarget {
+    /// Standard window handle for windowed rendering. Must also expose a display handle.
+    WindowHandle(Box<dyn wgpu::DisplayAndWindowHandle + 'static>),
+    /// DRM surface target for direct rendering on Linux KMS.
+    Drm(wgpu::SurfaceTargetUnsafe),
+}
+
+impl From<Box<dyn wgpu::DisplayAndWindowHandle + 'static>> for SurfaceTarget {
+    fn from(handle: Box<dyn wgpu::DisplayAndWindowHandle + 'static>) -> Self {
+        Self::WindowHandle(handle)
+    }
+}
+
+#[cfg(feature = "unstable-wgpu-30")]
+fn device_descriptor_from_settings<'a>(
+    settings: &'a api::WGPUSettings,
+    adapter: &wgpu::Adapter,
+) -> wgpu::DeviceDescriptor<'a> {
+    wgpu::DeviceDescriptor {
+        label: settings.device_label.as_deref(),
+        required_features: settings.device_required_features
+            | (adapter.features() - wgpu::Features::all_experimental_mask()),
+        // support images the size of the swapchain
+        required_limits: settings.device_required_limits.clone().using_resolution(adapter.limits()),
+        experimental_features: settings.device_experimental_features,
+        memory_hints: settings.device_memory_hints.clone(),
+        trace: wgpu::Trace::default(),
+    }
+}
+
+fn default_device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: None,
+        required_features: adapter.features() - wgpu::Features::all_experimental_mask(),
+        required_limits: adapter.limits(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        trace: wgpu::Trace::default(),
+    }
+}
+
+/// The device descriptor for a renderer that creates its own device without a surface,
+/// such as the linuxkms renderer that scans out a dma-buf.
+///
+/// It applies [`api::WGPUConfiguration::Automatic`] settings like the surface path does,
+/// so an application configures such a renderer with the same `WGPUSettings`.
+/// Only their device half applies.
+/// The renderer creates the instance and picks the adapter itself, so the backends and the
+/// power preference don't apply, and without a surface, there's no present mode to pick.
+///
+/// [`api::WGPUConfiguration::Manual`] is an error.
+/// Such a renderer needs a device built to its requirements, which a supplied one may not meet.
+pub fn surfaceless_device_descriptor<'a>(
+    requested_graphics_api: Option<&'a RequestedGraphicsAPI>,
+    adapter: &wgpu::Adapter,
+) -> Result<wgpu::DeviceDescriptor<'a>, crate::api::PlatformError> {
+    match requested_graphics_api {
+        None | Some(RequestedGraphicsAPI::Vulkan) => Ok(default_device_descriptor(adapter)),
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Automatic(settings))) => {
+            Ok(device_descriptor_from_settings(settings, adapter))
+        }
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Manual { .. })) => {
+            Err(crate::api::PlatformError::from(
+                "This renderer creates its own WGPU device and cannot use a supplied one; \
+                 configure it with WGPUConfiguration::Automatic instead",
+            ))
+        }
+        Some(api) => Err(crate::api::PlatformError::from(alloc::format!(
+            "This renderer creates its own WGPU device, so the requested graphics API {api:?} \
+             cannot be used"
+        ))),
+    }
+}
+
+/// Internal async helper function to initialize the wgpu instance/adapter/device/queue from either scratch or
+/// developer-provided config. This is called by any renderer intending to support WGPU.
+pub async fn async_init_instance_adapter_device_queue_surface(
+    surface_target: impl Into<SurfaceTarget>,
+    requested_graphics_api: Option<RequestedGraphicsAPI>,
+    backends_to_avoid: wgpu::Backends,
+) -> Result<
+    (
+        wgpu_30::Instance,
+        wgpu_30::Adapter,
+        wgpu_30::Device,
+        wgpu_30::Queue,
+        wgpu_30::Surface<'static>,
+    ),
+    Box<dyn std::error::Error + Send + Sync + 'static>,
+> {
+    #![allow(unsafe_code)]
+
+    let surface_target = surface_target.into();
+
+    let create_surface = |instance: &wgpu::Instance| {
+        match surface_target {
+            SurfaceTarget::WindowHandle(window_handle) => instance.create_surface(window_handle),
+            // Safety: The caller ensures the DRM file descriptor in the surface target
+            // remains valid for the lifetime of the returned surface, by storing the
+            // DrmOutput in the renderer adapter.
+            SurfaceTarget::Drm(surface_target_unsafe) => unsafe {
+                instance.create_surface_unsafe(surface_target_unsafe)
+            },
+        }
+        .map_err(|e| {
+            crate::api::PlatformError::from(alloc::format!(
+                "Error creating wgpu window surface: {e}"
+            ))
+        })
+    };
+
+    let (instance, adapter, device, queue, surface) = match requested_graphics_api {
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Manual {
+            instance,
+            adapter,
+            device,
+            queue,
+        })) => {
+            let surface = create_surface(&instance)?;
+            (instance, adapter, device, queue, surface)
+        }
+        #[cfg(feature = "unstable-wgpu-30")]
+        Some(RequestedGraphicsAPI::WGPU30(api::WGPUConfiguration::Automatic(wgpu30_settings))) => {
+            let instance =
+                wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
+                    backends: mask_backends(wgpu30_settings.backends, backends_to_avoid),
+                    flags: wgpu30_settings.instance_flags,
+                    backend_options: wgpu30_settings.backend_options.clone(),
+                    memory_budget_thresholds: wgpu30_settings.instance_memory_budget_thresholds,
+                    display: None,
+                })
+                .await;
+
+            let surface = create_surface(&instance)?;
+
+            let adapter = match wgpu::util::initialize_adapter_from_env(&instance, Some(&surface))
+                .await
+            {
+                Ok(adapter) => Ok(adapter),
+                Err(_) => {
+                    instance
+                        .request_adapter(&wgpu::RequestAdapterOptions {
+                            power_preference: wgpu30_settings.power_preference,
+                            force_fallback_adapter: false,
+                            compatible_surface: Some(&surface),
+                            apply_limit_buckets: false,
+                        })
+                        .await
+                }
+            }
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                alloc::format!("Failed to find an appropriate adapter: {e}").into()
+            })?;
+
+            let (device, queue) = adapter
+                .request_device(&device_descriptor_from_settings(&wgpu30_settings, &adapter))
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                    alloc::format!("Failed to create device: {e}").into()
+                })?;
+
+            (instance, adapter, device, queue, surface)
+        }
+        maybe_native_api @ (None
+        | Some(
+            RequestedGraphicsAPI::Metal
+            | RequestedGraphicsAPI::Vulkan
+            | RequestedGraphicsAPI::Direct3D,
+        )) => {
+            let backends = backends_for_request(maybe_native_api.as_ref(), backends_to_avoid);
+            if backends.is_empty() {
+                return Err(alloc::format!(
+                    "The requested graphics API ({maybe_native_api:?}) is not supported under wgpu on this platform"
+                )
+                .into());
+            }
+
+            let instance =
+                wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
+                    backends,
+                    flags: wgpu::InstanceFlags::from_build_config().with_env(),
+                    backend_options: default_backend_options(),
+                    memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+                    display: None,
+                })
+                .await;
+
+            let surface = create_surface(&instance)?;
+
+            let adapter =
+                wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                        alloc::format!("Failed to find an appropriate adapter: {e}").into()
+                    })?;
+
+            let (device, queue) = adapter
+                .request_device(&default_device_descriptor(&adapter))
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                    alloc::format!("Failed to create device: {e}").into()
+                })?;
+            (instance, adapter, device, queue, surface)
+        }
+        Some(other) => {
+            return Err(alloc::format!(
+                "The requested graphics API ({other:?}) is not supported under wgpu"
+            )
+            .into());
+        }
+    };
+    Ok((instance, adapter, device, queue, surface))
+}
+
+/// Blocking wrapper around [`async_init_instance_adapter_device_queue_surface`] that uses
+/// `poll_once` to synchronously drive the future. This works on all platforms except WASM
+/// where the wgpu futures don't resolve on first poll.
+pub fn init_instance_adapter_device_queue_surface(
+    surface_target: impl Into<SurfaceTarget>,
+    requested_graphics_api: Option<RequestedGraphicsAPI>,
+    backends_to_avoid: wgpu::Backends,
+) -> Result<
+    (
+        wgpu_30::Instance,
+        wgpu_30::Adapter,
+        wgpu_30::Device,
+        wgpu_30::Queue,
+        wgpu_30::Surface<'static>,
+    ),
+    Box<dyn std::error::Error + Send + Sync + 'static>,
+> {
+    poll_once(async_init_instance_adapter_device_queue_surface(
+        surface_target,
+        requested_graphics_api,
+        backends_to_avoid,
+    ))
+    .expect("internal error: wgpu setup is not expected to be async")
+}
+
+/// Runs [`async_init_instance_adapter_device_queue_surface`] and passes the created
+/// objects on to `finalize`. On most platforms the initialization future resolves on
+/// the first poll, so this happens synchronously and errors (including `finalize`'s)
+/// are returned to the caller. On WASM the initialization does real async work (the
+/// WebGPU adapter probe is a JsFuture), so the future is spawned on the event loop
+/// via `context`, `finalize` runs when it resolves, and errors can only be logged.
+pub fn init_instance_adapter_device_queue_surface_then(
+    context: &crate::SlintContext,
+    surface_target: impl Into<SurfaceTarget> + 'static,
+    requested_graphics_api: Option<RequestedGraphicsAPI>,
+    backends_to_avoid: wgpu::Backends,
+    finalize: impl FnOnce(
+        wgpu_30::Instance,
+        wgpu_30::Adapter,
+        wgpu_30::Device,
+        wgpu_30::Queue,
+        wgpu_30::Surface<'static>,
+    ) -> Result<(), crate::api::PlatformError>
+    + 'static,
+) -> Result<(), crate::api::PlatformError> {
+    let init_future = async move {
+        let (instance, adapter, device, queue, surface) =
+            async_init_instance_adapter_device_queue_surface(
+                surface_target,
+                requested_graphics_api,
+                backends_to_avoid,
+            )
+            .await
+            .map_err(|e| {
+                crate::api::PlatformError::from(alloc::format!("WGPU initialization failed: {e}"))
+            })?;
+        finalize(instance, adapter, device, queue, surface)
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = context;
+        poll_once(init_future).expect("internal error: wgpu setup is not expected to be async")
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        context
+            .spawn_local(async move {
+                if let Err(e) = init_future.await {
+                    crate::debug_log!("{e}");
+                }
+            })
+            .map_err(|e| {
+                crate::api::PlatformError::from(alloc::format!(
+                    "Error spawning async wgpu initialization: {e}"
+                ))
+            })?;
+        Ok(())
+    }
+}
+
+/// Polls `future` once, which is all a wgpu future needs on native platforms.
+/// `None` if it isn't ready.
+#[doc(hidden)]
+pub fn poll_once<F: std::future::Future>(future: F) -> Option<F::Output> {
+    let waker = std::task::Waker::noop();
+    let mut ctx = std::task::Context::from_waker(waker);
+
+    let future = std::pin::pin!(future);
+
+    match future.poll(&mut ctx) {
+        std::task::Poll::Ready(result) => Some(result),
+        std::task::Poll::Pending => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_backends_keeps_explicit_choice_when_empty() {
+        let avoid = wgpu::Backends::GL | wgpu::Backends::METAL | wgpu::Backends::DX12;
+        assert_eq!(mask_backends(wgpu::Backends::GL, avoid), wgpu::Backends::GL);
+        assert!(mask_backends(wgpu::Backends::all(), avoid).contains(wgpu::Backends::VULKAN));
+        assert!(!mask_backends(wgpu::Backends::all(), avoid).contains(wgpu::Backends::GL));
+        assert_eq!(mask_backends(wgpu::Backends::empty(), avoid), wgpu::Backends::empty());
+        assert_eq!(mask_backends(wgpu::Backends::VULKAN, avoid), wgpu::Backends::VULKAN);
+    }
+
+    #[test]
+    fn backends_for_native_api_request() {
+        let avoid = wgpu::Backends::GL | wgpu::Backends::METAL;
+        let d3d = RequestedGraphicsAPI::Direct3D;
+        assert_eq!(backends_for_request(Some(&d3d), avoid), wgpu::Backends::DX12);
+        let vulkan = RequestedGraphicsAPI::Vulkan;
+        assert_eq!(backends_for_request(Some(&vulkan), avoid), wgpu::Backends::VULKAN);
+        let metal = RequestedGraphicsAPI::Metal;
+        assert_eq!(backends_for_request(Some(&metal), avoid), wgpu::Backends::empty());
+    }
+
+    #[test]
+    fn default_avoid_includes_gl() {
+        assert!(default_backends_to_avoid().contains(wgpu::Backends::GL));
+    }
+}

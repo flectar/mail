@@ -85,10 +85,22 @@ export component ComposerHeader inherits Rectangle {
             }
 }
 
+// Who the message is from: one menu picks the account and, when it has
+// several, the address. The signature and the account's end-to-end
+// protection sit at the end of the same row.
 export component ComposerFromRow inherits Rectangle {
+    in property <bool> compact: false;
     in property <[AccountRow]> accounts: [];
     in-out property <int> selected-account-id: -1;
     in-out property <string> from-label: @tr("No connected account");
+    // The account's addresses, as "Name <address>", and the one in use.
+    in property <[string]> sender-names: [];
+    in property <int> sender-index: 0;
+    // "No signature" first, then the account's signatures.
+    in property <[string]> signature-names: [];
+    in property <int> signature-index: 0;
+    // "encrypted-signed", "encrypted", "signed", or "" for neither.
+    in property <string> security: "";
     in property <color> background-color;
     in property <color> frame-border-color;
     in property <color> hover-color;
@@ -97,206 +109,536 @@ export component ComposerFromRow inherits Rectangle {
     in property <color> selected-background;
     in property <color> title-color;
     callback changed(int);
+    callback sender-chosen(int);
+    // Past ten addresses, the sender is found by searching (#252).
+    callback more-senders();
+    callback signature-chosen(int);
+
     // Account rows hold a name and an address that grow with the platform font.
     private property <length> account-pitch: 14px + max(18px, account-name-probe.preferred-height)
         + max(16px, account-email-probe.preferred-height);
+    private property <length> option-pitch: 8px + max(24px, option-probe.preferred-height);
+    // The addresses the menu lists: none for an account with one, and a
+    // single search row past ten.
+    private property <int> sender-rows: root.sender-names.length > 10 ? 1
+        : root.sender-names.length > 1 ? root.sender-names.length : 0;
+    private property <length> accounts-height: min(5, root.accounts.length) * root.account-pitch;
+    private property <length> senders-top: 4px + root.accounts-height + (root.sender-rows > 0 ? 9px : 0px);
+    private property <string> sender-label: root.sender-index >= 0 && root.sender-index < root.sender-names.length
+        ? root.sender-names[root.sender-index] : root.from-label;
+    private property <string> signature-label: root.signature-index <= 0 || root.signature-index >= root.signature-names.length
+        ? @tr("No signature") : root.signature-names[root.signature-index];
+    private property <length> signature-width: root.compact ? 44px
+        : min(190px, signature-probe.preferred-width + 54px);
+    private property <length> security-width: root.security == "" ? 0px : root.compact ? 44px : 32px;
 
+    // The menu's rows: the accounts, then the addresses.
     private property <int> highlighted-index: 0;
+    private property <int> highlighted-signature: 0;
 
     function choose(index: int) {
-        if (index < 0 || index >= root.accounts.length) {
+        if (index < 0) {
             return;
         }
-        root.selected-account-id = root.accounts[index].id;
-        root.from-label = root.accounts[index].name == root.accounts[index].email
-            ? root.accounts[index].email
-            : root.accounts[index].name + "  <" + root.accounts[index].email + ">";
-        root.changed(root.selected-account-id);
-        account-popup.close();
+        if (index < root.accounts.length) {
+            if (root.accounts[index].id != root.selected-account-id) {
+                root.selected-account-id = root.accounts[index].id;
+                root.from-label = root.accounts[index].name == root.accounts[index].email
+                    ? root.accounts[index].email
+                    : root.accounts[index].name + "  <" + root.accounts[index].email + ">";
+                root.changed(root.selected-account-id);
+            }
+        } else if (root.sender-names.length > 10) {
+            root.more-senders();
+        } else if (index - root.accounts.length < root.sender-names.length) {
+            root.sender-chosen(index - root.accounts.length);
+        }
+        from-popup.close();
     }
 
-            height: 42px;
+    function choose-signature(index: int) {
+        if (index >= 0 && index < root.signature-names.length) {
+            root.signature-chosen(index);
+        }
+        signature-popup.close();
+    }
+
+    height: root.compact ? 52px : 42px;
+    background: root.background-color;
+
+    from-label-text := Text {
+        x: 12px;
+        width: max(60px, self.preferred-width);
+        height: parent.height;
+        text: @tr("From");
+        color: root.muted-color;
+        font-size: TypeScale.caption;
+        font-weight: 600;
+        vertical-alignment: center;
+        // The menu beside it carries the name.
+        accessible-role: none;
+    }
+
+    trigger := Rectangle {
+        x: from-label-text.x + from-label-text.width + 4px;
+        y: (parent.height - self.height) / 2;
+        width: max(0px, min(460px, parent.width - self.x - 20px - root.signature-width - root.security-width));
+        height: root.compact ? 44px : 32px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: from-popup.is-open || from-focus.has-focus ? root.secondary-color : root.frame-border-color;
+        background: from-hit.has-hover ? root.hover-color : root.background-color;
+
+        Text {
+            x: 10px;
+            width: parent.width - 36px;
+            height: parent.height;
+            text: root.sender-label;
+            color: root.accounts.length > 0 ? root.title-color : root.muted-color;
+            font-size: TypeScale.caption;
+            font-weight: root.accounts.length > 0 ? 600 : 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Image {
+            x: parent.width - 25px;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source: @image-url("../icons/lucide/outline/chevron-down.svg");
+            colorize: root.muted-color;
+            image-fit: contain;
+            transform-rotation: from-popup.is-open ? 180deg : 0deg;
+            accessible-role: none;
+            animate transform-rotation { duration: 120ms; enabled: MotionSettings.movement; }
+        }
+
+        from-focus := FocusScope {
+            accessible-role: combobox;
+            accessible-label: @tr("From");
+            accessible-value: root.sender-label;
+            accessible-action-default => {
+                if (root.accounts.length > 0) {
+                    root.highlighted-index = 0;
+                    from-popup.show();
+                }
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow) {
+                    if (root.accounts.length > 0) {
+                        root.highlighted-index = 0;
+                        from-popup.show();
+                    }
+                    return accept;
+                }
+                reject
+            }
+
+            from-hit := TouchArea {
+                enabled: root.accounts.length > 0;
+                clicked => {
+                    from-focus.focus();
+                    root.highlighted-index = 0;
+                    from-popup.show();
+                }
+                mouse-cursor: root.accounts.length > 0 ? pointer : default;
+            }
+        }
+    }
+
+    signature-trigger := Rectangle {
+        x: parent.width - 12px - root.security-width - self.width;
+        y: (parent.height - self.height) / 2;
+        width: root.signature-width;
+        height: root.compact ? 44px : 32px;
+        border-radius: 7px;
+        border-width: signature-focus.has-focus ? 1px : 0px;
+        border-color: root.secondary-color;
+        background: signature-hit.has-hover || signature-popup.is-open ? root.hover-color : transparent;
+
+        Image {
+            x: root.compact ? (parent.width - self.width) / 2 : 10px;
+            y: (parent.height - self.height) / 2;
+            width: 15px;
+            height: 15px;
+            source: @image-url("../icons/lucide/outline/pencil.svg");
+            colorize: root.signature-index > 0 ? root.title-color : root.muted-color;
+            image-fit: contain;
+            accessible-role: none;
+        }
+
+        if !root.compact : Text {
+            x: 31px;
+            width: parent.width - 54px;
+            height: parent.height;
+            text: root.signature-label;
+            color: root.signature-index > 0 ? root.title-color : root.muted-color;
+            font-size: TypeScale.caption;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if !root.compact : Image {
+            x: parent.width - 21px;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            source: @image-url("../icons/lucide/outline/chevron-down.svg");
+            colorize: root.muted-color;
+            image-fit: contain;
+            accessible-role: none;
+        }
+
+        signature-focus := FocusScope {
+            accessible-role: combobox;
+            accessible-label: @tr("Signature");
+            accessible-value: root.signature-label;
+            accessible-action-default => {
+                if (root.signature-names.length > 0) {
+                    root.highlighted-signature = max(0, root.signature-index);
+                    signature-popup.show();
+                }
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow) {
+                    if (root.signature-names.length > 0) {
+                        root.highlighted-signature = max(0, root.signature-index);
+                        signature-popup.show();
+                    }
+                    return accept;
+                }
+                reject
+            }
+
+            signature-hit := TouchArea {
+                enabled: root.signature-names.length > 0;
+                clicked => {
+                    signature-focus.focus();
+                    root.highlighted-signature = max(0, root.signature-index);
+                    signature-popup.show();
+                }
+                mouse-cursor: root.signature-names.length > 0 ? pointer : default;
+            }
+        }
+    }
+
+    // OpenPGP protection, shown only while the account signs or encrypts.
+    if root.security != "" : IconButton {
+        x: parent.width - 12px - self.width;
+        y: (parent.height - self.height) / 2;
+        width: root.security-width;
+        height: root.compact ? 44px : 32px;
+        interactive: false;
+        icon: root.security == "signed"
+            ? @image-url("../icons/lucide/outline/shield.svg")
+            : @image-url("../icons/lucide/outline/lock.svg");
+        icon-color: root.secondary-color;
+        tooltip-text: root.security == "encrypted-signed" ? @tr("OpenPGP: encrypted and digitally signed")
+            : root.security == "encrypted" ? @tr("OpenPGP: encrypted")
+            : @tr("OpenPGP: digitally signed, not encrypted");
+    }
+
+    account-name-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.secondary; font-weight: 600; }
+    account-email-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
+    option-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
+    signature-probe := Text { visible: false; text: root.signature-label; font-size: TypeScale.caption; }
+
+    from-popup := PopupWindow {
+        x: trigger.x;
+        y: trigger.y + trigger.height + 4px;
+        width: max(trigger.width, min(410px, root.width - self.x - 12px));
+        height: max(52px, root.senders-top + root.sender-rows * root.option-pitch + 4px);
+        close-policy: close-on-click-outside;
+        forward-focus: from-list;
+
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: root.frame-border-color;
             background: root.background-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            clip: true;
 
-            account-label := Text {
-                x: 12px;
-                width: max(60px, self.preferred-width);
-                height: parent.height;
-                text: @tr("Account");
-                color: root.muted-color;
-                font-size: TypeScale.caption;
-                font-weight: 600;
-                vertical-alignment: center;
-            }
-
-            trigger := Rectangle {
-                x: account-label.x + account-label.width + 4px;
-                y: 5px;
-                width: min(410px, parent.width - self.x - 12px);
-                height: 32px;
-                border-radius: 7px;
-                border-width: 1px;
-                border-color: account-popup.is-open ? root.secondary-color : root.frame-border-color;
-                background: account-hit.has-hover ? root.hover-color : root.background-color;
-
-                Text {
-                    x: 10px;
-                    width: parent.width - 36px;
-                    height: parent.height;
-                    text: root.from-label;
-                    color: root.accounts.length > 0 ? root.title-color : root.muted-color;
-                    font-size: TypeScale.caption;
-                    font-weight: root.accounts.length > 0 ? 600 : 500;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                Image {
-                    x: parent.width - 25px;
-                    y: 9px;
-                    width: 14px;
-                    height: 14px;
-                    source: @image-url("../icons/lucide/outline/chevron-down.svg");
-                    colorize: root.muted-color;
-                    image-fit: contain;
-                    transform-rotation: account-popup.is-open ? 180deg : 0deg;
-                    accessible-role: none;
-                    animate transform-rotation { duration: 120ms; enabled: MotionSettings.movement; }
-                }
-
-                account-focus := FocusScope {
-                    key-pressed(event) => {
-                        if (event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow) {
-                            if (root.accounts.length > 0) {
-                                account-popup.show();
-                            }
-                            return accept;
-                        }
-                        if (event.text == Key.Escape) {
-                            account-popup.close();
-                            return accept;
-                        }
-                        reject
+            from-list := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.DownArrow) {
+                        root.highlighted-index = min(root.accounts.length + root.sender-rows - 1, root.highlighted-index + 1);
+                        return accept;
                     }
-
-                    account-hit := TouchArea {
-                        enabled: root.accounts.length > 0;
-                        clicked => {
-                            account-focus.focus();
-                            root.highlighted-index = 0;
-                            account-popup.show();
-                        }
-                        mouse-cursor: root.accounts.length > 0 ? pointer : default;
+                    if (event.text == Key.UpArrow) {
+                        root.highlighted-index = max(0, root.highlighted-index - 1);
+                        return accept;
                     }
+                    if (event.text == Key.Return || event.text == Key.Space) {
+                        root.choose(root.highlighted-index);
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        from-popup.close();
+                        from-focus.focus();
+                        return accept;
+                    }
+                    reject
                 }
-            }
 
-            account-name-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.secondary; font-weight: 600; }
-            account-email-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
+                Flickable {
+                    x: 0px;
+                    y: 4px;
+                    width: parent.width;
+                    height: root.accounts-height;
+                    content-height: root.accounts.length * root.account-pitch;
+                    // The highlighted account stays in view.
+                    content-y: min(0px, max(root.accounts-height - root.accounts.length * root.account-pitch,
+                        root.accounts-height - (min(root.highlighted-index, root.accounts.length - 1) + 1) * root.account-pitch));
 
-            account-popup := PopupWindow {
-                x: 50px;
-                y: 38px;
-                width: min(410px, root.width - 62px);
-                height: max(52px, min(5, root.accounts.length) * root.account-pitch + 8px);
-                close-policy: close-on-click-outside;
-                forward-focus: account-list;
+                    for account[index] in root.accounts : Rectangle {
+                        x: 4px;
+                        y: index * root.account-pitch;
+                        width: parent.width - 8px;
+                        height: root.account-pitch - 4px;
+                        border-radius: 6px;
+                        background: index == root.highlighted-index || account-row-hit.has-hover
+                            ? root.selected-background : transparent;
+                        accessible-role: list-item;
+                        accessible-label: account.name == account.email ? account.email : account.name + ", " + account.email;
+                        accessible-item-selected: account.id == root.selected-account-id;
+                        accessible-action-default => { root.choose(index); }
 
-                popup-frame := Rectangle {
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: root.frame-border-color;
-                    background: root.background-color;
-                    drop-shadow-blur: 18px;
-                    drop-shadow-offset-y: 5px;
-                    drop-shadow-color: #0000002e;
-                    clip: true;
-
-                    account-list := FocusScope {
-                        key-pressed(event) => {
-                            if (event.text == Key.DownArrow) {
-                                root.highlighted-index = min(root.accounts.length - 1, root.highlighted-index + 1);
-                                return accept;
-                            }
-                            if (event.text == Key.UpArrow) {
-                                root.highlighted-index = max(0, root.highlighted-index - 1);
-                                return accept;
-                            }
-                            if (event.text == Key.Return || event.text == Key.Space) {
-                                root.choose(root.highlighted-index);
-                                return accept;
-                            }
-                            if (event.text == Key.Escape) {
-                                account-popup.close();
-                                return accept;
-                            }
-                            reject
+                        Avatar {
+                            x: 8px;
+                            y: (parent.height - self.height) / 2;
+                            size: 26px;
+                            source: account.avatar_small;
+                            has-source: account.has_avatar;
+                            fallback: account.initials;
+                            background-color: account.has_avatar ? #ffffff : root.selected-background;
+                            foreground-color: root.title-color;
+                            avatar-border-width: account.has_avatar ? 1px : 0px;
+                            avatar-border-color: root.frame-border-color;
                         }
 
-                        for account[index] in root.accounts : Rectangle {
-                            x: 4px;
-                            y: 4px + index * root.account-pitch;
-                            width: parent.width - 8px;
-                            height: root.account-pitch - 4px;
-                            border-radius: 6px;
-                            background: index == root.highlighted-index || account-row-hit.has-hover
-                                ? root.selected-background : transparent;
+                        account-name := Text {
+                            x: 43px;
+                            y: 5px;
+                            width: parent.width - 76px;
+                            height: max(18px, self.preferred-height);
+                            text: account.name;
+                            color: root.title-color;
+                            font-size: TypeScale.secondary;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
 
-                            Avatar {
-                                x: 8px;
-                                y: (parent.height - self.height) / 2;
-                                size: 26px;
-                                source: account.avatar_small;
-                                has-source: account.has_avatar;
-                                fallback: account.initials;
-                                background-color: account.has_avatar ? #ffffff : root.selected-background;
-                                foreground-color: root.title-color;
-                                avatar-border-width: account.has_avatar ? 1px : 0px;
-                                avatar-border-color: root.frame-border-color;
-                            }
+                        Text {
+                            x: 43px;
+                            y: account-name.y + account-name.height - 1px;
+                            width: parent.width - 76px;
+                            height: max(16px, self.preferred-height);
+                            text: account.email;
+                            color: root.muted-color;
+                            font-size: TypeScale.caption;
+                            overflow: elide;
+                        }
 
-                            account-name := Text {
-                                x: 43px;
-                                y: 5px;
-                                width: parent.width - 76px;
-                                height: max(18px, self.preferred-height);
-                                text: account.name;
-                                color: root.title-color;
-                                font-size: TypeScale.secondary;
-                                font-weight: 600;
-                                overflow: elide;
-                            }
+                        Image {
+                            x: parent.width - 25px;
+                            y: (parent.height - self.height) / 2;
+                            width: 16px;
+                            height: 16px;
+                            visible: account.id == root.selected-account-id;
+                            source: @image-url("../icons/lucide/outline/check.svg");
+                            colorize: root.secondary-color;
+                            accessible-role: none;
+                        }
 
-                            Text {
-                                x: 43px;
-                                y: account-name.y + account-name.height - 1px;
-                                width: parent.width - 76px;
-                                height: max(16px, self.preferred-height);
-                                text: account.email;
-                                color: root.muted-color;
-                                font-size: TypeScale.caption;
-                                overflow: elide;
-                            }
-
-                            Image {
-                                x: parent.width - 25px;
-                                y: (parent.height - self.height) / 2;
-                                width: 16px;
-                                height: 16px;
-                                visible: account.id == root.selected-account-id;
-                                source: @image-url("../icons/lucide/outline/check.svg");
-                                colorize: root.secondary-color;
-                                accessible-role: none;
-                            }
-
-                            account-row-hit := TouchArea {
-                                clicked => { root.choose(index); }
-                                mouse-cursor: pointer;
-                            }
+                        account-row-hit := TouchArea {
+                            clicked => { root.choose(index); }
+                            mouse-cursor: pointer;
                         }
                     }
                 }
+
+                // The chosen account's addresses, below a rule.
+                if root.sender-rows > 0 : Rectangle {
+                    x: 12px;
+                    y: root.senders-top - 5px;
+                    width: parent.width - 24px;
+                    height: 1px;
+                    background: root.frame-border-color;
+                }
+
+                if root.sender-names.length > 10 : Rectangle {
+                    x: 4px;
+                    y: root.senders-top;
+                    width: parent.width - 8px;
+                    height: root.option-pitch - 2px;
+                    border-radius: 6px;
+                    background: root.highlighted-index == root.accounts.length || more-hit.has-hover
+                        ? root.selected-background : transparent;
+                    accessible-role: button;
+                    accessible-label: @tr("Choose another address…");
+                    accessible-action-default => { root.choose(root.accounts.length); }
+
+                    Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        text: @tr("Choose another address…");
+                        color: root.title-color;
+                        font-size: TypeScale.caption;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    more-hit := TouchArea {
+                        clicked => { root.choose(root.accounts.length); }
+                        mouse-cursor: pointer;
+                    }
+                }
+
+                if root.sender-names.length > 1 && root.sender-names.length <= 10 : Rectangle {
+                    x: 4px;
+                    y: root.senders-top;
+                    width: parent.width - 8px;
+                    height: root.sender-rows * root.option-pitch;
+
+                    for name[index] in root.sender-names : Rectangle {
+                        y: index * root.option-pitch;
+                        height: root.option-pitch - 2px;
+                        border-radius: 6px;
+                        background: root.highlighted-index == root.accounts.length + index || sender-row-hit.has-hover
+                            ? root.selected-background : transparent;
+                        accessible-role: list-item;
+                        accessible-label: name;
+                        accessible-item-selected: index == root.sender-index;
+                        accessible-action-default => { root.choose(root.accounts.length + index); }
+
+                        Text {
+                            x: 12px;
+                            width: parent.width - 48px;
+                            height: parent.height;
+                            text: name;
+                            color: root.title-color;
+                            font-size: TypeScale.caption;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Image {
+                            x: parent.width - 25px;
+                            y: (parent.height - self.height) / 2;
+                            width: 16px;
+                            height: 16px;
+                            visible: index == root.sender-index;
+                            source: @image-url("../icons/lucide/outline/check.svg");
+                            colorize: root.secondary-color;
+                            accessible-role: none;
+                        }
+
+                        sender-row-hit := TouchArea {
+                            clicked => { root.choose(root.accounts.length + index); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    signature-popup := PopupWindow {
+        width: 230px;
+        x: min(root.width - self.width - 12px, signature-trigger.x);
+        y: signature-trigger.y + signature-trigger.height + 4px;
+        height: min(8, root.signature-names.length) * root.option-pitch + 8px;
+        close-policy: close-on-click-outside;
+        forward-focus: signature-list;
+
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: root.frame-border-color;
+            background: root.background-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            clip: true;
+
+            signature-list := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.DownArrow) {
+                        root.highlighted-signature = min(root.signature-names.length - 1, root.highlighted-signature + 1);
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        root.highlighted-signature = max(0, root.highlighted-signature - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.Return || event.text == Key.Space) {
+                        root.choose-signature(root.highlighted-signature);
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        signature-popup.close();
+                        signature-focus.focus();
+                        return accept;
+                    }
+                    reject
+                }
+
+                Flickable {
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    content-height: root.signature-names.length * root.option-pitch;
+                    content-y: min(0px, max(self.height - root.signature-names.length * root.option-pitch,
+                        self.height - (root.highlighted-signature + 1) * root.option-pitch));
+
+                    for name[index] in root.signature-names : Rectangle {
+                        y: index * root.option-pitch;
+                        height: root.option-pitch - 2px;
+                        border-radius: 6px;
+                        background: index == root.highlighted-signature || signature-row-hit.has-hover
+                            ? root.selected-background : transparent;
+                        accessible-role: list-item;
+                        accessible-label: index == 0 ? @tr("No signature") : name;
+                        accessible-item-selected: index == root.signature-index;
+                        accessible-action-default => { root.choose-signature(index); }
+
+                        Text {
+                            x: 12px;
+                            width: parent.width - 48px;
+                            height: parent.height;
+                            text: index == 0 ? @tr("No signature") : name;
+                            color: index == 0 ? root.muted-color : root.title-color;
+                            font-size: TypeScale.caption;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Image {
+                            x: parent.width - 25px;
+                            y: (parent.height - self.height) / 2;
+                            width: 16px;
+                            height: 16px;
+                            visible: index == root.signature-index;
+                            source: @image-url("../icons/lucide/outline/check.svg");
+                            colorize: root.secondary-color;
+                            accessible-role: none;
+                        }
+
+                        signature-row-hit := TouchArea {
+                            clicked => { root.choose-signature(index); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 export component ComposerRecipients inherits Rectangle {

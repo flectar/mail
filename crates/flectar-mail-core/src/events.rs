@@ -158,12 +158,9 @@ pub enum CoreEvent {
     /// Settings changed outside the settings screens, such as by another
     /// device through Flectar Mail Sync.
     SettingsChanged,
-    /// Accounts were added, changed or removed outside the account screens,
-    /// such as by another device through Flectar Mail Sync. `removed` lists the
-    /// accounts whose removal was attempted; one may remain if it failed.
-    AccountsChanged {
-        removed: Vec<i64>,
-    },
+    /// Accounts were added or changed outside the account screens, such as
+    /// by another device through Flectar Mail Sync. Sync never removes one.
+    AccountsChanged,
     /// Another device blocked a sender, or stopped blocking one, through
     /// Flectar Mail Sync.
     BlockedSendersChanged,

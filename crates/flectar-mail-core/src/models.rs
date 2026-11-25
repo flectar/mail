@@ -2511,6 +2511,19 @@ pub struct ScheduledSend {
     pub error: Option<String>,
 }
 
+/// What stopping a draft's scheduled send did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelledSend {
+    /// No send waited.
+    NotScheduled,
+    /// The send is cancelled.
+    Cancelled,
+    /// The send is cancelled here, but another of the user's devices may
+    /// still send it: it holds the send, may be sending it right now, or
+    /// can't hear of the cancel yet.
+    MayStillGoOut,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSendResult {
@@ -3202,6 +3215,11 @@ pub struct Settings {
     /// The interface's text size.
     #[serde(default)]
     pub interface_text_size: InterfaceTextSize,
+    /// On a metered connection, such as a phone's mobile data, accounts
+    /// check for mail but download messages only when they're opened
+    /// (#253). Each device keeps its own.
+    #[serde(default)]
+    pub pause_downloads_when_metered: bool,
     /// What to do when a message asks for a read receipt.
     #[serde(default)]
     pub read_receipts: ReadReceiptPolicy,
@@ -3698,6 +3716,7 @@ impl Default for Settings {
             message_appearance: MessageAppearance::default(),
             reduce_motion: ReduceMotion::default(),
             interface_text_size: InterfaceTextSize::default(),
+            pause_downloads_when_metered: false,
             read_receipts: ReadReceiptPolicy::default(),
             empty_trash_after_days: 0,
             empty_junk_after_days: 0,

@@ -444,9 +444,15 @@ pub fn delete(conn: &Connection, sync_id: &str) -> Result<Option<SyncedSend>> {
 }
 
 /// Forget sends that finished before `before`: sent, cancelled or failed.
+/// One this device took back from the group as it left stays while its
+/// send waits here for the others to hear so.
 pub fn prune_finished(conn: &Connection, before: i64) -> Result<usize> {
     let mut statement = conn.prepare(
-        "SELECT sync_id FROM synced_sends WHERE state <> 'scheduled' AND updated_at < ?1",
+        "SELECT sync_id FROM synced_sends s
+         WHERE state <> 'scheduled' AND updated_at < ?1
+           AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                           WHERE pa.id = s.action_id AND pa.state = 'pending'
+                             AND json_extract(pa.payload, '$.takenBack') = 1)",
     )?;
     let finished = statement
         .query_map(params![before], |row| row.get::<_, String>(0))?
@@ -555,6 +561,19 @@ mod tests {
         assert_eq!(prune_finished(&conn, 11).unwrap(), 1);
         assert!(get(&conn, &waiting).unwrap().is_some());
         assert!(get(&conn, &sent).unwrap().is_none());
+
+        // One this device took back from the group as it left stays while
+        // its send waits here.
+        conn.execute(
+            "INSERT INTO pending_actions (id, account_id, kind, payload, created_at)
+             VALUES (8, 1, 'send', '{\"takenBack\": true}', 0)",
+            [],
+        )
+        .unwrap();
+        let taken = create(&conn, 1, "c@example.com", 1_000, "aa", 8, 0).unwrap();
+        set_state(&conn, &taken, CANCELLED, None, 10).unwrap();
+        assert_eq!(prune_finished(&conn, 11).unwrap(), 0);
+        assert!(get(&conn, &taken).unwrap().is_some());
     }
 
     fn file_named(id: &str) -> String {
