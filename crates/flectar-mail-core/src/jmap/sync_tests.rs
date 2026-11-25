@@ -42,6 +42,7 @@ async fn fixture() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
         tokens,
         credentials,
         pace: Default::default(),
+        metered: Default::default(),
     };
     let mut config = ctx
         .db
@@ -3416,5 +3417,32 @@ async fn embedded_parts_without_a_disposition_show_in_their_message() {
         .unwrap();
     assert!(list_once(&ctx, &config, &mock.connected).await);
     assert_eq!(inline().await, expected);
+    mock.task.abort();
+}
+
+/// On a metered connection, when the device chose so, bodies wait to be
+/// opened, and they download again once the connection isn't (#253).
+#[tokio::test]
+async fn bodies_wait_for_an_unmetered_connection() {
+    let (_dir, ctx, config) = fixture().await;
+    let mock = MockJmap {
+        emails: vec![with_bodies(email("email-a", "thread-a"), "Words", None)],
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    let metered = Arc::new(AtomicBool::new(true));
+    let probe = metered.clone();
+    ctx.metered
+        .set_probe(Arc::new(move || probe.load(Ordering::SeqCst)));
+    ctx.metered.set_pause(true);
+    let calls = mock.calls("Email/get").len();
+    assert!(!download_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(mock.calls("Email/get").len(), calls);
+
+    metered.store(false, Ordering::SeqCst);
+    assert!(download_once(&ctx, &config, &mock.connected).await);
+    assert_eq!(stored_bodies(&ctx).await[0].1, "cached");
     mock.task.abort();
 }

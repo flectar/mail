@@ -195,6 +195,21 @@ pub fn configure_system_proxy(reader: impl SystemProxies + 'static) {
     CONFIGURED.call_once(|| flectar_mail_core::net::proxy::set_system_source(reader));
 }
 
+type MeteredRead = Box<dyn Fn() -> bool + Send + Sync>;
+
+static METERED: OnceLock<MeteredRead> = OnceLock::new();
+
+/// Supply the reader of whether the network in use is metered (#253),
+/// `ConnectivityManager.isActiveNetworkMetered`, once.
+pub fn configure_metered(read: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = METERED.set(Box::new(read));
+}
+
+/// Whether the network in use is metered, once the host told how to ask.
+pub(crate) fn connection_metered() -> Option<bool> {
+    METERED.get().map(|read| read())
+}
+
 type ReduceMotion = Box<dyn Fn() -> bool + Send + Sync>;
 
 static REDUCE_MOTION: OnceLock<ReduceMotion> = OnceLock::new();
