@@ -210,6 +210,9 @@
     "printer.svg": {
       "source": "printer"
     },
+    "qr-code.svg": {
+      "source": "qr-code"
+    },
     "quote.svg": {
       "source": "quote"
     },
@@ -224,6 +227,9 @@
     },
     "reply-all.svg": {
       "source": "reply-all"
+    },
+    "scan-qr.svg": {
+      "source": "scan-qr-code"
     },
     "screen-full.svg": {
       "source": "maximize"
@@ -627,6 +633,10 @@
       "path": "sources/printer.svg",
       "sha256": "48fa647af0f143683bcbfd227c35c716aa48bc5ff158d6ac46823871180ffb87"
     },
+    "qr-code": {
+      "path": "sources/qr-code.svg",
+      "sha256": "baa1f82760d71e382f2308b4c65feeb4b07696251cb90b5ff8668289fca5f70e"
+    },
     "quote": {
       "path": "sources/quote.svg",
       "sha256": "fdf724a054ec2036787dc5477a980eb38c0071baef86398fe0ac371fa8cd5eaf"
@@ -650,6 +660,10 @@
     "reply-all": {
       "path": "sources/reply-all.svg",
       "sha256": "94cbd373d28b15966ae4ac74b2c08afd58c45b3c7de7fab5631cce6dcab87054"
+    },
+    "scan-qr-code": {
+      "path": "sources/scan-qr-code.svg",
+      "sha256": "201fb5027eeba8078d712d0768023c7a1a8f308448069a9d5113cbee37b5db9d"
     },
     "search": {
       "path": "sources/search.svg",

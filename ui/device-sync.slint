@@ -55,9 +55,11 @@ export global SyncUi {
     in-out property <string> join-method: "code";
     // This device can scan QR codes with its camera.
     in property <bool> can-scan;
-    // Devices can pair by QR code. No build can scan one yet (#449), so the
-    // QR options stay hidden and devices pair with a code.
-    in property <bool> qr-pairing: false;
+    // Devices can pair by QR code: any device shows one, and phones scan.
+    in property <bool> qr-pairing: true;
+    // The words on a scanner the app draws itself, as on iOS.
+    out property <string> scan-hint: @tr("Scan the QR code your other device shows.");
+    out property <string> scan-close: @tr("Cancel");
     // Passwords and sign-ins sync too, on every device of the group.
     in-out property <bool> sync-sign-ins: true;
     // Accounts this device had before it joined keep their passwords and
@@ -716,12 +718,12 @@ export component SyncSettingsPage inherits VerticalBox {
             spacing: 8px;
             Button { height: 32px; text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
             if SyncUi.can-scan : Button { height: 32px; text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
-            if SyncUi.qr-pairing && !SyncUi.can-scan : Button { height: 32px; text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+            if SyncUi.qr-pairing && !SyncUi.can-scan : Button { height: 32px; text: @tr("Show QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
             Button { height: 32px; text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
         }
         if !root.compact : Button { text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
         if !root.compact && SyncUi.can-scan : Button { text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
-        if !root.compact && SyncUi.qr-pairing && !SyncUi.can-scan : Button { text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+        if !root.compact && SyncUi.qr-pairing && !SyncUi.can-scan : Button { text: @tr("Show QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
         if !root.compact : Button { text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
     }
 
@@ -1120,6 +1122,8 @@ component PairingOutcome inherits Text {
         : SyncUi.pairing-stage == "expired" ? root.expired-text
         : SyncUi.pairing-stage == "not-found" ? root.not-found-text
         : SyncUi.pairing-stage == "server" ? @tr("Enter the sync server's address, such as https://sync.example.com.")
+        : SyncUi.pairing-stage == "camera" ? @tr("Turn on camera access for Flectar Mail in your phone's settings to scan a QR code.")
+        : SyncUi.pairing-stage == "scanner" ? @tr("The QR code scanner didn't start. Try again, or use a code instead.")
         : SyncUi.pairing-error;
     color: root.body-text;
     font-size: TypeScale.secondary;
@@ -1299,7 +1303,7 @@ export component InviteDeviceDialog inherits SyncModal {
     in-out property <bool> with-code: !SyncUi.qr-pairing;
     callback closed();
 
-    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "failed";
+    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "failed" || SyncUi.pairing-stage == "camera" || SyncUi.pairing-stage == "scanner";
 
     open: SyncUi.dialog == "invite";
     title: SyncUi.pairing-stage == "request" ? @tr("Add this device?")
@@ -1307,8 +1311,9 @@ export component InviteDeviceDialog inherits SyncModal {
         : @tr("Add a device");
     dismissed => { root.closed(); }
 
-    if SyncUi.pairing-stage == "" || SyncUi.pairing-stage == "starting" : Text {
-        text: @tr("Getting a code…");
+    if SyncUi.pairing-stage == "" || SyncUi.pairing-stage == "starting" || SyncUi.pairing-stage == "connecting" : Text {
+        // Connecting once this device has scanned the other one's code.
+        text: SyncUi.pairing-stage == "connecting" ? @tr("Connecting…") : @tr("Getting a code…");
         color: root.secondary-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -1372,10 +1377,33 @@ export component InviteDeviceDialog inherits SyncModal {
         expired-text: @tr("The code expired. Start again to get a new one.");
         not-found-text: @tr("That QR code isn't for Flectar Mail Sync, or it expired.");
     }
+    // A phone's dialog is too narrow for every button in one row, so the
+    // ways to pair get a row of their own.
+    if root.compact && SyncUi.pairing-stage == "code" && (SyncUi.can-scan || SyncUi.qr-pairing) : HorizontalLayout {
+        spacing: 8px;
+        if SyncUi.can-scan : Button {
+            horizontal-stretch: 1;
+            height: 32px;
+            text: @tr("Scan QR code");
+            clicked => {
+                root.with-code = false;
+                SyncUi.scan();
+            }
+        }
+        if SyncUi.qr-pairing : Button {
+            horizontal-stretch: 1;
+            height: 32px;
+            text: root.with-code ? @tr("Show QR code") : @tr("Use a code");
+            clicked => {
+                root.with-code = !root.with-code;
+                SyncUi.invite(root.with-code);
+            }
+        }
+    }
     HorizontalLayout {
         spacing: 8px;
         alignment: end;
-        if SyncUi.pairing-stage == "code" && SyncUi.can-scan : Button {
+        if !root.compact && SyncUi.pairing-stage == "code" && SyncUi.can-scan : Button {
             width: max(130px, self.content-width);
             height: 32px;
             text: @tr("Scan QR code");
@@ -1384,7 +1412,7 @@ export component InviteDeviceDialog inherits SyncModal {
                 SyncUi.scan();
             }
         }
-        if SyncUi.pairing-stage == "code" && SyncUi.qr-pairing : Button {
+        if !root.compact && SyncUi.pairing-stage == "code" && SyncUi.qr-pairing : Button {
             width: max(130px, self.content-width);
             height: 32px;
             text: root.with-code ? @tr("Show QR code") : @tr("Use a code");
@@ -1427,7 +1455,7 @@ export component JoinDeviceDialog inherits SyncModal {
     private property <string> method: SyncUi.join-method;
     private property <string> code;
     private property <string> words;
-    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "server" || SyncUi.pairing-stage == "failed";
+    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "server" || SyncUi.pairing-stage == "failed" || SyncUi.pairing-stage == "camera" || SyncUi.pairing-stage == "scanner";
     // Typing a code or the recovery words: before connecting, or again after
     // an attempt failed.
     private property <bool> typing: (root.method == "code" || root.method == "recovery")
