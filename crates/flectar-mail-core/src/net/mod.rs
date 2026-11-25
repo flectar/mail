@@ -4,6 +4,7 @@
 mod address;
 mod connect;
 pub(crate) mod dns;
+pub mod metered;
 pub mod proxy;
 pub mod retry_after;
 pub mod timeouts;

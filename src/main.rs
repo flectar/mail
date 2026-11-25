@@ -4890,6 +4890,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     notifications::ui::core_ready();
                     auto_replies::core_ready(&app, &startup_runtime, core.file_core());
                     mail_rules::core_ready(&startup_runtime, core.file_core());
+                    network::watch_metered(core.file_core(), app.as_weak(), &startup_runtime);
                     translation::core_ready(core.file_core());
                     ai_features::core_ready();
                     if !startup_benchmark_disable_background {
