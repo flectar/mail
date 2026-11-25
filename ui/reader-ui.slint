@@ -1,0 +1,102 @@
+import { EmailLink, EmailTile, MailLabelRow, MessageDetails, ThreadMessageRow } from "models.slint";
+import { MailReadingPane } from "views/mail-reading-pane.slint";
+
+// The open message as a reader shows it (#254). Every window has its own
+// instance, so the main window and a window a conversation opens in each
+// keep their own, which the same Rust code fills.
+export global ReaderUi {
+    in property <[ThreadMessageRow]> thread_messages: [];
+    in property <int> selected_thread_index: 0;
+    in property <[MailLabelRow]> mail_labels: [];
+    in property <[MailLabelRow]> mail_label_results: [];
+    in property <int> selected_mail_label_count: 0;
+    in property <bool> selected_account_uses_labels: false;
+    in property <string> selected_sender: "";
+    in property <string> selected_address: "";
+    in property <string> selected_subject: "";
+    in property <string> selected_time: "";
+    in property <string> selected_to: "";
+    in property <MessageDetails> selected_details;
+    in property <string> selected_label: "";
+    in property <bool> selected_is_draft: false;
+    in property <string> selected_initials: "?";
+    in property <image> selected_favicon;
+    in property <bool> selected_has_favicon: false;
+    in property <string> selected_plain_text: "";
+    in property <string> selected_source: "";
+    in property <string> selected_text: "";
+    in property <bool> has_selection: false;
+    in property <string> clipboard_request: "";
+    in property <int> clipboard_request_id: 0;
+    in property <[EmailTile]> email_tiles: [];
+    in property <[EmailLink]> email_links: [];
+    in property <bool> selected_starred: false;
+    in property <bool> selected_unread: false;
+    in property <string> selected_sender_verification: "";
+    in property <bool> remote-images-blocked: false;
+    in-out property <bool> text_mode: false;
+    in-out property <bool> source_mode: false;
+    in-out property <bool> rendering_info_open: false;
+    in-out property <float> email-content-aspect: 900 / 520;
+    in-out property <length> email-scroll-y: 0px;
+    // The email's viewport, which the window showing the reader passes on
+    // from the pane it shows.
+    in-out property <length> email-viewport-width: 0px;
+    in-out property <length> email-viewport-height: 0px;
+    in-out property <length> email-scroll-document-height: 0px;
+
+    callback copy_email_status(string);
+    callback email-pointer-event(float, float, string, bool, bool, bool, bool);
+    callback email-scroll(float, float);
+    callback email-key-event(string, bool, bool, bool, bool, bool, bool);
+    callback select-email-text();
+}
+
+// The reading pane of a window's reader. The window places it, and handles
+// what is done to the message, which differs between the main window and a
+// window of its own.
+export component BoundReadingPane inherits MailReadingPane {
+    email_tiles: ReaderUi.email_tiles;
+    email_links: ReaderUi.email_links;
+    thread-messages: ReaderUi.thread_messages;
+    selected-thread-index: ReaderUi.selected_thread_index;
+    selected_sender: ReaderUi.selected_sender;
+    selected_address: ReaderUi.selected_address;
+    selected_subject: ReaderUi.selected_subject;
+    selected_time: ReaderUi.selected_time;
+    selected_to: ReaderUi.selected_to;
+    selected_details: ReaderUi.selected_details;
+    selected_label: ReaderUi.selected_label;
+    mail_labels: ReaderUi.mail_labels;
+    mail-label-results: ReaderUi.mail_label_results;
+    selected-label-count: ReaderUi.selected_mail_label_count;
+    selected-account-uses-labels: ReaderUi.selected_account_uses_labels;
+    selected_initials: ReaderUi.selected_initials;
+    selected_favicon: ReaderUi.selected_favicon;
+    selected_has_favicon: ReaderUi.selected_has_favicon;
+    selected_plain_text: ReaderUi.selected_plain_text;
+    selected_source: ReaderUi.selected_source;
+    selected_text: ReaderUi.selected_text;
+    has_selection: ReaderUi.has_selection;
+    clipboard_request: ReaderUi.clipboard_request;
+    clipboard_request_id: ReaderUi.clipboard_request_id;
+    selected_starred: ReaderUi.selected_starred;
+    selected_unread: ReaderUi.selected_unread;
+    selected_is_draft: ReaderUi.selected_is_draft;
+    selected_sender_verification: ReaderUi.selected_sender_verification;
+    remote-images-blocked: ReaderUi.remote-images-blocked;
+    text_mode <=> ReaderUi.text_mode;
+    source_mode <=> ReaderUi.source_mode;
+    rendering_info_open <=> ReaderUi.rendering_info_open;
+    email-content-aspect <=> ReaderUi.email-content-aspect;
+    email-scroll-y <=> ReaderUi.email-scroll-y;
+    copy_email_status(status) => { ReaderUi.copy_email_status(status); }
+    email-pointer-event(x, y, kind, control, shift, alt, meta) => {
+        ReaderUi.email-pointer-event(x, y, kind, control, shift, alt, meta);
+    }
+    email-scroll(offset, viewport-height) => { ReaderUi.email-scroll(offset, viewport-height); }
+    email-key-event(text, pressed, repeat, control, shift, alt, meta) => {
+        ReaderUi.email-key-event(text, pressed, repeat, control, shift, alt, meta);
+    }
+    select-email-text => { ReaderUi.select-email-text(); }
+}

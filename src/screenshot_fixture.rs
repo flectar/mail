@@ -359,32 +359,52 @@ fn apply(app: &AppWindow) {
     app.set_startup_hydrated(FixtureValue::read(&data["startup_hydrated"]));
     app.set_active_view(FixtureValue::read(&data["active_view"]));
     app.set_workspace_layout(FixtureValue::read(&data["workspace_layout"]));
-    app.set_text_mode(FixtureValue::read(&data["text_mode"]));
+    app.global::<ReaderUi>()
+        .set_text_mode(FixtureValue::read(&data["ReaderUi.text_mode"]));
     app.set_has_selected(FixtureValue::read(&data["has_selected"]));
     app.set_selected_scope(FixtureValue::read(&data["selected_scope"]));
     app.set_unified_count(FixtureValue::read(&data["unified_count"]));
-    app.set_selected_sender(FixtureValue::read(&data["selected_sender"]));
-    app.set_selected_address(FixtureValue::read(&data["selected_address"]));
-    app.set_selected_subject(FixtureValue::read(&data["selected_subject"]));
-    app.set_selected_time(FixtureValue::read(&data["selected_time"]));
-    app.set_selected_to(FixtureValue::read(&data["selected_to"]));
-    app.set_selected_label(FixtureValue::read(&data["selected_label"]));
-    app.set_selected_initials(FixtureValue::read(&data["selected_initials"]));
-    app.set_selected_favicon(FixtureValue::read(&data["selected_favicon"]));
-    app.set_selected_has_favicon(FixtureValue::read(&data["selected_has_favicon"]));
-    app.set_selected_plain_text(FixtureValue::read(&data["selected_plain_text"]));
-    app.set_selected_starred(FixtureValue::read(&data["selected_starred"]));
-    app.set_selected_unread(FixtureValue::read(&data["selected_unread"]));
-    app.set_selected_mail_label_count(FixtureValue::read(&data["selected_mail_label_count"]));
+    app.global::<ReaderUi>()
+        .set_selected_sender(FixtureValue::read(&data["ReaderUi.selected_sender"]));
+    app.global::<ReaderUi>()
+        .set_selected_address(FixtureValue::read(&data["ReaderUi.selected_address"]));
+    app.global::<ReaderUi>()
+        .set_selected_subject(FixtureValue::read(&data["ReaderUi.selected_subject"]));
+    app.global::<ReaderUi>()
+        .set_selected_time(FixtureValue::read(&data["ReaderUi.selected_time"]));
+    app.global::<ReaderUi>()
+        .set_selected_to(FixtureValue::read(&data["ReaderUi.selected_to"]));
+    app.global::<ReaderUi>()
+        .set_selected_label(FixtureValue::read(&data["ReaderUi.selected_label"]));
+    app.global::<ReaderUi>()
+        .set_selected_initials(FixtureValue::read(&data["ReaderUi.selected_initials"]));
+    app.global::<ReaderUi>()
+        .set_selected_favicon(FixtureValue::read(&data["ReaderUi.selected_favicon"]));
+    app.global::<ReaderUi>()
+        .set_selected_has_favicon(FixtureValue::read(&data["ReaderUi.selected_has_favicon"]));
+    app.global::<ReaderUi>()
+        .set_selected_plain_text(FixtureValue::read(&data["ReaderUi.selected_plain_text"]));
+    app.global::<ReaderUi>()
+        .set_selected_starred(FixtureValue::read(&data["ReaderUi.selected_starred"]));
+    app.global::<ReaderUi>()
+        .set_selected_unread(FixtureValue::read(&data["ReaderUi.selected_unread"]));
+    app.global::<ReaderUi>()
+        .set_selected_mail_label_count(FixtureValue::read(
+            &data["ReaderUi.selected_mail_label_count"],
+        ));
     app.set_emails(FixtureValue::read(&data["emails"]));
     app.set_mail_list_entries(FixtureValue::read(&data["mail_list_entries"]));
     app.set_sidebar_rows(FixtureValue::read(&data["sidebar_rows"]));
     app.set_connected_accounts(FixtureValue::read(&data["connected_accounts"]));
     app.set_mail_profiles(FixtureValue::read(&data["mail_profiles"]));
-    app.set_mail_labels(FixtureValue::read(&data["mail_labels"]));
-    app.set_mail_label_results(FixtureValue::read(&data["mail_label_results"]));
-    app.set_email_tiles(FixtureValue::read(&data["email_tiles"]));
+    app.global::<ReaderUi>()
+        .set_mail_labels(FixtureValue::read(&data["ReaderUi.mail_labels"]));
+    app.global::<ReaderUi>()
+        .set_mail_label_results(FixtureValue::read(&data["ReaderUi.mail_label_results"]));
+    app.global::<ReaderUi>()
+        .set_email_tiles(FixtureValue::read(&data["ReaderUi.email_tiles"]));
     app.set_show_account_markers(FixtureValue::read(&data["show_account_markers"]));
-    app.set_email_content_aspect(FixtureValue::read(&data["email-content-aspect"]));
+    app.global::<ReaderUi>()
+        .set_email_content_aspect(FixtureValue::read(&data["ReaderUi.email-content-aspect"]));
     app.global::<MotionSettings>().set_enabled(false);
 }

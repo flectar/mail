@@ -75,7 +75,7 @@ impl Controller {
         if !ui.get_stage().is_empty() || !ui.get_available() {
             return;
         }
-        let address = app.get_selected_address().to_string();
+        let address = app.global::<ReaderUi>().get_selected_address().to_string();
         if ui.get_blocked() {
             self.unblock(address, true);
             return;
@@ -83,7 +83,7 @@ impl Controller {
         let Some(core) = self.core() else {
             return;
         };
-        let name = app.get_selected_sender().to_string();
+        let name = app.global::<ReaderUi>().get_selected_sender().to_string();
         self.spawn(
             async move { core.block_offer(&address).await },
             move |app, result| match result {
@@ -174,7 +174,10 @@ impl Controller {
     /// that sender, and Settings follow.
     fn changed(&self, address: &str, blocked: bool) {
         if let Some(app) = self.app.upgrade()
-            && app.get_selected_address().eq_ignore_ascii_case(address)
+            && app
+                .global::<ReaderUi>()
+                .get_selected_address()
+                .eq_ignore_ascii_case(address)
         {
             app.global::<BlockSender>().set_blocked(blocked);
         }
@@ -198,7 +201,7 @@ impl Controller {
                 };
                 // Kept lowercase, as the list compares them.
                 let blocked = |address: &str| addresses.contains(&address.to_ascii_lowercase());
-                let selected = app.get_selected_address();
+                let selected = app.global::<ReaderUi>().get_selected_address();
                 if !selected.is_empty() {
                     app.global::<BlockSender>()
                         .set_blocked(blocked(selected.as_str()));

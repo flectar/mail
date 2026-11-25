@@ -4,7 +4,7 @@ import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
 import { MailListPane } from "mail-list-pane.slint";
-import { MailReadingPane } from "mail-reading-pane.slint";
+import { BoundReadingPane, ReaderUi } from "../reader-ui.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { Notice } from "../notice.slint";
@@ -30,8 +30,6 @@ export component MailView inherits FocusScope {
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> list_entries: [];
     in property <bool> group_mail_by_date: true;
-    in property <[ThreadMessageRow]> thread_messages: [];
-    in property <int> selected_thread_index: 0;
     in property <[SidebarRow]> sidebar_rows: [];
     // Compact layouts choose the profile from the sidebar.
     in property <[MailProfileRow]> mail_profiles: [];
@@ -43,12 +41,6 @@ export component MailView inherits FocusScope {
     callback create_mail_profile();
     in-out property <string> folder_filter_query: "";
     private property <length> sidebar-scroll-y: 0px;
-    in property <[MailLabelRow]> mail_labels: [];
-    in property <[MailLabelRow]> mail_label_results: [];
-    in property <int> selected_mail_label_count: 0;
-    in property <bool> selected_account_uses_labels: false;
-    in property <[EmailTile]> email_tiles: [];
-    in property <[EmailLink]> email_links: [];
     in property <string> active_view: "mail";
     in property <string> selected_scope: "Unified Inbox";
     in property <string> selected_scope_title: "Unified Inbox";
@@ -59,22 +51,6 @@ export component MailView inherits FocusScope {
     in property <bool> mail_oldest_first: false;
     in property <bool> mail_compact_rows: false;
     in property <int> mail_preview_lines: 1;
-    in property <string> selected_sender: "";
-    in property <string> selected_address: "";
-    in property <string> selected_subject: "";
-    in property <string> selected_time: "";
-    in property <string> selected_to: "";
-    in property <MessageDetails> selected_details;
-    in property <string> selected_label: "";
-    in property <string> selected_initials: "?";
-    in property <image> selected_favicon;
-    in property <bool> selected_has_favicon: false;
-    in property <string> selected_plain_text: "";
-    in property <string> selected_source: "";
-    in property <string> selected_text: "";
-    in property <bool> has_selection: false;
-    in property <string> clipboard_request: "";
-    in property <int> clipboard_request_id: 0;
     in property <bool> sync_in_progress: false;
     // An account's checks fail, as its sidebar heading shows.
     in property <bool> account_problem: false;
@@ -85,19 +61,9 @@ export component MailView inherits FocusScope {
     in property <bool> has_selected: true;
     in property <int> previous-email-id: -1;
     in property <int> next-email-id: -1;
-    in property <bool> selected_starred: false;
-    in property <bool> selected_unread: false;
-    in property <bool> selected_is_draft: false;
-    in property <string> selected_sender_verification: "";
-    in property <bool> remote-images-blocked: false;
     in property <bool> monochrome_sidebar_icons: false;
     in property <bool> print_supported: true;
     in-out property <bool> mail_sidebar_collapsed: false;
-    in-out property <bool> text_mode: false;
-    in-out property <bool> source_mode: false;
-    in-out property <bool> rendering_info_open: false;
-    in-out property <float> email-content-aspect: 900 / 520;
-    in-out property <length> email-scroll-y: 0px;
     // Settings replaces this view, showing the given page.
     callback open-settings(string);
     // An account Settings signs in again once it shows the account.
@@ -186,12 +152,7 @@ export component MailView inherits FocusScope {
     callback open_message_in_browser();
     callback open_compose();
     callback open_email_link(string);
-    callback copy_email_status(string);
     callback report_rendering_issue();
-    callback email-pointer-event(float, float, string, bool, bool, bool, bool);
-    callback email-scroll(float, float);
-    callback email-key-event(string, bool, bool, bool, bool, bool, bool);
-    callback select-email-text();
     callback load-remote-images-for-message();
 
     function dispatch-message-action(action: string) {
@@ -294,7 +255,7 @@ export component MailView inherits FocusScope {
     capture-key-pressed(event) => {
         if event.modifiers.control || event.modifiers.meta || event.modifiers.alt { return reject; }
         if event.text == Key.Escape && root.single-pane && root.compact-page == "message"
-            && !EmailReader.find-open && !root.has_selection && !EmailReader.caret-mode {
+            && !EmailReader.find-open && !ReaderUi.has_selection && !EmailReader.caret-mode {
             root.compact-page = "list";
             root.close_preview();
             return accept;
@@ -475,7 +436,7 @@ export component MailView inherits FocusScope {
                 }
             }
 
-            desktop-reading-pane := MailReadingPane {
+            desktop-reading-pane := BoundReadingPane {
                 shown: !root.single-pane;
                 show-avatars: root.show-avatars;
                 // This is the flexible column. Explicit constraints prevent
@@ -488,45 +449,11 @@ export component MailView inherits FocusScope {
                 horizontal-stretch: 1;
                 print_supported: root.print_supported;
                 window-width: root.width;
-                email_tiles: root.email_tiles;
-                email_links: root.email_links;
-                thread-messages: root.thread_messages;
-                selected-thread-index: root.selected_thread_index;
-                selected_sender: root.selected_sender;
-                selected_address: root.selected_address;
-                selected_subject: root.selected_subject;
-                selected_time: root.selected_time;
-                selected_to: root.selected_to;
-                selected_details: root.selected_details;
-                selected_label: root.selected_label;
-                mail_labels: root.mail_labels;
-                mail-label-results: root.mail_label_results;
-                selected-label-count: root.selected_mail_label_count;
-                selected-account-uses-labels: root.selected_account_uses_labels;
-                selected_initials: root.selected_initials;
-                selected_favicon: root.selected_favicon;
-                selected_has_favicon: root.selected_has_favicon;
-                selected_plain_text: root.selected_plain_text;
-                selected_source: root.selected_source;
-                selected_text: root.selected_text;
-                has_selection: root.has_selection;
-                clipboard_request: root.clipboard_request;
-                clipboard_request_id: root.clipboard_request_id;
                 has_selected: root.has_selected;
                 previous-email-id: root.previous-email-id;
                 next-email-id: root.next-email-id;
-                selected_starred: root.selected_starred;
-                selected_unread: root.selected_unread;
-                selected_is_draft: root.selected_is_draft;
                 trash_view: root.trash_view;
                 request_empty_trash => { root.request_empty_trash(-1); }
-                selected_sender_verification: root.selected_sender_verification;
-                remote-images-blocked: root.remote-images-blocked;
-                text_mode <=> root.text_mode;
-                source_mode <=> root.source_mode;
-                rendering_info_open <=> root.rendering_info_open;
-                email-content-aspect <=> root.email-content-aspect;
-                email-scroll-y <=> root.email-scroll-y;
                 accent: root.accent;
                 accent-soft: root.accent-soft;
                 border: root.border;
@@ -550,19 +477,8 @@ export component MailView inherits FocusScope {
                 print_message => { root.print_message(); }
                 open_message_in_browser => { root.open_message_in_browser(); }
                 open_email_link(url) => { root.open_email_link(url); }
-                copy_email_status(status) => { root.copy_email_status(status); }
                 report_rendering_issue => { root.report_rendering_issue(); }
                 load-remote-images-for-message => { root.load-remote-images-for-message(); }
-                email-pointer-event(x, y, kind, control, shift, alt, meta) => {
-                    root.email-pointer-event(x, y, kind, control, shift, alt, meta);
-                }
-                email-scroll(offset, viewport-height) => {
-                    root.email-scroll(offset, viewport-height);
-                }
-                email-key-event(text, pressed, repeat, control, shift, alt, meta) => {
-                    root.email-key-event(text, pressed, repeat, control, shift, alt, meta);
-                }
-                select-email-text => { root.select-email-text(); }
             }
         }
 
@@ -721,7 +637,7 @@ export component MailView inherits FocusScope {
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
 
-            compact-reading-pane := MailReadingPane {
+            compact-reading-pane := BoundReadingPane {
                 print_supported: root.print_supported;
                 full-width: true;
                 show-avatars: root.show-avatars;
@@ -737,45 +653,11 @@ export component MailView inherits FocusScope {
                 animate opacity { duration: 170ms; easing: ease-out; }
                 compact: root.compact;
                 window-width: self.width;
-                email_tiles: root.email_tiles;
-                email_links: root.email_links;
-                thread-messages: root.thread_messages;
-                selected-thread-index: root.selected_thread_index;
-                selected_sender: root.selected_sender;
-                selected_address: root.selected_address;
-                selected_subject: root.selected_subject;
-                selected_time: root.selected_time;
-                selected_to: root.selected_to;
-                selected_details: root.selected_details;
-                selected_label: root.selected_label;
-                mail_labels: root.mail_labels;
-                mail-label-results: root.mail_label_results;
-                selected-label-count: root.selected_mail_label_count;
-                selected-account-uses-labels: root.selected_account_uses_labels;
-                selected_initials: root.selected_initials;
-                selected_favicon: root.selected_favicon;
-                selected_has_favicon: root.selected_has_favicon;
-                selected_plain_text: root.selected_plain_text;
-                selected_source: root.selected_source;
-                selected_text: root.selected_text;
-                has_selection: root.has_selection;
-                clipboard_request: root.clipboard_request;
-                clipboard_request_id: root.clipboard_request_id;
                 has_selected: root.has_selected;
                 previous-email-id: root.previous-email-id;
                 next-email-id: root.next-email-id;
-                selected_starred: root.selected_starred;
-                selected_unread: root.selected_unread;
-                selected_is_draft: root.selected_is_draft;
                 trash_view: root.trash_view;
                 request_empty_trash => { root.request_empty_trash(-1); }
-                selected_sender_verification: root.selected_sender_verification;
-                remote-images-blocked: root.remote-images-blocked;
-                text_mode <=> root.text_mode;
-                source_mode <=> root.source_mode;
-                rendering_info_open <=> root.rendering_info_open;
-                email-content-aspect <=> root.email-content-aspect;
-                email-scroll-y <=> root.email-scroll-y;
                 accent: root.accent;
                 accent-soft: root.accent-soft;
                 border: root.border;
@@ -802,19 +684,8 @@ export component MailView inherits FocusScope {
                 print_message => { root.print_message(); }
                 open_message_in_browser => { root.open_message_in_browser(); }
                 open_email_link(url) => { root.open_email_link(url); }
-                copy_email_status(status) => { root.copy_email_status(status); }
                 report_rendering_issue => { root.report_rendering_issue(); }
                 load-remote-images-for-message => { root.load-remote-images-for-message(); }
-                email-pointer-event(x, y, kind, control, shift, alt, meta) => {
-                    root.email-pointer-event(x, y, kind, control, shift, alt, meta);
-                }
-                email-scroll(offset, viewport-height) => {
-                    root.email-scroll(offset, viewport-height);
-                }
-                email-key-event(text, pressed, repeat, control, shift, alt, meta) => {
-                    root.email-key-event(text, pressed, repeat, control, shift, alt, meta);
-                }
-                select-email-text => { root.select-email-text(); }
             }
 
             // Modal drawer and scrim intentionally sit above both compact pages.

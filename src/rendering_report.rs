@@ -39,10 +39,10 @@ pub(super) fn register(
             return;
         };
         let url = issue_url(&Environment::from_app(&app).describe());
-        let html = app.get_selected_source();
+        let html = app.global::<ReaderUi>().get_selected_source();
         if fits_in_issue(&html) {
             if !html.is_empty() {
-                crate::renderer_input_controller::copy_text(&app, html.into());
+                crate::renderer_input_controller::copy_text(&ReaderRef::main(&app), html.into());
                 app.set_render_status(UiMessage::plain(
                     "Copied HTML source. Paste it into the issue.",
                 ));
@@ -183,7 +183,7 @@ impl Environment {
             } else {
                 "light"
             },
-            remote_images_blocked: app.get_remote_images_blocked(),
+            remote_images_blocked: app.global::<ReaderUi>().get_remote_images_blocked(),
         }
     }
 
@@ -496,8 +496,8 @@ mod tests {
             clock.set(Duration::from_secs(1));
             slint::platform::update_timers_and_animations();
         }
-        app.set_selected_source(SOURCE.into());
-        app.set_remote_images_blocked(true);
+        app.global::<ReaderUi>().set_selected_source(SOURCE.into());
+        app.global::<ReaderUi>().set_remote_images_blocked(true);
         app.global::<RendererSettings>().set_active("gpu".into());
         app.global::<EmailReader>().set_zoom(0.85);
         app.global::<EmailReader>().set_auto_fit(true);
@@ -522,7 +522,7 @@ mod tests {
         );
 
         // The dialog selects Report issue when it opens.
-        app.set_rendering_info_open(true);
+        app.global::<ReaderUi>().set_rendering_info_open(true);
         let key = slint::SharedString::from(slint::platform::Key::Return);
         app.window()
             .dispatch_event(WindowEvent::KeyPressed { text: key.clone() });

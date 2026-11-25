@@ -21,7 +21,7 @@ const WIDTH: u32 = 1320;
 const HEIGHT: u32 = 800;
 
 fn render(app: &AppWindow, scale: f32) -> renderer::RenderedEmail {
-    let width = app.get_email_viewport_width();
+    let width = app.global::<ReaderUi>().get_email_viewport_width();
     assert!(width > 1.0, "the reading pane must be laid out first");
     renderer::render_screenshot_email(
         &std::fs::read_to_string(HTML_PATH).unwrap(),
@@ -34,7 +34,7 @@ fn render(app: &AppWindow, scale: f32) -> renderer::RenderedEmail {
 
 /// Show the message in the reader through the application's own projection.
 pub(super) fn show(app: &AppWindow, scale: f32) {
-    mail_render_projection::apply_cpu_frame(app, render(app, scale));
+    mail_render_projection::apply_cpu_frame(&ReaderRef::main(app), render(app, scale));
 }
 
 #[test]

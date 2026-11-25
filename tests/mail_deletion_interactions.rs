@@ -16,6 +16,7 @@ slint::slint! {
     import { AppTheme } from "../ui/design-system.slint";
     export { MotionSettings } from "../ui/design-system.slint";
     import { MailView } from "../ui/views/mail-view.slint";
+    import { ReaderUi } from "../ui/reader-ui.slint";
 
     export component MailDeletionHarness inherits Window {
         preferred-width: 1200px;
@@ -29,7 +30,11 @@ slint::slint! {
         callback single-action(string);
         callback bulk-action(string);
 
-        init => { Palette.color-scheme = ColorScheme.light; }
+        init => {
+            Palette.color-scheme = ColorScheme.light;
+            ReaderUi.selected_sender = "Third sender";
+            ReaderUi.selected_subject = "Preview outside the checked selection";
+        }
         changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
         MailView {
             width: parent.width;
@@ -42,8 +47,6 @@ slint::slint! {
             show-avatars: false;
             selection-count: root.checked ? 2 : 0;
             has_selected: true;
-            selected_sender: "Third sender";
-            selected_subject: "Preview outside the checked selection";
             trash_view: root.trash-view;
             emails: [
                 { id: 1, sender: "First sender", subject: "First checked message", checked: root.checked },
