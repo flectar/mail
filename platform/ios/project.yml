@@ -26,6 +26,8 @@ targets:
         CFBundleDisplayName: Flectar Mail
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Scanning another device's QR code (platform/ios/QrScanner.m).
+        NSCameraUsageDescription: Flectar Mail uses the camera only to scan the QR code another of your devices shows, when you add a device to Flectar Mail Sync.
         NSLocalNetworkUsageDescription: Flectar Mail connects to mail servers on your local network.
         UIBackgroundModes: [fetch]
         UILaunchScreen: {}

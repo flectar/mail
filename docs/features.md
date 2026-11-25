@@ -1090,12 +1090,17 @@ new device. Your mail, contacts and calendars keep syncing with your mail
 provider as before.
 
 Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
-that already syncs and type the code it shows into **Enter code** on the new
-one, either on the welcome screen or in Settings → Sync. A device can also join
-with your recovery code. Each device keeps its own mail checking, how much mail
-history it downloads and what it downloads ahead of time, which folders of an
-IMAP account it syncs, its proxy and server timeout, and settings that belong
-to the device itself, such as reduced motion and text size.
+that already syncs. It shows a QR code for a phone to scan with **Scan QR
+code**, on the welcome screen or in Settings → Sync, and **Use a code** shows a
+code to type into **Enter code** instead. The other way around, a computer shows
+its own QR code with **Show QR code**, and a phone that syncs scans it from
+**Add a device**. Android phones scan with Google Play services and HarmonyOS
+phones with the system's scanner, neither of which needs the app to have camera
+access. An iPhone asks for camera access the first time it scans. A device can
+also join with your recovery code. Each device keeps its own mail checking, how
+much mail history it downloads and what it downloads ahead of time, which
+folders of an IMAP account it syncs, its proxy and server timeout, and settings
+that belong to the device itself, such as reduced motion and text size.
 
 Accounts arrive with their passwords, so they work on a new device at once.
 Google and Microsoft sign-ins go only to devices of the same kind. A

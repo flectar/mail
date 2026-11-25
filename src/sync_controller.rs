@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::documents::{DocumentDialog, DocumentFuture, DocumentProvider};
+use crate::qr_scanner::is_pairing_code;
 use crate::retained_model::RetainedModel;
 use chrono::{Datelike, Timelike};
 use flectar_mail_core::Core;
@@ -68,14 +69,15 @@ impl SyncController {
         app: &AppWindow,
         state: &Rc<RefCell<InboxState>>,
         runtime: &tokio::runtime::Handle,
-        urls: ExternalUrlOpener,
-        documents: Arc<dyn DocumentProvider>,
-        temp_dir: PathBuf,
+        host: &PlatformContext,
     ) {
         let ui = app.global::<SyncUi>();
         ui.set_devices(Rc::clone(&self.devices).into());
         ui.set_can_buy(platform::sells_sync());
+        let scanner = host.qr_scanner.clone();
+        ui.set_can_scan(scanner.as_ref().is_some_and(|scanner| scanner.available()));
 
+        let temp_dir = host.paths.temp_dir();
         let staging = temp_dir.clone();
         runtime.spawn_blocking(move || remove_staged_recovery_codes(&staging));
 
@@ -84,9 +86,10 @@ impl SyncController {
             state: Rc::clone(state),
             runtime: runtime.clone(),
             controller: Rc::clone(self),
-            urls,
-            documents,
+            urls: host.external_urls.clone(),
+            documents: host.documents.clone(),
             temp_dir,
+            scanner,
         };
 
         let turn_on = actions.clone();
@@ -95,6 +98,8 @@ impl SyncController {
         ui.on_join_with_code(move |code| join.join_with_code(code.to_string()));
         let show = actions.clone();
         ui.on_join_show_qr(move || show.join_show_qr());
+        let scan = actions.clone();
+        ui.on_scan(move || scan.scan());
         let recover = actions.clone();
         ui.on_recover(move |words| recover.recover(words.to_string()));
         let invite = actions.clone();
@@ -295,6 +300,8 @@ struct Actions {
     /// Where a file to save is written first, below the cache directory,
     /// which every document provider accepts as an export source.
     temp_dir: PathBuf,
+    /// The phone's QR code scanner; computers have none.
+    scanner: Option<Arc<dyn QrScannerHost>>,
 }
 
 impl Actions {
@@ -406,6 +413,110 @@ impl Actions {
             async move { core.device_sync_join_show_code(server).await },
             move |ui, controller, result| {
                 show_code(ui, controller, attempt, result, &cancel);
+            },
+        );
+    }
+
+    /// Scan another device's QR code: to join its sync from Connect this
+    /// device, or, from Add a device, to add the device that shows it.
+    fn scan(&self) {
+        let (Some(app), Some(scanner)) = (self.app.upgrade(), self.scanner.clone()) else {
+            return;
+        };
+        let ui = app.global::<SyncUi>();
+        let adding = ui.get_dialog() == "invite";
+        let texts = ScanTexts {
+            hint: ui.get_scan_hint().into(),
+            close: ui.get_scan_close().into(),
+        };
+        let scan = scanner.scan(texts);
+        let actions = self.clone();
+        self.run(
+            async move { Ok(scan.await) },
+            move |ui, controller, result| match result.unwrap_or(Ok(None)) {
+                Ok(Some(code)) if is_pairing_code(&code) => {
+                    if adding {
+                        actions.answer_code(code);
+                    } else {
+                        actions.join_scanned(code);
+                    }
+                }
+                // Closing the scanner keeps Add a device's own code, and
+                // leaves Connect this device, which had only the scanner.
+                Ok(None) => {
+                    if !adding {
+                        ui.set_dialog("".into());
+                    }
+                }
+                outcome => {
+                    if let (Some(pairing), Some(core)) =
+                        (controller.end_attempt(ui), actions.core())
+                    {
+                        core.device_sync_cancel_pairing(pairing);
+                    }
+                    let stage = match outcome {
+                        Err(ScanError::CameraDenied) => "camera",
+                        Err(ScanError::Unavailable(reason)) => {
+                            tracing::warn!(%reason, "the QR code scanner didn't start");
+                            "scanner"
+                        }
+                        _ => "not-found",
+                    };
+                    ui.set_pairing_stage(stage.into());
+                }
+            },
+        );
+    }
+
+    /// Join with the QR code an existing device shows.
+    fn join_scanned(&self, code: String) {
+        let (Some(app), Some(core)) = (self.app.upgrade(), self.core()) else {
+            return;
+        };
+        let ui = app.global::<SyncUi>();
+        let attempt = self.controller.start_attempt(&ui, "starting");
+        let cancel = Arc::clone(&core);
+        self.run(
+            async move { core.device_sync_join_scanned(code).await },
+            move |ui, controller, result| {
+                if controller.attempt.get() != attempt {
+                    if let Ok(pairing) = result {
+                        cancel.device_sync_cancel_pairing(pairing);
+                    }
+                    return;
+                }
+                match result {
+                    Ok(pairing) => controller.follow(ui, pairing),
+                    Err(error) => show_pairing_error(ui, &error),
+                }
+            },
+        );
+    }
+
+    /// Add the device that shows this QR code, instead of showing one.
+    fn answer_code(&self, code: String) {
+        let (Some(app), Some(core)) = (self.app.upgrade(), self.core()) else {
+            return;
+        };
+        let ui = app.global::<SyncUi>();
+        if let Some(pairing) = self.controller.pairing.get() {
+            core.device_sync_cancel_pairing(pairing);
+        }
+        let attempt = self.controller.start_attempt(&ui, "connecting");
+        let cancel = Arc::clone(&core);
+        self.run(
+            async move { core.device_sync_answer_code(code).await },
+            move |ui, controller, result| {
+                if controller.attempt.get() != attempt {
+                    if let Ok(pairing) = result {
+                        cancel.device_sync_cancel_pairing(pairing);
+                    }
+                    return;
+                }
+                match result {
+                    Ok(pairing) => controller.follow(ui, pairing),
+                    Err(error) => show_pairing_error(ui, &error),
+                }
             },
         );
     }

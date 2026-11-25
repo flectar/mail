@@ -3036,6 +3036,11 @@ export component AppWindow inherits Window {
             root.welcome-join = true;
             SyncUi.join-method = method;
             SyncUi.dialog = "join";
+            if method == "qr" {
+                SyncUi.join-show-qr();
+            } else if method == "scan" {
+                SyncUi.scan();
+            }
         }
         import-accounts => { root.import_accounts(); }
         privacy-policy-url: root.privacy-policy-url;

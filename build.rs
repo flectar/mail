@@ -31,12 +31,14 @@ fn main() {
             .file("platform/ios/MemoryPressure.m")
             .file("platform/ios/BackgroundChecks.m")
             .file("platform/ios/ReduceMotion.m")
+            .file("platform/ios/QrScanner.m")
             .flag("-fobjc-arc")
             .compile("flectar_documents");
         println!("cargo:rustc-link-lib=framework=UIKit");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=AuthenticationServices");
         println!("cargo:rustc-link-lib=framework=BackgroundTasks");
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
         // iOS gives the main thread a 1 MB stack, and Slint's generated code
         // for the main window takes a 930 KiB frame when the mailbox first
         // appears (slint-ui/slint#14817). Ask for the 8 MiB the same code gets
@@ -49,6 +51,7 @@ fn main() {
         println!("cargo:rerun-if-changed=platform/ios/MemoryPressure.m");
         println!("cargo:rerun-if-changed=platform/ios/BackgroundChecks.m");
         println!("cargo:rerun-if-changed=platform/ios/ReduceMotion.m");
+        println!("cargo:rerun-if-changed=platform/ios/QrScanner.m");
     }
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         let mut resources = winresource::WindowsResource::new();
