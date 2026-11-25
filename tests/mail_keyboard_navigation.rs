@@ -18,6 +18,7 @@ slint::slint! {
     import { AppTheme } from "../ui/design-system.slint";
     import { MailListPane } from "../ui/views/mail-list-pane.slint";
     import { MailView } from "../ui/views/mail-view.slint";
+    import { ReaderUi } from "../ui/reader-ui.slint";
 
     export component MailKeyboardHarness inherits Window {
         preferred-width: 500px;
@@ -77,8 +78,8 @@ slint::slint! {
         in-out property <string> layout-mode: "default";
         in-out property <bool> compact: false;
         in property <bool> dark: false;
-        in-out property <bool> text-mode: false;
-        in-out property <bool> source-mode: false;
+        in-out property <bool> text-mode <=> ReaderUi.text_mode;
+        in-out property <bool> source-mode <=> ReaderUi.source_mode;
         in-out property <int> checked-count: 0;
         in-out property <bool> trash: false;
         in-out property <bool> draft: false;
@@ -94,8 +95,15 @@ slint::slint! {
         callback searched(string);
         callback checked-mail();
         callback checked-all-mail();
-        init => { Palette.color-scheme = ColorScheme.light; }
+        init => {
+            Palette.color-scheme = ColorScheme.light;
+            ReaderUi.selected_sender = "Navigation sender";
+            ReaderUi.selected_subject = "Keyboard navigation test";
+            ReaderUi.selected_plain_text = "A fictional message for keyboard testing.";
+            ReaderUi.selected_is_draft = root.draft;
+        }
         changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+        changed draft => { ReaderUi.selected_is_draft = root.draft; }
         public function focus-list() { view.focus-list(true); }
         view := MailView {
             width: parent.width;
@@ -105,16 +113,10 @@ slint::slint! {
             list_entries: root.entries;
             layout-mode: root.layout-mode;
             compact: root.compact;
-            text_mode: root.text-mode;
-            source_mode: root.source-mode;
             search_query <=> root.query;
             selection-count: root.checked-count;
             trash_view: root.trash;
-            selected_is_draft: root.draft;
             has_selected: true;
-            selected_sender: "Navigation sender";
-            selected_subject: "Keyboard navigation test";
-            selected_plain_text: "A fictional message for keyboard testing.";
             surface: AppTheme.surface;
             surface-raised: AppTheme.surface-raised;
             sidebar-bg: AppTheme.sidebar-bg;

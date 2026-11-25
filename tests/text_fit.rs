@@ -19,7 +19,7 @@ use flectar_mail::{
     ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow,
     ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment,
     MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRole, MailboxRow,
-    MotionSettings, ProfileMemberRow, SidebarRow, SidebarRowKind, StorageUsageRow,
+    MotionSettings, ProfileMemberRow, ReaderUi, SidebarRow, SidebarRowKind, StorageUsageRow,
     ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
@@ -409,18 +409,21 @@ fn apply_fixture(app: &AppWindow) {
     app.set_sidebar_rows(model(sidebar_rows()));
     app.set_unified_count("14".into());
     app.set_has_selected(true);
-    app.set_text_mode(true);
-    app.set_selected_sender("Jamie Rivera".into());
-    app.set_selected_address("jamie.rivera@example.com".into());
-    app.set_selected_subject("Quarterly planning notes and the revised agenda for Thursday".into());
-    app.set_selected_time("Oct 19, 2026, 9:41 AM".into());
-    app.set_selected_to("Alex Morgan".into());
-    app.set_selected_initials("JR".into());
-    app.set_selected_plain_text(
+    let reader = app.global::<ReaderUi>();
+    reader.set_text_mode(true);
+    reader.set_selected_sender("Jamie Rivera".into());
+    reader.set_selected_address("jamie.rivera@example.com".into());
+    reader.set_selected_subject(
+        "Quarterly planning notes and the revised agenda for Thursday".into(),
+    );
+    reader.set_selected_time("Oct 19, 2026, 9:41 AM".into());
+    reader.set_selected_to("Alex Morgan".into());
+    reader.set_selected_initials("JR".into());
+    reader.set_selected_plain_text(
         "Hi Alex,\n\nHere are the notes from today, including the open questions about the launch.\n\nJamie"
             .into(),
     );
-    app.set_thread_messages(model(vec![
+    reader.set_thread_messages(model(vec![
         ThreadMessageRow {
             index: 0,
             sender: "Jamie Rivera".into(),
@@ -461,9 +464,9 @@ fn apply_fixture(app: &AppWindow) {
             ..Default::default()
         })
         .collect();
-    app.set_mail_label_results(model(labels.clone()));
-    app.set_mail_labels(model(labels));
-    app.set_selected_mail_label_count(1);
+    reader.set_mail_label_results(model(labels.clone()));
+    reader.set_mail_labels(model(labels));
+    reader.set_selected_mail_label_count(1);
     app.set_sync_message(message("Local data ready."));
     app.set_app_version("0.1.0-alpha.7".into());
     app.set_storage_loaded(true);
@@ -736,7 +739,7 @@ fn reset(app: &AppWindow) {
     app.set_settings_tab("General".into());
     app.global::<ComposerUi>().set_open(false);
     app.set_calendar_editor_open(false);
-    app.set_rendering_info_open(false);
+    app.global::<ReaderUi>().set_rendering_info_open(false);
     app.set_oauth_setup_open(false);
     app.set_custom_oauth_open(false);
     app.set_account_form_open(false);
@@ -1075,7 +1078,9 @@ fn states() -> Vec<State> {
             composer.set_subject("Re: Quarterly planning notes".into());
             composer.set_open(true);
         }),
-        state("rendering info", |app| app.set_rendering_info_open(true)),
+        state("rendering info", |app| {
+            app.global::<ReaderUi>().set_rendering_info_open(true)
+        }),
         state("oauth setup", |app| app.set_oauth_setup_open(true)),
         state("settings custom theme", |app| {
             app.global::<AppTheme>().set_preset("custom".into());
