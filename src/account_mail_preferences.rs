@@ -1333,18 +1333,15 @@ pub(super) fn sender_index(
         .unwrap_or(0)
 }
 
-/// What the composer says about end-to-end encryption for its account.
-pub(super) fn security_summary(policy: &MailSecurity) -> &'static str {
-    if policy.require_encryption {
-        if policy.sign_by_default {
-            "OpenPGP: encryption required · digitally signed"
-        } else {
-            "OpenPGP: encryption required"
-        }
-    } else if policy.sign_by_default {
-        "OpenPGP: digitally signed · not encrypted"
-    } else {
-        "Message is not end-to-end encrypted"
+/// How the account protects its messages end to end, for the composer to
+/// show and word in the interface's language: "encrypted-signed",
+/// "encrypted", "signed", or "" when it does neither.
+pub(super) fn security_state(policy: &MailSecurity) -> &'static str {
+    match (policy.require_encryption, policy.sign_by_default) {
+        (true, true) => "encrypted-signed",
+        (true, false) => "encrypted",
+        (false, true) => "signed",
+        (false, false) => "",
     }
 }
 
