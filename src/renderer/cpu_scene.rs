@@ -8,7 +8,11 @@
 //!
 //! AnyRender doesn't say yet which space the transform is meant in, see
 //! DioxusLabs/anyrender#212. Remove this wrapper once its backends agree.
+//!
+//! The wrapper also hands vello_cpu only the filters it can run, see
+//! [`cpu_filter`].
 
+use anyrender::filters::FilterEffect;
 use anyrender::{
     Filter, Glyph, NormalizedCoord, PaintRef, PaintScene, RegisterResourceError, RenderContext,
     ResourceId,
@@ -28,6 +32,40 @@ pub(super) struct CpuScene<'a, S>(pub(super) &'a mut S);
 /// The same transform, applied on the other side of the y flip.
 fn page_space(glyph_transform: Affine) -> Affine {
     Affine::FLIP_Y * glyph_transform * Affine::FLIP_Y
+}
+
+/// The part of a layer's filter that vello_cpu can run.
+///
+/// It runs only the first effect of a filter, and panics on the colour
+/// matrices behind `grayscale()`, `opacity()` and the like, so only a blur or
+/// a drop shadow is passed on, which is what blurred text shadows need. Its
+/// filter padding is 16-bit, so how far an effect reaches is capped well
+/// below that, in device pixels.
+fn cpu_filter(filter: &Filter, transform: Affine) -> Option<Arc<Filter>> {
+    const MAX_STD_DEV: f64 = 256.0;
+    const MAX_OFFSET: f64 = 1024.0;
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    // vello_cpu scales a blur by the mean of the axis scales.
+    let scale = (a.hypot(b) + c.hypot(d)) / 2.0;
+    if !(scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    let std_dev = |std_dev: f32| std_dev.min((MAX_STD_DEV / scale) as f32);
+    let offset = |offset: f32| {
+        let limit = (MAX_OFFSET / scale) as f32;
+        offset.clamp(-limit, limit)
+    };
+    let effect = match &filter.nodes().first()?.effect {
+        FilterEffect::GaussianBlur(blur) => FilterEffect::blur(std_dev(blur.std_deviation)),
+        FilterEffect::DropShadow(shadow) => FilterEffect::drop_shadow(
+            offset(shadow.dx),
+            offset(shadow.dy),
+            std_dev(shadow.std_deviation),
+            shadow.color,
+        ),
+        _ => return None,
+    };
+    Some(Arc::new(Filter::single(effect)))
 }
 
 impl<S: RenderContext> RenderContext for CpuScene<'_, S> {
@@ -62,6 +100,7 @@ impl<S: PaintScene> PaintScene for CpuScene<'_, S> {
         filter: Option<Arc<Filter>>,
         backdrop_filter: Option<Arc<Filter>>,
     ) {
+        let filter = filter.and_then(|filter| cpu_filter(&filter, transform));
         self.0
             .push_layer(fill, blend, alpha, transform, clip, filter, backdrop_filter);
     }
@@ -153,5 +192,52 @@ mod tests {
         let top = kurbo::Point::new(0.0, -10.0);
         assert!((page * top).x > 0.0);
         assert!((italic * kurbo::Point::new(0.0, 10.0)).x > 0.0);
+    }
+
+    fn only_effect(filter: &Filter) -> &FilterEffect {
+        let [node] = filter.nodes() else {
+            panic!("one effect expected");
+        };
+        &node.effect
+    }
+
+    #[test]
+    fn vello_cpu_gets_only_the_filters_it_runs() {
+        let blur = Filter::single(FilterEffect::blur(3.0));
+        let passed = cpu_filter(&blur, Affine::IDENTITY).unwrap();
+        assert!(
+            matches!(only_effect(&passed), FilterEffect::GaussianBlur(blur) if blur.std_deviation == 3.0)
+        );
+        let shadow = Filter::single(FilterEffect::drop_shadow(2.0, 4.0, 1.0, Color::BLACK));
+        assert!(matches!(
+            only_effect(&cpu_filter(&shadow, Affine::IDENTITY).unwrap()),
+            FilterEffect::DropShadow(shadow) if (shadow.dx, shadow.dy) == (2.0, 4.0)
+        ));
+        // vello_cpu panics on colour matrices, even behind a blur it would
+        // otherwise run first.
+        let grayscale = Filter::single(FilterEffect::grayscale(1.0));
+        assert!(cpu_filter(&grayscale, Affine::IDENTITY).is_none());
+        let list = Filter::linear_list(
+            [FilterEffect::blur(2.0), FilterEffect::grayscale(1.0)].into_iter(),
+        );
+        assert!(matches!(
+            only_effect(&cpu_filter(&list, Affine::IDENTITY).unwrap()),
+            FilterEffect::GaussianBlur(_)
+        ));
+    }
+
+    #[test]
+    fn filter_reach_is_capped_in_device_pixels() {
+        let huge = Filter::single(FilterEffect::blur(100_000.0));
+        let at_2x = cpu_filter(&huge, Affine::scale(2.0)).unwrap();
+        assert!(
+            matches!(only_effect(&at_2x), FilterEffect::GaussianBlur(blur) if blur.std_deviation == 128.0)
+        );
+        let far = Filter::single(FilterEffect::drop_shadow(-1e6, 5.0, 0.0, Color::BLACK));
+        assert!(matches!(
+            only_effect(&cpu_filter(&far, Affine::IDENTITY).unwrap()),
+            FilterEffect::DropShadow(shadow) if (shadow.dx, shadow.dy) == (-1024.0, 5.0)
+        ));
+        assert!(cpu_filter(&huge, Affine::scale(0.0)).is_none());
     }
 }

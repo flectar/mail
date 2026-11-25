@@ -4709,6 +4709,9 @@ fn detail_to_conversation_message(
 
 fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) -> String {
     html.filter(|value| !value.trim().is_empty())
+        // The Gmail sync stores a message that has only text as that text in
+        // a `<pre>`. Show it as plain-text mail from other accounts is shown.
+        .filter(|value| !text.is_some_and(|text| is_text_in_pre(value, text)))
         .map(str::to_owned)
         .or_else(|| {
             text.filter(|value| !value.trim().is_empty())
@@ -4718,6 +4721,21 @@ fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) 
         // body row while its MIME sections are in flight. Never turn that
         // transient state into a completely white reading pane.
         .unwrap_or_else(|| text_to_html(&display_preview(snippet)))
+}
+
+/// Whether `html` is `text` in a bare `<pre>`, escaped as the Gmail sync
+/// escapes it.
+fn is_text_in_pre(html: &str, text: &str) -> bool {
+    html.strip_prefix("<pre>")
+        .and_then(|html| html.strip_suffix("</pre>"))
+        .is_some_and(|inner| {
+            inner.len() >= text.len()
+                && inner
+                    == text
+                        .replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+        })
 }
 
 fn account_label(account: &Account) -> String {
@@ -5210,6 +5228,24 @@ mod tests {
         );
 
         assert_eq!(html, "<main><strong>Rich message</strong></main>");
+    }
+
+    #[test]
+    fn gmail_text_bodies_show_as_plain_text() {
+        // The Gmail sync stores a message that has only text as that text in
+        // a `<pre>`, which reads like plain-text mail from other accounts.
+        let text = "Hi <Ana> & team,\n\n> Earlier reply";
+        let stored = "<pre>Hi &lt;Ana&gt; &amp; team,\n\n&gt; Earlier reply</pre>";
+        assert_eq!(
+            readable_message_html(Some(stored), Some(text), "preview"),
+            readable_message_html(None, Some(text), "preview")
+        );
+        // A sender's own preformatted HTML is left as it is.
+        let authored = "<pre style=\"color:#333\">Hi</pre>";
+        assert_eq!(
+            readable_message_html(Some(authored), Some("Hi"), "preview"),
+            authored
+        );
     }
 
     #[test]

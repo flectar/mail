@@ -7,6 +7,7 @@ mod color;
 mod debug_overlay;
 mod filters;
 mod gradient;
+mod ink_skip;
 mod kurbo_css;
 mod layers;
 mod render;
@@ -43,6 +44,10 @@ const FONT_EMBOLDEN_ENABLED: bool = cfg!(any(
 
 /// The default color for text selection highlights
 const SELECTION_COLOR: Color = Color::from_rgb8(180, 213, 255);
+/// Blink's colours for find-in-page matches, and for the current one
+/// (`LayoutTheme::PlatformTextSearchHighlightColor`). Their text is black.
+const MATCH_COLOR: Color = Color::from_rgb8(255, 255, 0);
+const ACTIVE_MATCH_COLOR: Color = Color::from_rgb8(255, 150, 50);
 
 /// Pre-computed `Scene`s for each CustomWidget, keyed by `(document id, node id)`
 type CustomWidgetSceneMap = HashMap<(usize, NodeId), Scene>;

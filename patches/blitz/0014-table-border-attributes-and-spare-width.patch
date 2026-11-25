@@ -1,0 +1,385 @@
+diff --git a/crates/blitz-dom/assets/default.css b/crates/blitz-dom/assets/default.css
+index 718f39e..8790d04 100644
+--- a/crates/blitz-dom/assets/default.css
++++ b/crates/blitz-dom/assets/default.css
+@@ -395,139 +395,10 @@ th[nowrap] {
+ }
+ 
+ 
+-/* border collapse rules */
+-
+-/* Set hidden if we have 'frame' or 'rules' attribute.
+-     Set it on all sides when we do so there's more consistency
+-     in what authors should expect */
+-
+-/* Put this first so 'border' and 'frame' rules can override it. */
+-table[rules] {
+-    border-width: thin;
+-    border-style: hidden;
+-}
+-
+-/* 'border' before 'frame' so 'frame' overrides
+-      A border with a given value should, of course, pass that value
+-      as the border-width in pixels -> attr mapping */
+-
+-/* :-moz-table-border-nonzero is like [border]:not([border="0"]) except it
+-     also checks for other zero-like values according to HTML attribute
+-     parsing rules */
+-table:-moz-table-border-nonzero {
+-    border-width: thin;
+-    border-style: outset;
+-}
+-
+-table[frame] {
+-    border: thin hidden;
+-}
+-
+-/* specificity must beat table:-moz-table-border-nonzero rule above */
+-table[frame="void"] {
+-    border-style: hidden;
+-}
+-
+-table[frame="above"] {
+-    border-style: outset hidden hidden hidden;
+-}
+-
+-table[frame="below"] {
+-    border-style: hidden hidden outset hidden;
+-}
+-
+-table[frame="lhs"] {
+-    border-style: hidden hidden hidden outset;
+-}
+-
+-table[frame="rhs"] {
+-    border-style: hidden outset hidden hidden;
+-}
+-
+-table[frame="hsides"] {
+-    border-style: outset hidden;
+-}
+-
+-table[frame="vsides"] {
+-    border-style: hidden outset;
+-}
+-
+-table[frame="box"],
+-table[frame="border"] {
+-    border-style: outset;
+-}
+-
+-
+-/* Internal Table Borders */
+-
+-/* 'border' cell borders first */
+-
+-table:-moz-table-border-nonzero>*>tr>td,
+-table:-moz-table-border-nonzero>*>tr>th,
+-table:-moz-table-border-nonzero>*>td,
+-table:-moz-table-border-nonzero>*>th,
+-table:-moz-table-border-nonzero>td,
+-table:-moz-table-border-nonzero>th {
+-    border-width: thin;
+-    border-style: inset;
+-}
+-
+-/* collapse only if rules are really specified */
+-table[rules]:not([rules="none"], [rules=""]) {
+-    border-collapse: collapse;
+-}
+-
+-/* only specified rules override 'border' settings
+-  (increased specificity to achieve this) */
+-table[rules]:not([rules=""])>tr>td,
+-table[rules]:not([rules=""])>*>tr>td,
+-table[rules]:not([rules=""])>tr>th,
+-table[rules]:not([rules=""])>*>tr>th,
+-table[rules]:not([rules=""])>td,
+-table[rules]:not([rules=""])>th {
+-    border-width: thin;
+-    border-style: none;
+-}
+-
+-
+-table[rules][rules="none"]>tr>td,
+-table[rules][rules="none"]>*>tr>td,
+-table[rules][rules="none"]>tr>th,
+-table[rules][rules="none"]>*>tr>th,
+-table[rules][rules="none"]>td,
+-table[rules][rules="none"]>th {
+-    border-width: thin;
+-    border-style: none;
+-}
+-
+-table[rules][rules="all"]>tr>td,
+-table[rules][rules="all"]>*>tr>td,
+-table[rules][rules="all"]>tr>th,
+-table[rules][rules="all"]>*>tr>th,
+-table[rules][rules="all"]>td,
+-table[rules][rules="all"]>th {
+-    border-width: thin;
+-    border-style: solid;
+-}
+-
+-table[rules][rules="rows"]>tr,
+-table[rules][rules="rows"]>*>tr {
+-    border-block-start-width: thin;
+-    border-block-end-width: thin;
+-    border-block-start-style: solid;
+-    border-block-end-style: solid;
+-}
+-
+-
+-table[rules][rules="cols"]>tr>td,
+-table[rules][rules="cols"]>*>tr>td,
+-table[rules][rules="cols"]>tr>th,
+-table[rules][rules="cols"]>*>tr>th {
+-    border-inline-start-width: thin;
+-    border-inline-end-width: thin;
+-    border-inline-start-style: solid;
+-    border-inline-end-style: solid;
+-}
++/* A table's border, frame, rules and bordercolor attributes set its own and
++   its cells' borders through presentational hints, as Blink does (see
++   presentational_hints.rs). Only the borders between groups of
++   rules="groups" stay here. */
+ 
+ table[rules][rules="groups"]>colgroup {
+     border-inline-start-width: thin;
+@@ -626,17 +497,12 @@ th {
+     display: none !important;
+ }
+ 
+-table[bordercolor]>tbody,
+-table[bordercolor]>thead,
+-table[bordercolor]>tfoot,
+-table[bordercolor]>col,
+-table[bordercolor]>colgroup,
+-table[bordercolor]>tr,
+-table[bordercolor]>*>tr,
+-table[bordercolor]>tr>td,
+-table[bordercolor]>*>tr>td,
+-table[bordercolor]>tr>th,
+-table[bordercolor]>*>tr>th {
++/* Rows and row groups pass the table's border colour on to cells (HTML,
++   rendering of tables). */
++thead,
++tbody,
++tfoot,
++tr {
+     border-color: inherit;
+ }
+ 
+diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
+index 8653287..162eb39 100644
+--- a/crates/blitz-dom/src/layout/table.rs
++++ b/crates/blitz-dom/src/layout/table.rs
+@@ -621,8 +621,13 @@ pub(crate) fn build_table_context(
+         BorderCollapse::Separate => {
+             // In the separated borders model, `border-spacing` also applies between
+             // the table border and the outermost cells, in addition to between cells.
+-            let spacing_x = border_spacing.width.px();
+-            let spacing_y = border_spacing.height.px();
++            // A table without columns has no spacing at all, as in Blink, so an
++            // empty `<table cellspacing=10>` is no taller than its border.
++            let (spacing_x, spacing_y) = if column_count == 0 {
++                (0.0, 0.0)
++            } else {
++                (border_spacing.width.px(), border_spacing.height.px())
++            };
+             let padding = style.padding().resolve_or_zero(None, resolve_calc_value);
+             style.padding = taffy::Rect {
+                 left: style_helpers::length(padding.left + spacing_x),
+@@ -1906,7 +1911,8 @@ impl TableTreeWrapper<'_, '_> {
+     /// When the authored widths fit, the width left over is shared between
+     /// the auto columns as Chromium shares it (CSS Tables 3 §3.9.3): each grows
+     /// from its min-content width toward its max-content width by the same
+-    /// fraction of the way, rather than by equal amounts as grid tracks do.
++    /// fraction of the way, and past it in proportion to its max-content
++    /// width, rather than by equal amounts as grid tracks do.
+     pub(crate) fn fold_authored_widths(&mut self, table_width: Option<f32>) {
+         let ctx = Arc::clone(&self.ctx);
+         let lengths = &ctx.column_lengths;
+@@ -2008,6 +2014,27 @@ impl TableTreeWrapper<'_, '_> {
+                         for column in (0..lengths.len()).filter(|&column| is_auto(column)) {
+                             fold.floors[column] = minimums[column] + room[column] * share;
+                         }
++                    } else if left > total_room + 0.5
++                        && ctx.style.size.width.tag() != taffy::CompactLength::AUTO_TAG
++                    {
++                        // A table with an authored width wider than its
++                        // columns' max-content widths shares the excess in
++                        // proportion to those widths, so an empty column gets
++                        // none of it (section 3.9.3 of CSS Tables 3), where
++                        // grid tracks would grow by equal amounts. An
++                        // auto-width table is as wide as its columns, and
++                        // `width` is only the room it has.
++                        let widest = |column: usize| minimums[column] + room[column];
++                        let total: f32 = (0..lengths.len())
++                            .filter(|&column| is_auto(column))
++                            .map(widest)
++                            .sum();
++                        if total > 0.0 {
++                            let scale = 1.0 + (left - total_room) / total;
++                            for column in (0..lengths.len()).filter(|&column| is_auto(column)) {
++                                fold.floors[column] = widest(column) * scale;
++                            }
++                        }
+                     }
+                 }
+             }
+diff --git a/crates/blitz-dom/src/presentational_hints.rs b/crates/blitz-dom/src/presentational_hints.rs
+index b91f130..e52796e 100644
+--- a/crates/blitz-dom/src/presentational_hints.rs
++++ b/crates/blitz-dom/src/presentational_hints.rs
+@@ -197,12 +197,34 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
+             if let Some(padding) = attr(table, "cellpadding").and_then(parse_non_negative_integer) {
+                 let _ = write!(css, "padding:{padding}px;");
+             }
+-            if table_border_width(table).is_some_and(|width| width > 0)
+-                && attr(table, "rules").is_none()
+-                && attr(table, "frame").is_none()
+-            {
+-                // No colour: cell borders follow the cell's `currentcolor`.
+-                css.push_str("border-width:1px;border-style:inset;");
++            // Blink's cell borders: `rules` picks the sides, otherwise a
++            // nonzero `border` draws all four, solid when `bordercolor` is set
++            // and inset when not. `frame` only changes the table's own border.
++            // Cells take the table's border colour through their rows, as in
++            // Blink (its `TableCellBorderColorInherit`).
++            let borders = match table_rules(table) {
++                Some(Rules::All) => Some("border-width:1px;border-style:solid;"),
++                Some(Rules::Cols) => Some(
++                    "border-left-width:1px;border-right-width:1px;\
++                     border-left-style:solid;border-right-style:solid;",
++                ),
++                Some(Rules::Rows) => Some(
++                    "border-top-width:1px;border-bottom-width:1px;\
++                     border-top-style:solid;border-bottom-style:solid;",
++                ),
++                Some(Rules::None | Rules::Groups) => None,
++                None if table_border_width(table).is_some_and(|width| width > 0) => {
++                    Some(if has_border_color(table) {
++                        "border-width:1px;border-style:solid;"
++                    } else {
++                        "border-width:1px;border-style:inset;"
++                    })
++                }
++                None => None,
++            };
++            if let Some(borders) = borders {
++                css.push_str(borders);
++                css.push_str("border-color:inherit;");
+             }
+         }
+     }
+@@ -282,11 +304,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
+             }
+             "border" => {
+                 if *tag == local_name!("table") {
++                    // The style comes with `frame`, `rules` and `bordercolor`
++                    // after the loop.
+                     if let Some(width) = table_border_width(elem) {
+                         let _ = write!(css, "border-width:{width}px;");
+-                        if width > 0 {
+-                            css.push_str("border-style:outset;");
+-                        }
+                     }
+                 } else if *tag == local_name!("img")
+                     || *tag == local_name!("object")
+@@ -350,6 +371,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
+         }
+     }
+ 
++    if *tag == local_name!("table") {
++        table_border_style(elem, css);
++    }
++
+     // `body` margins: per axis, the first of these attributes that exists
+     // sets both sides; if it does not parse, the default margin stays. There
+     // is no `rightmargin` or `bottommargin`.
+@@ -442,6 +467,84 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
+     }
+ }
+ 
++/// A table's own border style, as Blink sets it. The sides `frame` names are
++/// solid and the others hidden, 1px wide unless `border` gives a width.
++/// Without `frame`, a nonzero `border` is outset, or solid with
++/// `bordercolor`, and `rules` alone hides the border, which then wins over
++/// the cells' borders along the table's edge. `rules` also collapses borders.
++fn table_border_style(table: &ElementData, css: &mut String) {
++    let border = table_border_width(table);
++    if let Some(sides) = frame_sides(table) {
++        if border.is_none() {
++            css.push_str("border-width:1px;");
++        }
++        let [top, right, bottom, left] = sides.map(|side| if side { "solid" } else { "hidden" });
++        let _ = write!(css, "border-style:{top} {right} {bottom} {left};");
++    } else if border.is_some_and(|width| width > 0) {
++        css.push_str(if has_border_color(table) {
++            "border-style:solid;"
++        } else {
++            "border-style:outset;"
++        });
++    } else if table_rules(table).is_some() {
++        css.push_str("border-style:hidden;");
++    }
++    if table_rules(table).is_some() {
++        css.push_str("border-collapse:collapse;");
++    }
++}
++
++/// The sides of a table that its `frame` attribute borders, as top, right,
++/// bottom and left, or `None` without a known value.
++fn frame_sides(table: &ElementData) -> Option<[bool; 4]> {
++    let value = attr(table, "frame")?;
++    let sides = [
++        ("void", [false, false, false, false]),
++        ("above", [true, false, false, false]),
++        ("below", [false, false, true, false]),
++        ("hsides", [true, false, true, false]),
++        ("vsides", [false, true, false, true]),
++        ("lhs", [false, false, false, true]),
++        ("rhs", [false, true, false, false]),
++        ("box", [true, true, true, true]),
++        ("border", [true, true, true, true]),
++    ];
++    sides
++        .into_iter()
++        .find(|(name, _)| value.eq_ignore_ascii_case(name))
++        .map(|(_, sides)| sides)
++}
++
++/// Which borders between cells a table's `rules` attribute draws.
++#[derive(Clone, Copy)]
++enum Rules {
++    None,
++    Groups,
++    Rows,
++    Cols,
++    All,
++}
++
++fn table_rules(table: &ElementData) -> Option<Rules> {
++    let value = attr(table, "rules")?;
++    [
++        ("none", Rules::None),
++        ("groups", Rules::Groups),
++        ("rows", Rules::Rows),
++        ("cols", Rules::Cols),
++        ("all", Rules::All),
++    ]
++    .into_iter()
++    .find(|(name, _)| value.eq_ignore_ascii_case(name))
++    .map(|(_, rules)| rules)
++}
++
++/// Whether a table has a `bordercolor`, which makes Blink draw its borders
++/// solid even when the colour doesn't parse.
++fn has_border_color(table: &ElementData) -> bool {
++    attr(table, "bordercolor").is_some_and(|value| !value.is_empty())
++}
++
+ /// The table `border` attribute: a missing value or a parse error means 1px.
+ fn table_border_width(table: &ElementData) -> Option<u32> {
+     attr(table, "border").map(|value| parse_non_negative_integer(value).unwrap_or(1))

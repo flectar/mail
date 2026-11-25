@@ -1,0 +1,217 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index 3573b7e..6bccbaf 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -1337,7 +1337,9 @@ impl BaseDocument {
+                 DocumentEvent::ResourceLoad(res) => {
+                     updates.layout |= self.pending_critical_resources.contains(&res.request_id);
+                     match &res.result {
+-                        Ok(Resource::Image(..) | Resource::Raster(..)) => {
++                        // An image that fails to load lays out with its alt
++                        // text, so it changes layout as a loaded one does.
++                        Ok(Resource::Image(..) | Resource::Raster(..)) | Err(_) => {
+                             if let Some(waiting) = res
+                                 .resolved_url
+                                 .as_ref()
+@@ -1355,7 +1357,7 @@ impl BaseDocument {
+                                 }
+                             }
+                         }
+-                        Ok(Resource::None) | Err(_) => {}
++                        Ok(Resource::None) => {}
+                         _ => updates.layout = true,
+                     }
+                 }
+@@ -1414,6 +1416,7 @@ impl BaseDocument {
+             Err(err) => {
+                 if let Some(url) = res.resolved_url.as_ref() {
+                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
++                    self.mark_images_unavailable(&waiting_nodes);
+                     #[cfg(feature = "tracing")]
+                     tracing::warn!(
+                         url = url.as_str(),
+@@ -1525,6 +1528,62 @@ impl BaseDocument {
+ 
+     /// Cache a loaded image and apply it to all nodes waiting on it
+     /// (`<img>` elements, `background-image` layers and `mask-image` layers).
++    /// The URLs of images still waiting for a response.
++    pub fn pending_image_urls(&self) -> impl Iterator<Item = &str> + '_ {
++        self.pending_images.keys().map(String::as_str)
++    }
++
++    /// Tells the document that the image at `url` won't load, as when the
++    /// embedder blocks it. The `<img>` elements waiting for it then lay out
++    /// with their alt text, as browsers lay out an image they can't show, and
++    /// the next [`Self::drain_pending_updates`] reports the change.
++    pub fn fail_image(&mut self, url: &str) {
++        let Some(waiting) = self.pending_images.remove(url) else {
++            return;
++        };
++        self.mark_images_unavailable(&waiting);
++        self.resource_updates.changed = true;
++        for &(id, kind) in &waiting {
++            if matches!(kind, ImageType::Image)
++                && self
++                    .get_node(id)
++                    .is_some_and(|node| !image_has_fixed_size(self, node))
++            {
++                self.resource_updates.layout = true;
++            }
++            self.resource_updates.paint_nodes.push(id);
++        }
++    }
++
++    fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
++        for &(id, kind) in waiting {
++            if !matches!(kind, ImageType::Image) {
++                continue;
++            }
++            let Some(node) = self.get_node_mut(id) else {
++                continue;
++            };
++            let Some(element) = node.element_data_mut() else {
++                continue;
++            };
++            #[cfg(feature = "custom-widget")]
++            if element.custom_widget_data().is_some() {
++                continue;
++            }
++            // An image that never loaded has no image data yet.
++            let unloaded = match &element.special_data {
++                SpecialElementData::None => true,
++                SpecialElementData::Image(image) => matches!(**image, ImageData::None),
++                _ => false,
++            };
++            if unloaded {
++                element.special_data = SpecialElementData::Image(Box::new(ImageData::Unavailable));
++                node.clear_layout_cache();
++                node.insert_damage(ALL_DAMAGE);
++            }
++        }
++    }
++
+     fn apply_loaded_image(&mut self, url: &str, image: ImageData) {
+         // Get all nodes waiting for this image
+         let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
+diff --git a/crates/blitz-dom/src/layout/mod.rs b/crates/blitz-dom/src/layout/mod.rs
+index 5314069..5393044 100644
+--- a/crates/blitz-dom/src/layout/mod.rs
++++ b/crates/blitz-dom/src/layout/mod.rs
+@@ -121,6 +121,71 @@ impl<'doc> LayoutPassState<'doc> {
+         }
+     }
+ 
++    /// For an `<img>` that won't load, the size of its alt text in its font,
++    /// which browsers show in its place: on one line, or wrapped inside a
++    /// width or max-width the image is given. `None` for any other node or an
++    /// empty alt, which leaves the image without a natural size.
++    fn unavailable_image_alt_size(
++        &mut self,
++        dom_id: crate::NodeId,
++        inputs: &taffy::LayoutInput,
++    ) -> Option<taffy::Size<f32>> {
++        let doc = &mut *self.doc;
++        let node = &doc.nodes[dom_id];
++        let element = node.element_data()?;
++        let SpecialElementData::Image(image) = &element.special_data else {
++            return None;
++        };
++        if !matches!(**image, ImageData::Unavailable) {
++            return None;
++        }
++        let alt = element.attr(local_name!("alt"))?.trim();
++        if alt.is_empty() {
++            return None;
++        }
++        let style = node.primary_styles()?;
++        let wrap_width = {
++            let layout_style = node.layout_style();
++            let parent_width = inputs.parent_size.width;
++            let frame = layout_style
++                .padding()
++                .resolve_or_zero(parent_width, resolve_calc_value)
++                .horizontal_axis_sum()
++                + layout_style
++                    .border()
++                    .resolve_or_zero(parent_width, resolve_calc_value)
++                    .horizontal_axis_sum();
++            [
++                inputs.known_dimensions.width.map(|width| width - frame),
++                layout_style
++                    .size()
++                    .width
++                    .maybe_resolve(parent_width, resolve_calc_value),
++                layout_style
++                    .max_size()
++                    .width
++                    .maybe_resolve(parent_width, resolve_calc_value),
++            ]
++            .into_iter()
++            .flatten()
++            .reduce(f32::min)
++            .map(|width| width.max(0.0))
++        };
++        let text_style = crate::stylo_to_parley::style(dom_id, &style);
++        let scale = doc.viewport.scale();
++        let mut font_ctx = doc.font_ctx.lock().unwrap();
++        let mut builder = doc
++            .layout_ctx
++            .tree_builder(&mut font_ctx, scale, true, &text_style);
++        builder.push_text(alt);
++        let mut layout = builder.build().0;
++        layout.break_all_lines(wrap_width.map(|width| width * scale));
++        Some(taffy::Size {
++            width: layout.full_width() / scale,
++            height: layout.height() / scale,
++        })
++    }
++
+     pub(crate) fn new(doc: &'doc mut BaseDocument) -> Self {
+         #[cfg(feature = "writing-mode")]
+         let root_id = doc.try_root_element().map(|root| root.id);
+@@ -224,6 +289,7 @@ impl LayoutPassState<'_> {
+         block_ctx: Option<&mut BlockContext<'_>>,
+     ) -> taffy::tree::LayoutOutput {
+         let orthogonal_percent_basis = self.orthogonal_percent_basis_of(dom_node_id(node_id));
++        let unavailable_image_alt = self.unavailable_image_alt_size(dom_node_id(node_id), &inputs);
+         let node = &mut self.nodes[dom_node_id(node_id)];
+ 
+         let font_styles = node.primary_styles().map(|style| {
+@@ -430,6 +496,14 @@ impl LayoutPassState<'_> {
+                                 )
+                             }
+                             ImageData::None => (IntrinsicSizes::default(), taffy::Size::ZERO),
++                            ImageData::Unavailable => (
++                                IntrinsicSizes {
++                                    width: unavailable_image_alt.map(|size| size.width),
++                                    height: unavailable_image_alt.map(|size| size.height),
++                                    ratio: None,
++                                },
++                                taffy::Size::ZERO,
++                            ),
+                         },
+                         SpecialElementData::Canvas(_)
+                         | SpecialElementData::SubDocument(_)
+diff --git a/crates/blitz-dom/src/node/element.rs b/crates/blitz-dom/src/node/element.rs
+index 10f3778..48a1ed0 100644
+--- a/crates/blitz-dom/src/node/element.rs
++++ b/crates/blitz-dom/src/node/element.rs
+@@ -867,6 +867,10 @@ pub enum ImageData {
+     #[cfg(feature = "svg")]
+     Svg(SvgImageData),
+     None,
++    /// An image that won't load, such as one that failed to decode or that
++    /// the embedder blocks (see [`crate::BaseDocument::fail_image`]). It lays
++    /// out with its alt text, as browsers lay out an image they can't show.
++    Unavailable,
+ }
+ 
+ #[derive(Debug, Clone, PartialEq)]
+@@ -913,6 +917,7 @@ impl std::fmt::Debug for SpecialElementData {
+                 #[cfg(feature = "svg")]
+                 ImageData::Svg(_) => f.write_str("NodeSpecificData::Image(Svg)"),
+                 ImageData::None => f.write_str("NodeSpecificData::Image(None)"),
++                ImageData::Unavailable => f.write_str("NodeSpecificData::Image(Unavailable)"),
+             },
+             SpecialElementData::Canvas(_) => f.write_str("NodeSpecificData::Canvas"),
+             SpecialElementData::TableRoot(_) => f.write_str("NodeSpecificData::TableRoot"),

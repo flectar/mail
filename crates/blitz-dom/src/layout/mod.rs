@@ -23,6 +23,7 @@ use taffy::{
     compute_oof_layout, prelude::*,
 };
 
+pub(crate) mod block_item;
 pub(crate) mod construct;
 pub(crate) mod damage;
 pub(crate) mod inline;
@@ -121,6 +122,71 @@ impl<'doc> LayoutPassState<'doc> {
         }
     }
 
+    /// For an `<img>` that won't load, the size of its alt text in its font,
+    /// which browsers show in its place: on one line, or wrapped inside a
+    /// width or max-width the image is given. `None` for any other node or an
+    /// empty alt, which leaves the image without a natural size.
+    fn unavailable_image_alt_size(
+        &mut self,
+        dom_id: crate::NodeId,
+        inputs: &taffy::LayoutInput,
+    ) -> Option<taffy::Size<f32>> {
+        let doc = &mut *self.doc;
+        let node = &doc.nodes[dom_id];
+        let element = node.element_data()?;
+        let SpecialElementData::Image(image) = &element.special_data else {
+            return None;
+        };
+        if !matches!(**image, ImageData::Unavailable) {
+            return None;
+        }
+        let alt = element.attr(local_name!("alt"))?.trim();
+        if alt.is_empty() {
+            return None;
+        }
+        let style = node.primary_styles()?;
+        let wrap_width = {
+            let layout_style = node.layout_style();
+            let parent_width = inputs.parent_size.width;
+            let frame = layout_style
+                .padding()
+                .resolve_or_zero(parent_width, resolve_calc_value)
+                .horizontal_axis_sum()
+                + layout_style
+                    .border()
+                    .resolve_or_zero(parent_width, resolve_calc_value)
+                    .horizontal_axis_sum();
+            [
+                inputs.known_dimensions.width.map(|width| width - frame),
+                layout_style
+                    .size()
+                    .width
+                    .maybe_resolve(parent_width, resolve_calc_value),
+                layout_style
+                    .max_size()
+                    .width
+                    .maybe_resolve(parent_width, resolve_calc_value),
+            ]
+            .into_iter()
+            .flatten()
+            .reduce(f32::min)
+            .map(|width| width.max(0.0))
+        };
+        let text_style = crate::stylo_to_parley::style(dom_id, &style);
+        let scale = doc.viewport.scale();
+        let mut font_ctx = doc.font_ctx.lock().unwrap();
+        let mut builder = doc
+            .layout_ctx
+            .tree_builder(&mut font_ctx, scale, true, &text_style);
+        builder.push_text(alt);
+        let mut layout = builder.build().0;
+        layout.break_all_lines(wrap_width.map(|width| width * scale));
+        Some(taffy::Size {
+            width: layout.full_width() / scale,
+            height: layout.height() / scale,
+        })
+    }
+
     pub(crate) fn new(doc: &'doc mut BaseDocument) -> Self {
         #[cfg(feature = "writing-mode")]
         let root_id = doc.try_root_element().map(|root| root.id);
@@ -194,8 +260,46 @@ impl LayoutPassState<'_> {
         let mut output = self.dispatch_child_layout(node_id, inputs, block_ctx);
         if inputs.run_mode == RunMode::PerformLayout {
             compute_oof_layout(self, node_id, &mut output);
+            // Taffy's block layout finds a block container's first baseline
+            // only. Its last is that of its last in-flow child that has one,
+            // which an inline block sits on (CSS 2.1 section 10.8.1).
+            let dom_id = dom_node_id(node_id);
+            let node = &self.nodes[dom_id];
+            let last_baseline = output.baselines.last.or_else(|| {
+                (!node.flags.is_inline_root()
+                    && !node.flags.is_table_root()
+                    && matches!(node.taffy_display(), Display::Block | Display::FlowRoot))
+                .then(|| self.last_in_flow_baseline(dom_id))
+                .flatten()
+            });
+            if let NodeData::Element(data) | NodeData::AnonymousBlock(data) =
+                &mut self.nodes[dom_id].data
+            {
+                data.layout_data_mut().last_baseline = last_baseline;
+            }
         }
         output
+    }
+
+    /// The last baseline of a block container's last in-flow child that has
+    /// one, from the container's top, as its children were last laid out.
+    fn last_in_flow_baseline(&self, dom_id: crate::NodeId) -> Option<f32> {
+        let node = &self.nodes[dom_id];
+        let children = node.layout_children.borrow();
+        children.as_deref()?.iter().rev().find_map(|&child_id| {
+            let child = &self.nodes[child_id];
+            let (NodeData::Element(data) | NodeData::AnonymousBlock(data)) = &child.data else {
+                return None;
+            };
+            let floats = child
+                .primary_styles()
+                .is_some_and(|style| style.clone_float() != style::computed_values::float::T::None);
+            if child.is_out_of_flow() || floats {
+                return None;
+            }
+            let baseline = data.layout_data().last_baseline?;
+            Some(child.unrounded_layout().location.y + baseline)
+        })
     }
 
     /// The style of a node being laid out *by* the node whose algorithm is currently running,
@@ -224,6 +328,7 @@ impl LayoutPassState<'_> {
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> taffy::tree::LayoutOutput {
         let orthogonal_percent_basis = self.orthogonal_percent_basis_of(dom_node_id(node_id));
+        let unavailable_image_alt = self.unavailable_image_alt_size(dom_node_id(node_id), &inputs);
         let node = &mut self.nodes[dom_node_id(node_id)];
 
         let font_styles = node.primary_styles().map(|style| {
@@ -430,6 +535,14 @@ impl LayoutPassState<'_> {
                                 )
                             }
                             ImageData::None => (IntrinsicSizes::default(), taffy::Size::ZERO),
+                            ImageData::Unavailable => (
+                                IntrinsicSizes {
+                                    width: unavailable_image_alt.map(|size| size.width),
+                                    height: unavailable_image_alt.map(|size| size.height),
+                                    ratio: None,
+                                },
+                                taffy::Size::ZERO,
+                            ),
                         },
                         SpecialElementData::Canvas(_)
                         | SpecialElementData::SubDocument(_)
@@ -559,10 +672,16 @@ impl LayoutPassState<'_> {
                     let mut table_wrapper = TableTreeWrapper {
                         doc: self,
                         ctx: context,
+                        fixed_style: None,
                     };
                     table_wrapper.fold_authored_widths(table_width);
+                    let captions_min_width = if table_wrapper.ctx.captions.is_empty() {
+                        0.0
+                    } else {
+                        table_wrapper.captions_min_width(inputs.parent_size.width)
+                    };
 
-                    let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
+                    let mut output = table_wrapper.layout_grid(node_id, inputs);
 
                     // A table is never narrower than its columns' minimums, even
                     // with an authored width or max-width: over-wide content
@@ -590,29 +709,92 @@ impl LayoutPassState<'_> {
                             ..inputs
                         };
                         let mut laid_out = if measuring {
-                            compute_grid_layout(&mut table_wrapper, node_id, layout)
+                            table_wrapper.layout_grid(node_id, layout)
                         } else {
                             output
                         };
-                        if !is_fixed
+                        // Laid out without a width, the grid may size its columns
+                        // for the space the table's `max-width` keeps it from, so
+                        // it is laid out again at the width the table took.
+                        if !measuring
                             && table_wrapper
                                 .required_width()
                                 .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
+                        }
+                        // Text-only cells give up their long words' widths only
+                        // when the columns would overflow the table's container.
+                        // Within it, the table widens to them, as in browsers.
+                        let room = inputs
+                            .available_space
+                            .width
+                            .into_option()
+                            .or(inputs.parent_size.width)
+                            .unwrap_or(f32::INFINITY);
+                        if !is_fixed
+                            && table_wrapper.required_width().is_some_and(|required| {
+                                required > laid_out.size.width + 0.5 && required > room + 0.5
+                            })
+                        {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
-                            laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
+                            // It takes all the room it has before its words break.
+                            if room > laid_out.size.width + 0.5 {
+                                layout.known_dimensions.width = Some(room);
+                            }
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
                         }
                         if let Some(required) = table_wrapper.required_width() {
                             if required > laid_out.size.width + 0.5 {
                                 layout.known_dimensions.width = Some(required);
-                                laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
+                                laid_out = table_wrapper.layout_grid(node_id, layout);
                             }
                         }
+                        // Nor is it narrower than its captions, as in Blink.
+                        if captions_min_width > laid_out.size.width + 0.5 {
+                            layout.known_dimensions.width = Some(captions_min_width);
+                            laid_out = table_wrapper.layout_grid(node_id, layout);
+                        }
                         output = if measuring {
-                            taffy::LayoutOutput::from_outer_size(laid_out.size)
+                            // Measured at a width, the table keeps the baselines
+                            // its layout found, which a line it is in sits on.
+                            let mut measured = taffy::LayoutOutput::from_outer_size(laid_out.size);
+                            measured.baselines = laid_out.baselines;
+                            measured
                         } else {
                             laid_out
                         };
+                    }
+
+                    output.size.width = output.size.width.max(captions_min_width);
+                    // Captions sit above and below the table's grid.
+                    if !table_wrapper.ctx.captions.is_empty() {
+                        output = table_wrapper.place_captions(inputs, output);
+                    }
+                    // In Blink a fixed-layout table with a percentage width is
+                    // a million pixels wide at its max-content size
+                    // (`TableLayoutAlgorithm::ComputeMinMaxSizes`), so a cell,
+                    // float or other box sized to its content takes all the
+                    // room it has around one, as in browsers. Measured where
+                    // its percentage has nothing to resolve against, it takes
+                    // the space available.
+                    if measuring
+                        && is_fixed
+                        && inputs.known_dimensions.width.is_none()
+                        && matches!(
+                            table_wrapper.ctx.style.size.width.tag(),
+                            taffy::CompactLength::PERCENT_TAG | taffy::CompactLength::CALC_TAG
+                        )
+                    {
+                        match inputs.available_space.width {
+                            taffy::AvailableSpace::MaxContent => output.size.width = 1_000_000.0,
+                            taffy::AvailableSpace::Definite(available)
+                                if inputs.parent_size.width.is_none() =>
+                            {
+                                output.size.width = output.size.width.max(available);
+                            }
+                            _ => {}
+                        }
                     }
 
                     // Absolutely positioned children take no part in the table grid. Their
@@ -845,7 +1027,7 @@ impl taffy::LayoutBlockContainer for LayoutPassState<'_> {
         Self: 'a;
 
     type BlockItemStyle<'a>
-        = TaffyStyloStyle<ComputedStyleRef<'a>>
+        = block_item::BlockChildStyle<ComputedStyleRef<'a>>
     where
         Self: 'a;
 
@@ -854,7 +1036,22 @@ impl taffy::LayoutBlockContainer for LayoutPassState<'_> {
     }
 
     fn get_block_child_style(&self, child_node_id: NodeId) -> Self::BlockItemStyle<'_> {
-        self.child_layout_style(self.node_from_id(child_node_id))
+        let node = self.node_from_id(child_node_id);
+        // An image that won't load is laid out with its alt text, if it has any.
+        let shows_alt_text = node.element_data().is_some_and(|element| {
+            let unavailable = match &element.special_data {
+                SpecialElementData::Image(image) => matches!(**image, ImageData::Unavailable),
+                _ => false,
+            };
+            unavailable
+                && element
+                    .attr(local_name!("alt"))
+                    .is_some_and(|alt| !alt.trim().is_empty())
+        });
+        block_item::BlockChildStyle {
+            style: self.child_layout_style(node),
+            shows_alt_text,
+        }
     }
 
     #[inline(always)]

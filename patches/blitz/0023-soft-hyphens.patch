@@ -1,0 +1,100 @@
+diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
+index 23a97ee..6f684ed 100644
+--- a/crates/blitz-paint/src/text.rs
++++ b/crates/blitz-paint/src/text.rs
+@@ -1278,6 +1278,7 @@ pub(crate) fn stroke_text<'a>(
+                 draw_run_glyphs(scene, &glyph_run, run.color, run.embolden, transform);
+             }
+         }
++        draw_soft_hyphen(scene, &line, line_runs, text, transform);
+         flush_line_decorations(
+             scene,
+             transform,
+@@ -1308,6 +1309,87 @@ fn recorded_runs<'l, 'r>(
+     })
+ }
+ 
++/// Show a hyphen at the end of a line that breaks at a soft hyphen, as CSS
++/// Text 3 has it, drawn after the line's last glyph in that run's font: U+2010
++/// where the font has it, as in Blink, or else a hyphen-minus. Parley shapes
++/// the soft hyphen itself as nothing.
++fn draw_soft_hyphen(
++    scene: &mut impl PaintScene,
++    line: &Line<'_, TextBrush>,
++    line_runs: &[LineRun],
++    text: &str,
++    transform: Affine,
++) {
++    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
++    use skrifa::{FontRef, MetadataProvider as _};
++
++    let end = line.text_range().end;
++    if !matches!(
++        line.break_reason(),
++        parley::BreakReason::Regular | parley::BreakReason::Emergency
++    ) || !text.get(..end).is_some_and(|text| text.ends_with('\u{AD}'))
++    {
++        return;
++    }
++    // The last run with glyphs before the break.
++    let Some((glyph_run, run)) = recorded_runs(line, line_runs)
++        .filter(|(glyph_run, _)| {
++            glyph_run.run().text_range().start < end && glyph_run.glyphs().next().is_some()
++        })
++        .last()
++    else {
++        return;
++    };
++    if run.culled {
++        return;
++    }
++    let parley_run = glyph_run.run();
++    let font = parley_run.font();
++    let Ok(font_ref) = FontRef::from_index(font.data.as_ref(), font.index) else {
++        return;
++    };
++    let charmap = font_ref.charmap();
++    let Some(glyph) = charmap.map('\u{2010}').or_else(|| charmap.map('-')) else {
++        return;
++    };
++    let coords: Vec<NormalizedCoord> =
++        bytemuck::cast_slice::<_, i16>(parley_run.normalized_coords())
++            .iter()
++            .map(|coord| NormalizedCoord::from_bits(*coord))
++            .collect();
++    let advance = font_ref
++        .glyph_metrics(Size::new(parley_run.font_size()), LocationRef::new(&coords))
++        .advance_width(glyph)
++        .unwrap_or_default();
++    // Right to left, the hyphen ends the line on its left.
++    let x = if parley_run.is_rtl() {
++        glyph_run.offset() - advance
++    } else {
++        glyph_run.offset() + glyph_run.advance()
++    };
++    let glyph_xform = parley_run
++        .synthesis()
++        .skew()
++        .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
++    scene.draw_glyphs(
++        font,
++        parley_run.font_size(),
++        !FONT_EMBOLDEN_ENABLED, // hint
++        bytemuck::cast_slice(parley_run.normalized_coords()),
++        run.embolden,
++        Fill::NonZero,
++        &anyrender::Paint::from(run.color),
++        1.0, // alpha
++        transform,
++        glyph_xform,
++        std::iter::once(anyrender::Glyph {
++            id: glyph.to_u32(),
++            x,
++            y: glyph_run.baseline(),
++        }),
++    );
++}
++
+ /// Draw a glyph run in one colour.
+ fn draw_run_glyphs(
+     scene: &mut impl PaintScene,

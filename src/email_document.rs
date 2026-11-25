@@ -395,7 +395,7 @@ pub fn bounded_html(html: &str) -> (String, Option<String>) {
     if s.excessive {
         return (
             format!(
-                "<pre style='margin:16px;white-space:pre-wrap;overflow-wrap:anywhere;color:#111;background:#fff'>{}</pre>",
+                "<pre style='margin:16px;font-size:16px;white-space:pre-wrap;overflow-wrap:anywhere;color:#111;background:#fff'>{}</pre>",
                 escape(&readable_fallback(&s.text))
             ),
             Some(if s.truncated { "Message text exceeds the display limit. Full content is available in the original source." } else { "Complex message shown as plain text." }.into()),

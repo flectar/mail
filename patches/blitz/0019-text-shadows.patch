@@ -1,0 +1,567 @@
+diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
+index dcab8e7..23a97ee 100644
+--- a/crates/blitz-paint/src/text.rs
++++ b/crates/blitz-paint/src/text.rs
+@@ -1,13 +1,15 @@
+ use anyrender::PaintScene;
++use anyrender::filters::{Filter, FilterEffect};
+ use blitz_dom::{
+     BaseDocument, NodeId,
+     node::{GeneratedText, TextBrush},
+     util::ToColorColor,
+ };
+ use kurbo::{Affine, BezPath, Cap, Circle, Rect, Shape as _, Stroke};
+-use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
+-use peniko::Fill;
++use parley::{Affinity, Cursor, GlyphRun, Layout, Line, PositionedLayoutItem, Selection};
++use peniko::{Fill, Mix};
+ use std::collections::HashMap;
++use std::sync::Arc;
+ use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
+ use style::values::computed::{
+     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
+@@ -100,15 +102,38 @@ struct DecorationStackEntry {
+     text_color: Color,
+     /// The decoration this node introduces as a decorating box, if any.
+     decoration: Option<ResolvedDecoration>,
++    /// This node's (inherited) `text-shadow` list, `None` for `none`. Equal
++    /// lists share one allocation, so the runs of a shadowed paragraph are
++    /// shadowed together.
++    text_shadows: Option<Arc<[TextShadow]>>,
+ }
+ 
++/// One `text-shadow`, in device pixels.
++#[derive(Clone, Copy, PartialEq)]
++struct TextShadow {
++    offset: kurbo::Vec2,
++    /// The blur's standard deviation, which is half the blur radius.
++    std_dev: f64,
++    color: Color,
++}
++
++/// The most blur a text shadow gets, in device pixels. Blurrier shadows are
++/// too faint to tell apart, and the cap bounds the layer a blur needs.
++const MAX_SHADOW_STD_DEV: f64 = 100.0;
++
+ /// Resolve the cached style values for a single node into a [`DecorationStackEntry`].
+-fn resolve_decoration_entry(doc: &BaseDocument, node_id: NodeId) -> DecorationStackEntry {
++fn resolve_decoration_entry(
++    doc: &BaseDocument,
++    node_id: NodeId,
++    scale: f64,
++    parent: Option<&DecorationStackEntry>,
++) -> DecorationStackEntry {
+     let Some(styles) = doc.get_node(node_id).and_then(|node| node.primary_styles()) else {
+         return DecorationStackEntry {
+             node_id,
+             text_color: Color::BLACK,
+             decoration: None,
++            text_shadows: None,
+         };
+     };
+ 
+@@ -116,6 +141,31 @@ fn resolve_decoration_entry(doc: &BaseDocument, node_id: NodeId) -> DecorationSt
+     let text = styles.get_text();
+     let text_color = itext.color.as_color_color();
+ 
++    // `text-shadow` lengths are CSS pixels and the layout is in device pixels.
++    // A shadow without a colour takes the text's.
++    let text_shadows = (!itext.text_shadow.0.is_empty()).then(|| {
++        itext
++            .text_shadow
++            .0
++            .iter()
++            .map(|shadow| TextShadow {
++                offset: kurbo::Vec2::new(
++                    f64::from(shadow.horizontal.px()) * scale,
++                    f64::from(shadow.vertical.px()) * scale,
++                ),
++                std_dev: (f64::from(shadow.blur.px()) * scale / 2.0).min(MAX_SHADOW_STD_DEV),
++                color: shadow
++                    .color
++                    .resolve_to_absolute(&itext.color)
++                    .as_color_color(),
++            })
++            .collect::<Arc<[_]>>()
++    });
++    let text_shadows = match (text_shadows, parent.and_then(|p| p.text_shadows.as_ref())) {
++        (Some(own), Some(inherited)) if *own == **inherited => Some(inherited.clone()),
++        (own, _) => own,
++    };
++
+     let drawn_lines = TextDecorationLine::UNDERLINE
+         | TextDecorationLine::OVERLINE
+         | TextDecorationLine::LINE_THROUGH;
+@@ -152,6 +202,7 @@ fn resolve_decoration_entry(doc: &BaseDocument, node_id: NodeId) -> DecorationSt
+         node_id,
+         text_color,
+         decoration,
++        text_shadows,
+     }
+ }
+ 
+@@ -208,6 +259,24 @@ pub(crate) struct DrawTextContext {
+     inked_coords: Vec<i16>,
+     /// The decorating boxes (indices into `deco_boxes`) over each inked run.
+     inked_boxes: Vec<usize>,
++    /// The glyph runs of the line being painted.
++    line_runs: Vec<LineRun>,
++}
++
++/// A glyph run of the line being painted, resolved before any of the line is
++/// drawn so that its text shadows can go beneath all of its text.
++struct LineRun {
++    /// The run's index among the line's items.
++    item: usize,
++    color: Color,
++    embolden: kurbo::Vec2,
++    /// Whether none of the run's glyphs can reach the viewport.
++    culled: bool,
++    /// The run's ink before the transform, where the font's bounds are known.
++    ink: Option<Rect>,
++    /// The run's advance across the line's height.
++    extent: Rect,
++    shadows: Option<Arc<[TextShadow]>>,
+ }
+ 
+ /// A glyph run under an underline or overline on the current line.
+@@ -263,7 +332,8 @@ fn font_outline_bounds(font: &parley::FontData) -> Option<Rect> {
+ }
+ 
+ /// Local paint bounds for each line, computed once per layout. Unknown font
+-/// bounds and authored decorations conservatively retain the original path.
++/// bounds, authored decorations and text shadows conservatively retain the
++/// original path.
+ pub(crate) fn line_paint_bounds(
+     layout: &Layout<TextBrush>,
+     doc: &BaseDocument,
+@@ -281,9 +351,22 @@ pub(crate) fn line_paint_bounds(
+                 };
+                 let id = glyph_run.style().brush.id;
+                 let has_decoration = *decorated.entry(id).or_insert_with(|| {
++                    // `text-shadow` inherits, so the run's own node has it.
++                    let shadowed = doc
++                        .get_node(id)
++                        .and_then(|node| node.primary_styles())
++                        .is_some_and(|styles| {
++                            !styles.get_inherited_text().text_shadow.0.is_empty()
++                        });
++                    if shadowed {
++                        return true;
++                    }
+                     let mut ancestor = Some(id);
+                     while let Some(id) = ancestor {
+-                        if resolve_decoration_entry(doc, id).decoration.is_some() {
++                        if resolve_decoration_entry(doc, id, 1.0, None)
++                            .decoration
++                            .is_some()
++                        {
+                             return true;
+                         }
+                         if id == root {
+@@ -597,7 +680,13 @@ fn flush_line_decorations(
+     line_baseline: f32,
+     inked: &InkedLine<'_>,
+     ink_skip: &mut crate::ink_skip::InkSkip,
++    shadow: Option<(Color, kurbo::Vec2)>,
+ ) {
++    // A text shadow draws the decorations again, offset and in its colour.
++    let transform = match shadow {
++        Some((_, offset)) => transform * Affine::translate(offset),
++        None => transform,
++    };
+     // Draw innermost boxes first so ancestors' decorations paint on top, matching the
+     // per-run drawing order this replaced (`stack.iter().rev()`).
+     for (index, acc) in deco_boxes.iter().enumerate().rev() {
+@@ -622,7 +711,7 @@ fn flush_line_decorations(
+         if width <= 0.0 {
+             continue;
+         }
+-        let brush = anyrender::Paint::from(deco.color);
++        let brush = anyrender::Paint::from(shadow.map_or(deco.color, |(color, _)| color));
+         let baseline = f64::from(geom.baseline);
+ 
+         // `text-decoration-inset` shortens (or, when negative, extends) the line from the
+@@ -782,6 +871,7 @@ pub(crate) fn stroke_text<'a>(
+         inked_glyphs,
+         inked_coords,
+         inked_boxes,
++        line_runs,
+     } = context;
+     stack.clear();
+     path_scratch.clear();
+@@ -804,8 +894,10 @@ pub(crate) fn stroke_text<'a>(
+         inked_glyphs.clear();
+         inked_coords.clear();
+         inked_boxes.clear();
++        line_runs.clear();
++        let line_metrics = line.metrics();
+ 
+-        for item in line.items() {
++        for (item_index, item) in line.items().enumerate() {
+             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                 let style = glyph_run.style();
+                 // An inline element's edge has no text to draw or decorate.
+@@ -846,7 +938,8 @@ pub(crate) fn stroke_text<'a>(
+                     .count();
+                 stack.truncate(shared);
+                 for &node_id in &path_scratch[shared..] {
+-                    stack.push(resolve_decoration_entry(doc, node_id));
++                    let entry = resolve_decoration_entry(doc, node_id, scale, stack.last());
++                    stack.push(entry);
+                 }
+ 
+                 // The glyph colour comes from the run's own node (the stack top): `color`
+@@ -867,65 +960,76 @@ pub(crate) fn stroke_text<'a>(
+                     embolden += synthetic_bold(f64::from(font_size));
+                 }
+ 
+-                let outside = viewport.is_some_and(|viewport| {
+-                    let bounds = *outline_bounds
+-                        .entry((font.data.id(), font.index))
+-                        .or_insert_with(|| font_outline_bounds(font));
+-                    let Some(bounds) = bounds else {
+-                        return false;
+-                    };
+-                    // Include hinting and synthetic emboldening before applying
+-                    // italic synthesis and the complete CSS transform.
+-                    let bounds = Affine::scale(font_size as f64)
+-                        .transform_rect_bbox(bounds)
+-                        .inflate(2.0, 2.0);
+-                    let bounds = glyph_xform
+-                        .unwrap_or(Affine::IDENTITY)
+-                        .transform_rect_bbox(bounds);
++                // Highlights repaint text without its shadows.
++                let shadows = if color_override.is_some() {
++                    None
++                } else {
++                    stack.last().and_then(|entry| entry.text_shadows.clone())
++                };
++
++                // The run's ink, to skip runs that can't reach the viewport and
++                // to place shadows. A font without usable bounds is never skipped.
++                let mut culled = false;
++                let mut ink = None;
++                if viewport.is_some() || shadows.is_some() {
+                     let mut glyphs = glyph_run.positioned_glyphs();
+-                    let Some(first) = glyphs.next() else {
+-                        return true;
+-                    };
+-                    let mut positions = Rect::new(
+-                        first.x as f64,
+-                        first.y as f64,
+-                        first.x as f64,
+-                        first.y as f64,
+-                    );
+-                    for glyph in glyphs {
+-                        positions = positions.union_pt((glyph.x as f64, glyph.y as f64));
++                    match glyphs.next() {
++                        None => culled = true,
++                        Some(first) => {
++                            let mut positions = Rect::new(
++                                first.x as f64,
++                                first.y as f64,
++                                first.x as f64,
++                                first.y as f64,
++                            );
++                            for glyph in glyphs {
++                                positions = positions.union_pt((glyph.x as f64, glyph.y as f64));
++                            }
++                            let bounds = *outline_bounds
++                                .entry((font.data.id(), font.index))
++                                .or_insert_with(|| font_outline_bounds(font));
++                            if let Some(bounds) = bounds {
++                                // Include hinting and synthetic emboldening before
++                                // applying italic synthesis.
++                                let bounds = Affine::scale(font_size as f64)
++                                    .transform_rect_bbox(bounds)
++                                    .inflate(2.0, 2.0);
++                                let bounds = glyph_xform
++                                    .unwrap_or(Affine::IDENTITY)
++                                    .transform_rect_bbox(bounds);
++                                let run_ink = Rect::new(
++                                    positions.x0 + bounds.x0,
++                                    positions.y0 + bounds.y0,
++                                    positions.x1 + bounds.x1,
++                                    positions.y1 + bounds.y1,
++                                );
++                                culled = viewport.is_some_and(|viewport| {
++                                    outside_viewport(
++                                        transform.transform_rect_bbox(run_ink),
++                                        viewport,
++                                    )
++                                });
++                                ink = Some(run_ink);
++                            }
++                        }
+                     }
+-                    let painted = transform.transform_rect_bbox(Rect::new(
+-                        positions.x0 + bounds.x0,
+-                        positions.y0 + bounds.y0,
+-                        positions.x1 + bounds.x1,
+-                        positions.y1 + bounds.y1,
+-                    ));
+-                    painted.is_finite()
+-                        && (painted.x1 < viewport.x0
+-                            || painted.x0 > viewport.x1
+-                            || painted.y1 < viewport.y0
+-                            || painted.y0 > viewport.y1)
+-                });
+-                if !outside {
+-                    scene.draw_glyphs(
+-                        font,
+-                        font_size,
+-                        !FONT_EMBOLDEN_ENABLED, // hint
+-                        bytemuck::cast_slice(run.normalized_coords()),
+-                        embolden,
+-                        Fill::NonZero,
+-                        &anyrender::Paint::from(text_color),
+-                        1.0, // alpha
+-                        transform,
+-                        glyph_xform,
+-                        glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
+-                            id: glyph.id as _,
+-                            x: glyph.x,
+-                            y: glyph.y,
+-                        }),
+-                    );
+                 }
++                let run_x0 = glyph_run.offset() as f64;
++                let run_x1 = run_x0 + glyph_run.advance() as f64;
++                line_runs.push(LineRun {
++                    item: item_index,
++                    color: text_color,
++                    embolden,
++                    culled,
++                    ink,
++                    extent: Rect::new(
++                        run_x0,
++                        f64::from(line_metrics.block_min_coord),
++                        run_x1,
++                        f64::from(line_metrics.block_max_coord),
++                    ),
++                    shadows,
++                });
+ 
+                 // Accumulate this run's contribution to each decorating box on its ancestor
+                 // path. The decoration is drawn once per box after the whole line has been
+@@ -943,8 +1047,6 @@ pub(crate) fn stroke_text<'a>(
+                     css_font_size,
+                 };
+                 let run_node_id = style.brush.id;
+-                let run_x0 = glyph_run.offset() as f64;
+-                let run_x1 = run_x0 + glyph_run.advance() as f64;
+ 
+                 let boxes_start = inked_boxes.len();
+                 for entry in stack.iter() {
+@@ -1045,6 +1147,137 @@ pub(crate) fn stroke_text<'a>(
+             coords: inked_coords,
+             boxes: inked_boxes,
+         };
++        let line_height = f64::from(line_metrics.block_max_coord - line_metrics.block_min_coord);
++
++        // Shadows go beneath all of the line's text, the first of a list on
++        // top, and shadow the decorations of the text they belong to, as in
++        // Blink and Gecko.
++        let mut start = 0;
++        while start < line_runs.len() {
++            let Some(list) = line_runs[start].shadows.clone() else {
++                start += 1;
++                continue;
++            };
++            // This run and the following ones with the same list share one
++            // layer per blurred shadow.
++            let end = start
++                + line_runs[start..]
++                    .iter()
++                    .take_while(|run| {
++                        run.shadows
++                            .as_ref()
++                            .is_some_and(|other| Arc::ptr_eq(other, &list))
++                    })
++                    .count();
++            let batch = &line_runs[start..end];
++            start = end;
++
++            let advance = batch
++                .iter()
++                .map(|run| run.extent)
++                .reduce(|a, b| a.union(b))
++                .unwrap_or(Rect::ZERO);
++            // The decorations over these runs are shadowed with them, cut at
++            // the runs' ends.
++            let decoration_area = advance.inflate(0.0, line_height);
++            let decorated = deco_boxes
++                .iter()
++                .any(|deco| deco.max_x > advance.x0 && deco.min_x < advance.x1);
++            let decorations_overhang = deco_boxes
++                .iter()
++                .any(|deco| deco.min_x < advance.x0 || deco.max_x > advance.x1);
++            let painted = batch
++                .iter()
++                .map(|run| {
++                    run.ink
++                        .unwrap_or_else(|| run.extent.inflate(line_height, line_height))
++                })
++                .fold(decoration_area, |a, b| a.union(b));
++
++            for shadow in list.iter().rev() {
++                if shadow.color.components[3] <= 0.0 {
++                    continue;
++                }
++                let spread = 3.0 * shadow.std_dev;
++                let reaches_viewport = |area: Rect| {
++                    !viewport.is_some_and(|viewport| {
++                        outside_viewport(
++                            transform.transform_rect_bbox(
++                                (area + shadow.offset).inflate(spread, spread),
++                            ),
++                            viewport,
++                        )
++                    })
++                };
++                let visible = |run: &LineRun| match run.ink {
++                    Some(ink) => reaches_viewport(ink),
++                    None => !run.culled,
++                };
++                let shadows_decorations = decorated && reaches_viewport(decoration_area);
++                if !shadows_decorations && !batch.iter().any(visible) {
++                    continue;
++                }
++
++                let blurred = shadow.std_dev > 0.0;
++                if blurred {
++                    let filter = Filter::single(FilterEffect::blur(shadow.std_dev as f32));
++                    scene.push_layer(
++                        Fill::NonZero,
++                        Mix::Normal,
++                        1.0,
++                        transform,
++                        &(painted + shadow.offset).inflate(spread, spread),
++                        Some(Arc::new(filter)),
++                        None,
++                    );
++                }
++                let shadow_transform = transform * Affine::translate(shadow.offset);
++                for (glyph_run, run) in recorded_runs(&line, batch) {
++                    if visible(run) {
++                        draw_run_glyphs(
++                            scene,
++                            &glyph_run,
++                            shadow.color,
++                            run.embolden,
++                            shadow_transform,
++                        );
++                    }
++                }
++                if shadows_decorations {
++                    if decorations_overhang {
++                        scene.push_clip_layer(
++                            Fill::NonZero,
++                            transform,
++                            &(decoration_area + shadow.offset),
++                        );
++                    }
++                    flush_line_decorations(
++                        scene,
++                        transform,
++                        scale,
++                        deco_boxes,
++                        win_ascent_ratios,
++                        inline_root_id,
++                        line_metrics.baseline,
++                        &inked,
++                        ink_skip,
++                        Some((shadow.color, shadow.offset)),
++                    );
++                    if decorations_overhang {
++                        scene.pop_layer();
++                    }
++                }
++                if blurred {
++                    scene.pop_layer();
++                }
++            }
++        }
++
++        for (glyph_run, run) in recorded_runs(&line, line_runs) {
++            if !run.culled {
++                draw_run_glyphs(scene, &glyph_run, run.color, run.embolden, transform);
++            }
++        }
+         flush_line_decorations(
+             scene,
+             transform,
+@@ -1052,13 +1285,71 @@ pub(crate) fn stroke_text<'a>(
+             deco_boxes,
+             win_ascent_ratios,
+             inline_root_id,
+-            line.metrics().baseline,
++            line_metrics.baseline,
+             &inked,
+             ink_skip,
++            None,
+         );
+     }
+ }
+ 
++/// The line's glyph runs that `runs` records, each with its record.
++fn recorded_runs<'l, 'r>(
++    line: &Line<'l, TextBrush>,
++    runs: &'r [LineRun],
++) -> impl Iterator<Item = (GlyphRun<'l, TextBrush>, &'r LineRun)> + use<'l, 'r> {
++    let mut runs = runs.iter().peekable();
++    line.items().enumerate().filter_map(move |(index, item)| {
++        let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
++            return None;
++        };
++        runs.next_if(|run| run.item == index)
++            .map(|run| (glyph_run, run))
++    })
++}
++
++/// Draw a glyph run in one colour.
++fn draw_run_glyphs(
++    scene: &mut impl PaintScene,
++    glyph_run: &GlyphRun<'_, TextBrush>,
++    color: Color,
++    embolden: kurbo::Vec2,
++    transform: Affine,
++) {
++    let run = glyph_run.run();
++    let glyph_xform = run
++        .synthesis()
++        .skew()
++        .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
++    scene.draw_glyphs(
++        run.font(),
++        run.font_size(),
++        !FONT_EMBOLDEN_ENABLED, // hint
++        bytemuck::cast_slice(run.normalized_coords()),
++        embolden,
++        Fill::NonZero,
++        &anyrender::Paint::from(color),
++        1.0, // alpha
++        transform,
++        glyph_xform,
++        glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
++            id: glyph.id as _,
++            x: glyph.x,
++            y: glyph.y,
++        }),
++    );
++}
++
++/// Whether a painted rect lies wholly outside the viewport. A rect that isn't
++/// finite never does.
++fn outside_viewport(painted: Rect, viewport: Rect) -> bool {
++    painted.is_finite()
++        && (painted.x1 < viewport.x0
++            || painted.x0 > viewport.x1
++            || painted.y1 < viewport.y0
++            || painted.y0 > viewport.y1)
++}
++
+ /// The glyphs a line's underlines and overlines skip.
+ struct InkedLine<'a> {
+     runs: &'a [InkedRun],

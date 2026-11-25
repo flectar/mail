@@ -269,6 +269,14 @@ pub(super) fn register_renderer_input_callbacks(
     });
     let reader = host.host();
     let r = renderer.clone();
+    host.email().on_find_closed(move || {
+        r.borrow_mut().end_find();
+        if let Some(host) = reader.upgrade() {
+            repaint_reader(&host, &r, gpu);
+        }
+    });
+    let reader = host.host();
+    let r = renderer.clone();
     host.email().on_toggle_section(move |section| {
         let (Some(host), Ok(section)) = (reader.upgrade(), usize::try_from(section)) else {
             return;

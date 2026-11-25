@@ -1,0 +1,84 @@
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index a8ed7dd..9233eb0 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -776,7 +776,12 @@ fn collect_layout_children_with_wrap(
+             return;
+         }
+ 
++        let is_details = tag_name == "details";
+         number_list_items(doc, container_node_id);
++
++        if is_details && collect_details_children(doc, container_node_id, out) {
++            return;
++        }
+     }
+ 
+     // Skip further construction if the node has no children or psuedo-children.
+@@ -942,6 +947,66 @@ fn collect_layout_children_with_wrap(
+     }
+ }
+ 
++/// Lays out a `<details>` as its UA shadow tree does (HTML "The details and
++/// summary elements"): its first `<summary>` first, wherever it is among the
++/// children, and everything else after it in one block, while it is open. A
++/// closed one shows only its summary, so its text is hidden along with its
++/// elements, which `display: none` alone leaves showing. Returns false for a
++/// `<details>` that isn't a block container, which lays out as usual.
++fn collect_details_children(
++    doc: &mut BaseDocument,
++    container_node_id: NodeId,
++    out: &mut LayoutChildren,
++) -> bool {
++    let node = &doc.nodes[container_node_id];
++    let is_flow = node.display_style().is_some_and(|display| {
++        matches!(
++            display.inside(),
++            DisplayInside::Flow | DisplayInside::FlowRoot
++        )
++    });
++    if !is_flow {
++        return false;
++    }
++    let summary = node.children.iter().copied().find(|&child| {
++        doc.nodes[child]
++            .data
++            .is_element_with_tag_name(&local_name!("summary"))
++    });
++    let open = node
++        .element_data()
++        .is_some_and(|element| element.has_attr(local_name!("open")));
++    let content: Vec<NodeId> = node
++        .children
++        .iter()
++        .copied()
++        .filter(|&child| Some(child) != summary)
++        .collect();
++    if let Some(summary) = summary {
++        let display = doc.nodes[summary]
++            .display_style()
++            .unwrap_or(Display::inline());
++        if display.outside() == DisplayOutside::Inline {
++            out.push_wrapped(container_node_id, summary, doc);
++        } else {
++            out.push(summary, doc);
++        }
++    }
++    let shows_content = open
++        && content
++            .iter()
++            .any(|&child| !doc.nodes[child].is_collapsible_whitespace_node());
++    if shows_content {
++        out.maybe_push_anon_block(doc);
++        let slot = create_anonymous_box(doc, container_node_id);
++        doc.nodes[slot].children = content.into();
++        out.children.push(slot);
++        out.anonymous_blocks.push(slot);
++    }
++    out.maybe_push_anon_block(doc);
++    true
++}
++
+ /// The marker of a list item whose `list-style-position` is `inside`.
+ fn inside_marker(node: &Node) -> Option<&Marker> {
+     match node.element_data()?.list_item_data.as_deref()? {
