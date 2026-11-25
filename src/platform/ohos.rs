@@ -16,6 +16,17 @@ static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
 /// Names this platform to the settings that describe it.
 pub(crate) const NAME: &str = "ohos";
 
+/// How the host reads the system's proxy settings; see
+/// [`configure_system_proxy`].
+pub use flectar_mail_core::net::proxy::SystemProxies;
+
+/// Supply the reader of the system's proxy settings, before the first
+/// connection. The first reader counts.
+pub fn configure_system_proxy(reader: impl SystemProxies + 'static) {
+    static CONFIGURED: std::sync::Once = std::sync::Once::new();
+    CONFIGURED.call_once(|| flectar_mail_core::net::proxy::set_system_source(reader));
+}
+
 /// The native window is the app while the page is showing; account changes
 /// that request notification permission come from that foreground session.
 pub(crate) fn app_is_active() -> bool {
@@ -115,11 +126,28 @@ pub(crate) fn sells_sync() -> bool {
     false
 }
 
-/// How this device appears in Flectar Mail Sync's device list.
+/// The device's market name, which the host reads before the app starts.
+static DEVICE_NAME: OnceLock<String> = OnceLock::new();
+
+/// Supply the device's market name, such as "HUAWEI MateBook Pro", before the
+/// application starts. A blank name leaves the shared default.
+pub fn configure_device_name(name: &str) {
+    let name = name.trim();
+    if !name.is_empty() {
+        let _ = DEVICE_NAME.set(name.to_owned());
+    }
+}
+
+/// How this device appears in Flectar Mail Sync's device list: by its market
+/// name, as Android uses its model name, or else by the shared default.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    let name = match DEVICE_NAME.get() {
+        Some(name) => name.clone(),
+        None => flectar_mail_core::device_sync::DeviceDescription::default().name,
+    };
     flectar_mail_core::device_sync::DeviceDescription {
+        name,
         platform: "harmonyos".to_owned(),
-        ..Default::default()
     }
 }
 
