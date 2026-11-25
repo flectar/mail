@@ -689,23 +689,9 @@ fn copy_preferences(from: &AccountMailPreferences<'_>, to: &AccountMailPreferenc
 
 #[cfg(desktop)]
 fn copy_appearance(app: &AppWindow, window: &ComposerWindow) {
-    let from = app.global::<AppTheme>();
-    let to = window.global::<AppTheme>();
-    to.set_preset(from.get_preset());
-    to.set_custom_light_primary(from.get_custom_light_primary());
-    to.set_custom_light_page_bg(from.get_custom_light_page_bg());
-    to.set_custom_light_surface(from.get_custom_light_surface());
-    to.set_custom_light_text(from.get_custom_light_text());
-    to.set_custom_light_border(from.get_custom_light_border());
-    to.set_custom_dark_primary(from.get_custom_dark_primary());
-    to.set_custom_dark_page_bg(from.get_custom_dark_page_bg());
-    to.set_custom_dark_surface(from.get_custom_dark_surface());
-    to.set_custom_dark_text(from.get_custom_dark_text());
-    to.set_custom_dark_border(from.get_custom_dark_border());
-    window
-        .global::<AppIcon>()
-        .set_variant(app.global::<AppIcon>().get_variant());
+    crate::theme::copy_look(app, window);
     window.set_theme(app.get_theme_mode());
+    window.set_interface_text_size(app.get_interface_text_size());
 }
 
 impl Composers {
@@ -4892,6 +4878,33 @@ mod tests {
         assert!(main.get_open());
         assert_eq!(main.get_to(), "fourth@example.com");
         assert_eq!(open_windows(), 3);
+    }
+
+    #[test]
+    fn message_windows_follow_the_text_size_and_reduced_motion() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        app.set_interface_text_size(20.0);
+        app.global::<MotionSettings>().set_preference("on".into());
+        app.set_compose_in_window(true);
+        app.invoke_open_compose("first@example.com".into());
+        let session = composers.sessions.borrow()[0].clone();
+        let Some(HostRef::Window(window)) = session.host() else {
+            panic!("the message has no window of its own");
+        };
+        assert_eq!(window.get_interface_text_size(), 20.0);
+        assert!(window.global::<MotionSettings>().get_reduced());
+
+        // What changes in the main window reaches the open window.
+        app.set_interface_text_size(24.0);
+        app.global::<MotionSettings>().set_preference("off".into());
+        app.invoke_appearance_changed();
+        assert_eq!(window.get_interface_text_size(), 24.0);
+        assert!(!window.global::<MotionSettings>().get_reduced());
     }
 
     #[test]

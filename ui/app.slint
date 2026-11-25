@@ -999,6 +999,10 @@ struct Appearance {
     mode: string,
     preset: string,
     icon: AppIconVariant,
+    text-size: length,
+    motion: bool,
+    motion-preference: string,
+    motion-reduced: bool,
     light_primary: color,
     light_page: color,
     light_surface: color,
@@ -1017,6 +1021,8 @@ struct Appearance {
 export component ComposerWindow inherits Window {
     // "light", "dark" or "system": the main window's theme-mode.
     in property <string> theme: "system";
+    // The main window's interface text size (src/text_size.rs).
+    in property <length> interface-text-size: 0px;
     in property <bool> attachment-picker-supported: true;
     // The window's close button asks the composer, which protects a
     // message with content behind its discard confirmation.
@@ -1027,6 +1033,7 @@ export component ComposerWindow inherits Window {
     title: ComposerUi.subject != "" ? ComposerUi.subject : ComposerText.mode-title(ComposerUi.mode);
     icon: AppIcon.window-image(AppIcon.variant);
     default-font-family: "Google Sans Flex";
+    default-font-size: root.interface-text-size;
     preferred-width: 760px;
     preferred-height: 720px;
     min-width: 420px;
@@ -1867,6 +1874,8 @@ export component AppWindow inherits Window {
     callback appearance-changed();
     private property <Appearance> appearance: {
         mode: root.theme-mode, preset: AppTheme.preset, icon: AppIcon.variant,
+        text-size: root.interface-text-size, motion: MotionSettings.enabled,
+        motion-preference: MotionSettings.preference, motion-reduced: MotionSettings.system-reduced,
         light_primary: AppTheme.custom-light-primary, light_page: AppTheme.custom-light-page-bg,
         light_surface: AppTheme.custom-light-surface, light_text: AppTheme.custom-light-text,
         light_border: AppTheme.custom-light-border, dark_primary: AppTheme.custom-dark-primary,

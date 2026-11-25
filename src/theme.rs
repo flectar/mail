@@ -38,6 +38,38 @@ pub(crate) fn stored_color(value: &str, fallback: &str) -> Color {
         .unwrap_or_default()
 }
 
+/// Give a window of its own the main window's look: its theme, colors and
+/// icon, and how much it moves, as composer and conversation windows follow
+/// them.
+#[cfg(desktop)]
+pub(crate) fn copy_look<'a, C>(app: &crate::AppWindow, window: &'a C)
+where
+    crate::AppTheme<'a>: slint::Global<'a, C>,
+    crate::AppIcon<'a>: slint::Global<'a, C>,
+    crate::MotionSettings<'a>: slint::Global<'a, C>,
+{
+    use crate::{AppIcon, AppTheme, MotionSettings};
+    use slint::{ComponentHandle, Global};
+    let from = app.global::<AppTheme>();
+    let to = AppTheme::get(window);
+    to.set_preset(from.get_preset());
+    to.set_custom_light_primary(from.get_custom_light_primary());
+    to.set_custom_light_page_bg(from.get_custom_light_page_bg());
+    to.set_custom_light_surface(from.get_custom_light_surface());
+    to.set_custom_light_text(from.get_custom_light_text());
+    to.set_custom_light_border(from.get_custom_light_border());
+    to.set_custom_dark_primary(from.get_custom_dark_primary());
+    to.set_custom_dark_page_bg(from.get_custom_dark_page_bg());
+    to.set_custom_dark_surface(from.get_custom_dark_surface());
+    to.set_custom_dark_text(from.get_custom_dark_text());
+    to.set_custom_dark_border(from.get_custom_dark_border());
+    AppIcon::get(window).set_variant(app.global::<AppIcon>().get_variant());
+    let (from, to) = (app.global::<MotionSettings>(), MotionSettings::get(window));
+    to.set_enabled(from.get_enabled());
+    to.set_preference(from.get_preference());
+    to.set_system_reduced(from.get_system_reduced());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
