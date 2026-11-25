@@ -908,6 +908,13 @@ pub(super) fn register_settings_preference_callbacks(
                 ));
             }
         }
+        // Turned off, only the active message stays open.
+        if !app.get_keep_messages_open()
+            && let Err(error) =
+                render_current(&app, &state_for_open_messages, &runtime_for_open_messages)
+        {
+            app.set_render_status(UiMessage::detail("Message load failed: {}", error));
+        }
     });
 
     let app_weak = app.as_weak();

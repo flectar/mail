@@ -2,7 +2,7 @@ import { AccountMailPreferences } from "../components/account-mail-preferences.s
 import { ActionMenu, ActionMenuEntry } from "../components/action-menu.slint";
 import { ZoomControls } from "../components/zoom-controls.slint";
 import { CheckBox, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, MailboxRole, MessageDetails, ThreadMessageRow } from "../models.slint";
+import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, MailboxRole, MessageDetails, OpenMessages, ThreadMessageRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -214,16 +214,27 @@ component ThreadMessageHeader inherits Rectangle {
     // The pane positions every header from these, so it supplies them.
     in property <length> sender-height: 23px;
     in property <length> detail-height: 24px;
+    // Open below its header while another message is the one the reader
+    // acts on. It looks open, and a click makes it that one.
+    in property <bool> expanded: false;
+    // One of several open messages, which its header can close.
+    in property <bool> can-collapse: false;
+    in property <bool> compact: false;
     callback open;
+    callback collapse;
     callback copy-text(string);
 
+    private property <bool> shown-open: root.selected || root.expanded;
+    private property <length> collapse-room: root.can-collapse
+        ? (root.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size)
+        : 0px;
     height: 17px + root.sender-height + root.detail-height;
     border-radius: 8px;
-    border-width: root.selected ? 0px : 1px;
+    border-width: root.shown-open ? 0px : 1px;
     border-color: root.border;
     background: root.thread-interactive && header-hit.has-hover
         ? root.control-bg
-        : root.selected ? transparent : root.control-bg.transparentize(0.35);
+        : root.shown-open ? transparent : root.control-bg.transparentize(0.35);
     animate background { duration: 140ms; }
     accessible-role: button;
     accessible-enabled: root.thread-interactive || root.selected;
@@ -260,17 +271,17 @@ component ThreadMessageHeader inherits Rectangle {
     sender-label := Text {
         x: root.content-x;
         y: 7px;
-        width: max(0px, parent.width - self.x - (root.sender-verification != "" ? 112px : 92px));
+        width: max(0px, parent.width - self.x - (root.sender-verification != "" ? 112px : 92px) - root.collapse-room);
         height: root.sender-height;
         text: root.outgoing ? @tr("You") : root.sender;
         color: root.heading;
         font-size: TypeScale.body;
-        font-weight: root.selected || root.unread ? 700 : 600;
+        font-weight: root.shown-open || root.unread ? 700 : 600;
         overflow: elide;
         vertical-alignment: center;
     }
     if root.sender-verification != "" : Image {
-        x: min(sender-label.x + sender-label.preferred-width + 6px, parent.width - 122px);
+        x: min(sender-label.x + sender-label.preferred-width + 6px, parent.width - 122px - root.collapse-room);
         y: sender-label.y + (sender-label.height - self.height) / 2;
         width: 17px;
         height: 17px;
@@ -286,7 +297,7 @@ component ThreadMessageHeader inherits Rectangle {
                     : @tr("Sender domain authenticated with DMARC and DKIM");
     }
     Text {
-        x: parent.width - 82px;
+        x: parent.width - 82px - root.collapse-room;
         y: 7px;
         width: 70px;
         height: root.sender-height;
@@ -302,10 +313,10 @@ component ThreadMessageHeader inherits Rectangle {
         y: sender-label.y + sender-label.height + 1px;
         // The open message leaves room for the chevron of its details.
         width: root.selected
-            ? min(self.preferred-width, max(0px, parent.width - self.x - 34px))
-            : max(0px, parent.width - self.x - 12px);
+            ? min(self.preferred-width, max(0px, parent.width - self.x - 34px - root.collapse-room))
+            : max(0px, parent.width - self.x - 12px - root.collapse-room);
         height: root.detail-height;
-        text: root.selected
+        text: root.shown-open
             ? root.address + (root.to == "" ? "" : " · " + @tr("to {}", root.to))
             : root.body-pending ? @tr("Loading message…") : root.preview;
         color: root.body-pending ? root.accent : root.secondary-text;
@@ -323,7 +334,7 @@ component ThreadMessageHeader inherits Rectangle {
         image-fit: contain;
         accessible-role: none;
     }
-    if root.selected : Rectangle {
+    if root.shown-open : Rectangle {
         x: 10px;
         y: parent.height - 1px;
         width: max(0px, parent.width - 20px);
@@ -352,6 +363,17 @@ component ThreadMessageHeader inherits Rectangle {
                 activated => { root.copy-text(EmailReader.mailbox-text(root.sender, root.address)); }
             }
         }
+    }
+
+    if root.can-collapse : ToolbarIconButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        compact: root.compact;
+        icon: @image-url("../icons/lucide/outline/chevron-up.svg");
+        icon-color: root.secondary-text;
+        hover-background: root.control-bg;
+        tooltip-text: @tr("Close message");
+        clicked => { root.collapse(); }
     }
 
     details-popup := PopupWindow {
@@ -686,7 +708,20 @@ export component MailReadingPane inherits FocusScope {
     private property <length> thread-item-stride: root.thread-header-height + root.thread-item-gap;
     private property <int> accordion-message-count: max(1, root.thread-messages.length);
     private property <int> accordion-selected-index: min(max(0, root.selected-thread-index), root.accordion-message-count - 1);
-    private property <length> selected-header-y: root.accordion-selected-index * root.thread-item-stride;
+    // Messages kept open while another is read show their body under their
+    // header, and push every message after them down by its height. Both
+    // scale with the width, so a resize moves them without a new frame.
+    pure function kept-open-above(row: ThreadMessageRow) -> length {
+        return root.email-viewport-width * row.aspect_above + row.extra_above;
+    }
+    pure function kept-open-height(row: ThreadMessageRow) -> length {
+        return row.open ? root.email-viewport-width * row.body_aspect + row.body_extra : 0px;
+    }
+    private property <ThreadMessageRow> last-thread-message: root.thread-messages[root.thread-messages.length - 1];
+    private property <length> kept-open-total: root.kept-open-above(root.last-thread-message)
+        + root.kept-open-height(root.last-thread-message);
+    private property <length> selected-header-y: root.accordion-selected-index * root.thread-item-stride
+        + root.kept-open-above(root.thread-messages[root.accordion-selected-index]);
     private property <length> renderer-controls-height: renderer-controls.preferred-height;
     private property <length> message-body-y: root.selected-header-y + root.thread-header-height + root.renderer-controls-height;
     private property <length> message-document-height: root.returned-section-y
@@ -826,8 +861,10 @@ export component MailReadingPane inherits FocusScope {
         root.email-scroll-y = 0px;
         // Keep the newly expanded message in view even when it is late in a
         // very large conversation. Renderer-local scrolling remains at the
-        // top of that message's body.
-        root.accordion-scroll-y = -root.accordion-selected-index * root.thread-item-stride;
+        // top of that message's body. The target, not the animated
+        // selected-header-y, counts the messages kept open above it.
+        root.accordion-scroll-y = -root.accordion-selected-index * root.thread-item-stride
+            - root.kept-open-above(root.thread-messages[root.accordion-selected-index]);
         root.syncing-accordion-scroll = false;
     }
     changed alternate-body-active => {
@@ -1437,6 +1474,7 @@ export component MailReadingPane inherits FocusScope {
                                         root.accordion-message-count * root.thread-header-height
                                             + max(0, root.accordion-message-count - 1) * root.thread-item-gap
                                             + root.expanded-message-height
+                                            + root.kept-open-total
                                     );
                                     content-y <=> root.accordion-scroll-y;
                                     horizontal-scrollbar-policy: !root.alternate-body-active && EmailReader.width-ratio > 1.01 ? as-needed : always-off;
@@ -1460,6 +1498,67 @@ export component MailReadingPane inherits FocusScope {
                                     border-radius: 8px;
                                     border-width: 1px;
                                     border-color: root.border-subtle;
+                                }
+
+                                // A message kept open shares the card look,
+                                // with its body painted under its header.
+                                for row in root.thread-messages : Rectangle {
+                                    visible: row.open;
+                                    x: -email-scroll.content-x + root.message-card-inset;
+                                    y: row.index * root.thread-item-stride + root.kept-open-above(row)
+                                        + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
+                                    animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
+                                    width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
+                                    height: row.open ? root.thread-header-height + root.kept-open-height(row) : 0px;
+                                    background: root.surface;
+                                    border-radius: 8px;
+                                    border-width: 1px;
+                                    border-color: root.border-subtle;
+                                    clip: true;
+
+                                    // The app paints the part of the body in
+                                    // view, and none of it out of view.
+                                    property <length> body-top: self.y + root.thread-header-height;
+                                    property <length> view-top: -root.accordion-scroll-y;
+                                    property <length> region-start: row.open ? max(0px, self.view-top - self.body-top) : 0px;
+                                    property <length> region-end: row.open
+                                        ? min(root.kept-open-height(row), self.view-top + email-scroll.visible-height - self.body-top)
+                                        : 0px;
+                                    property <length> region-height: max(0px, self.region-end - self.region-start);
+                                    changed region-start => { OpenMessages.region(row.index, self.region-start, self.region-height); }
+                                    changed region-height => { OpenMessages.region(row.index, self.region-start, self.region-height); }
+
+                                    for tile in row.tiles : Image {
+                                        x: root.message-card-border-width;
+                                        y: root.thread-header-height + tile.y * root.email-viewport-width * max(1, row.width_ratio);
+                                        width: root.email-viewport-width * max(1, row.width_ratio);
+                                        height: tile.height * root.email-viewport-width * max(1, row.width_ratio);
+                                        source: tile.image;
+                                        vertical-alignment: top;
+                                        image-fit: fill;
+                                        accessible-role: none;
+                                    }
+
+                                    MessageLoadingSkeleton {
+                                        x: root.message-card-border-width;
+                                        y: root.thread-header-height;
+                                        width: root.email-viewport-width;
+                                        height: max(0px, parent.height - self.y - root.message-card-border-width);
+                                        active: row.open && row.body_pending;
+                                        surface-color: root.surface;
+                                        base-color: root.control-bg;
+                                        highlight-color: root.surface-raised;
+                                        text-color: root.secondary-text;
+                                    }
+
+                                    // A click in its body makes it the message
+                                    // the reader acts on.
+                                    TouchArea {
+                                        y: root.thread-header-height;
+                                        height: max(0px, parent.height - self.y);
+                                        enabled: row.open;
+                                        clicked => { root.select_thread_message(row.index); }
+                                    }
                                 }
 
                                 if root.thread-messages.length == 0 : ThreadMessageHeader {
@@ -1492,7 +1591,7 @@ export component MailReadingPane inherits FocusScope {
 
                                 for row in root.thread-messages : ThreadMessageHeader {
                                     x: -email-scroll.content-x + root.message-card-inset;
-                                    y: row.index * root.thread-item-stride
+                                    y: row.index * root.thread-item-stride + root.kept-open-above(row)
                                         + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
                                     animate y { duration: 240ms; easing: spring(0); enabled: MotionSettings.movement; }
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
@@ -1509,6 +1608,9 @@ export component MailReadingPane inherits FocusScope {
                                     unread: row.unread;
                                     body-pending: row.body_pending;
                                     selected: row.selected;
+                                    expanded: row.open;
+                                    can-collapse: OpenMessages.count > 1 && (row.selected || row.open);
+                                    compact: root.compact;
                                     thread-interactive: root.thread-messages.length > 1;
                                     sender-verification: row.selected ? root.selected_sender_verification : "";
                                     show-avatar: root.show-avatars;
@@ -1521,6 +1623,7 @@ export component MailReadingPane inherits FocusScope {
                                     sender-height: root.thread-sender-height;
                                     detail-height: root.thread-detail-height;
                                     open => { root.select_thread_message(row.index); }
+                                    collapse => { OpenMessages.collapse(row.index); }
                                     copy-text(text) => { root.copy-to-clipboard(text); }
                                 }
 

@@ -201,6 +201,13 @@ def event_defaults:
     .favicon = favicon_path(if .outgoing then $selected_address else .address end)
     | .favicon_small = favicon_path(if .outgoing then $selected_address else .address end)
     | .has_favicon = (.outgoing | not)
+    | .open = (.open // false)
+    | .body_aspect = (.body_aspect // 0)
+    | .body_extra = (.body_extra // 0)
+    | .aspect_above = (.aspect_above // 0)
+    | .extra_above = (.extra_above // 0)
+    | .width_ratio = (.width_ratio // 1)
+    | .tiles = (.tiles // [])
   )
 | .selected_thread_index = (if $show_threads then (.selected_thread_index // 0) else 0 end)
 # The open message's state is in the ReaderUi global, as a reader shows it

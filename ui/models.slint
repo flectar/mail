@@ -270,6 +270,15 @@ export struct MessageDetails {
     date: string,
 }
 
+// Email HTML is rasterized into bounded vertical tiles. Coordinates are
+// normalized against the reading-pane width so HiDPI scaling stays in Slint
+// and no single full-message bitmap has to move on every scroll frame.
+export struct EmailTile {
+    image: image,
+    y: float,
+    height: float,
+}
+
 export struct ThreadMessageRow {
     index: int,
     sender: string,
@@ -285,6 +294,27 @@ export struct ThreadMessageRow {
     outgoing: bool,
     body_pending: bool,
     selected: bool,
+    // Shown open while another message is the one the reader acts on (#435),
+    // with its body's height per width of the reader, its height that doesn't
+    // scale, and the same summed over the messages open above it.
+    open: bool,
+    body_aspect: float,
+    body_extra: length,
+    aspect_above: float,
+    extra_above: length,
+    // The body as painted, positioned like the open message's tiles.
+    width_ratio: float,
+    tiles: [EmailTile],
+}
+
+// The messages of the open conversation that are open together (#435).
+export global OpenMessages {
+    // How many are open, the one the reader acts on included.
+    in property <int> count: 1;
+    callback collapse(int);
+    // The part of a message kept open whose body is in view, from the top
+    // of its body. An empty part means it's out of view.
+    callback region(int, length, length);
 }
 
 // A calendar server an account syncs; mirrors
@@ -393,15 +423,6 @@ export struct EmailLink {
     height: float,
     url: string,
     name: string
-}
-
-// Email HTML is rasterized into bounded vertical tiles. Coordinates are
-// normalized against the reading-pane width so HiDPI scaling stays in Slint
-// and no single full-message bitmap has to move on every scroll frame.
-export struct EmailTile {
-    image: image,
-    y: float,
-    height: float,
 }
 
 // The composer uses the same bounded-tile strategy as the message renderer,

@@ -50,6 +50,7 @@ mod folder_visibility;
 mod han_fallback;
 mod import_controller;
 mod invitation;
+mod kept_messages;
 mod keyboard_keys;
 mod latest_load;
 mod link_services;
@@ -91,6 +92,7 @@ mod number_format;
 mod privacy_consent;
 pub use privacy_consent::PrivacyConsent;
 mod oauth_browser;
+mod open_messages;
 pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
@@ -725,6 +727,9 @@ struct InboxState {
     conversation_messages: Vec<MailMessage>,
     conversation_selected_index: usize,
     conversation_rows: Rc<VecModel<ThreadMessageRow>>,
+    /// The messages open in the conversation, and the renderers of the ones
+    /// kept open beside the active message in `email_renderer` (#435).
+    kept: kept_messages::KeptMessages,
     labels: Vec<Label>,
     email_rows: Rc<VecModel<EmailRow>>,
     mail_list_entries: Rc<VecModel<MailListEntry>>,
@@ -1420,6 +1425,7 @@ impl InboxState {
             conversation_messages: Vec::new(),
             conversation_selected_index: 0,
             conversation_rows: Rc::new(VecModel::default()),
+            kept: kept_messages::KeptMessages::default(),
             labels: Vec::new(),
             email_rows: Rc::new(VecModel::default()),
             mail_list_entries: Rc::new(VecModel::default()),
@@ -2176,7 +2182,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     };
     let warm_start_cache = WarmStartCacheWriter::spawn(&runtime, platform.paths.warm_start_file());
-    let initial_state = InboxState::empty(
+    let mut initial_state = InboxState::empty(
         None,
         favicon_tx,
         profile_avatar_loader,
@@ -2185,6 +2191,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         false,
         warm_start_cache,
     );
+    let kept_resource_wake = resource_wake.clone();
+    initial_state
+        .kept
+        .configure(runtime.clone(), Arc::new(move || kept_resource_wake.wake()));
     initial_state
         .email_renderer
         .borrow_mut()
@@ -3691,6 +3701,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // renderer feedback loop; unlike the old repeated timer it has no idle
     // wakeups.
     let resource_renderer = Rc::clone(&email_renderer);
+    let resource_state = Rc::downgrade(&state);
     let resource_app = app.as_weak();
     let resource_callback_pending = Rc::new(Cell::new(false));
     app.on_refresh_email_resources(move || {
@@ -3698,10 +3709,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             return;
         }
         let renderer = Rc::downgrade(&resource_renderer);
+        let kept_state = resource_state.clone();
         let app = resource_app.clone();
         let pending = Rc::clone(&resource_callback_pending);
         Timer::single_shot(Duration::from_millis(50), move || {
             pending.set(false);
+            // Messages kept open load their images as well (#435).
+            if let (Some(app), Some(state)) = (app.upgrade(), kept_state.upgrade())
+                && let Ok(mut state) = state.try_borrow_mut()
+                && state.kept.poll_resources()
+                && kept_messages::paint(&app, &mut state)
+            {
+                refresh_thread_rows(&app, &state);
+            }
             let Some(renderer) = renderer.upgrade() else {
                 return;
             };
@@ -4584,8 +4604,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                     .get(state.conversation_selected_index)
                                     .map(|message| message.id)
                             });
+                            let mut messages = conversation.messages;
+                            // Messages kept open keep their bodies when the
+                            // same conversation loads again (#435).
+                            if state.conversation_owner_id == Some(update.id) {
+                                kept_messages::keep_bodies(
+                                    &state.kept,
+                                    &state.conversation_messages,
+                                    &mut messages,
+                                );
+                            }
                             state.conversation_owner_id = Some(update.id);
-                            state.conversation_messages = conversation.messages;
+                            state.conversation_messages = messages;
                             state.conversation_selected_index = selected_message_id
                                 .and_then(|id| {
                                     state
@@ -6121,6 +6151,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_sync_status(UiMessage::detail("Remote images unavailable: {}", error));
                 return;
             }
+            // Messages kept open load images the same way (#435).
+            state.kept.allow_remote_images(enabled);
         }
 
         app.set_remote_images_enabled(enabled);
@@ -7985,6 +8017,68 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    // Messages kept open in a conversation (#435).
+    let app_weak = app.as_weak();
+    let state_for_collapse = Rc::clone(&state);
+    let runtime_for_collapse = runtime.clone();
+    app.global::<OpenMessages>().on_collapse(move |index| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let next = {
+            let mut state = state_for_collapse.borrow_mut();
+            let state = &mut *state;
+            let Some(id) = usize::try_from(index)
+                .ok()
+                .and_then(|index| state.conversation_messages.get(index))
+                .map(|message| message.id)
+            else {
+                return;
+            };
+            let was_active = state.kept.open.active() == Some(id);
+            if !state.kept.open.collapse(id) {
+                return;
+            }
+            // Closing the active message returns to the one opened before it.
+            was_active
+                .then(|| state.kept.open.active())
+                .flatten()
+                .and_then(|active| {
+                    state
+                        .conversation_messages
+                        .iter()
+                        .position(|message| message.id == active)
+                })
+        };
+        let result = match next {
+            Some(position) => select_thread_message(
+                &app,
+                &state_for_collapse,
+                &runtime_for_collapse,
+                i32::try_from(position).unwrap_or(i32::MAX),
+            ),
+            None => render_current(&app, &state_for_collapse, &runtime_for_collapse),
+        };
+        if let Err(error) = result {
+            app.set_render_status(UiMessage::detail("Message load failed: {}", error));
+        }
+    });
+    let app_weak = app.as_weak();
+    let state_for_regions = Rc::clone(&state);
+    app.global::<OpenMessages>()
+        .on_region(move |index, start, height| {
+            let (Some(app), Ok(index)) = (app_weak.upgrade(), usize::try_from(index)) else {
+                return;
+            };
+            let Ok(mut state) = state_for_regions.try_borrow_mut() else {
+                return;
+            };
+            kept_messages::set_region(&mut state, index, start, height);
+            if kept_messages::paint(&app, &mut state) {
+                refresh_thread_rows(&app, &state);
+            }
+        });
+
     if use_wgpu {
         // Slint can retain a deferred window-surface error without
         // immediately exiting its event loop. Bound that otherwise blank-window
@@ -8039,6 +8133,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let visibility_app = app.as_weak();
     let visibility_renderer = email_renderer.clone();
+    let visibility_state = Rc::downgrade(&state);
     app.on_suspend_rendering(move |suspended| {
         let Some(app) = visibility_app.upgrade() else {
             return;
@@ -8048,6 +8143,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         app.set_render_suspended(suspended);
         visibility_renderer.borrow_mut().set_suspended(suspended);
+        // Messages kept open give their pixels back too, and paint again on
+        // the way back (#435).
+        if let Some(state) = visibility_state.upgrade()
+            && let Ok(mut state) = state.try_borrow_mut()
+        {
+            state.kept.set_suspended(suspended);
+            if !suspended && kept_messages::paint(&app, &mut state) {
+                refresh_thread_rows(&app, &state);
+            }
+        }
         composer::main_window_suspended(suspended);
         if suspended {
             app.global::<ReaderUi>().set_email_tiles(ModelRc::default());
@@ -8090,6 +8195,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if renderer.borrow_mut().release_caches(until) {
             let tiles = renderer.borrow().retained_tiles();
             mail_render_projection::retain_email_tiles(&ReaderRef::main(&app), tiles);
+        }
+        if let Ok(mut state) = state.try_borrow_mut() {
+            state.kept.release_caches(until);
         }
         mail_view_model::release_sender_images();
         let core = state.borrow().core.clone();
