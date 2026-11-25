@@ -339,6 +339,7 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                 immediate_follow_up: false,
                 list_status: false,
                 inbox_pushed: PushedChanges::default(),
+                folders: FolderSync::default(),
             },
         ),
     )
@@ -471,6 +472,7 @@ async fn count_inbox_without_list_status(inbox_uid_next: u32) -> (Vec<String>, O
             immediate_follow_up: false,
             list_status: offered.list_status,
             inbox_pushed: PushedChanges::default(),
+            folders: FolderSync::default(),
         },
     )
     .await
@@ -1108,6 +1110,7 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
             immediate_follow_up: false,
             list_status: false,
             inbox_pushed: PushedChanges::default(),
+            folders: FolderSync::default(),
         },
     )
     .await
@@ -1166,6 +1169,7 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
             immediate_follow_up: false,
             list_status: false,
             inbox_pushed: PushedChanges::default(),
+            folders: FolderSync::default(),
         },
     )
     .await
@@ -1266,7 +1270,7 @@ async fn waiting_mail_stays_until_each_folder_was_searched() {
         })
         .await
         .unwrap();
-    settle_unlinked_mail(&ctx, &config, &mut session)
+    settle_unlinked_mail(&ctx, &config, &mut session, &Default::default())
         .await
         .unwrap();
     assert!(still_there(&ctx, waiting).await);
@@ -1282,7 +1286,7 @@ async fn waiting_mail_stays_until_each_folder_was_searched() {
         })
         .await
         .unwrap();
-    settle_unlinked_mail(&ctx, &config, &mut session)
+    settle_unlinked_mail(&ctx, &config, &mut session, &Default::default())
         .await
         .unwrap();
     assert!(still_there(&ctx, waiting).await);
@@ -1293,7 +1297,7 @@ async fn waiting_mail_stays_until_each_folder_was_searched() {
         .await
         .unwrap();
     assert!(
-        settle_unlinked_mail(&ctx, &config, &mut session)
+        settle_unlinked_mail(&ctx, &config, &mut session, &Default::default())
             .await
             .is_err()
     );
@@ -1424,7 +1428,7 @@ async fn waiting_mail_is_matched_with_the_server_or_removed() {
         .unwrap();
     let mut events = ctx.bus.subscribe();
     let mut session = None;
-    settle_unlinked_mail(&ctx, &config, &mut session)
+    settle_unlinked_mail(&ctx, &config, &mut session, &Default::default())
         .await
         .unwrap();
     if let Some(session) = session.take() {
@@ -1620,6 +1624,7 @@ async fn list_status_opens_only_the_folders_that_changed() {
             immediate_follow_up: false,
             list_status: offered.list_status,
             inbox_pushed: PushedChanges::default(),
+            folders: FolderSync::default(),
         },
     )
     .await
@@ -1859,6 +1864,7 @@ async fn a_folder_the_server_no_longer_has_does_not_stop_the_cycle() {
             immediate_follow_up: false,
             list_status: offered.list_status,
             inbox_pushed: PushedChanges::default(),
+            folders: FolderSync::default(),
         },
     )
     .await
@@ -1972,6 +1978,7 @@ async fn a_refused_folder_the_server_still_lists_is_not_listed_again() {
                 immediate_follow_up: false,
                 list_status: offered.list_status,
                 inbox_pushed: PushedChanges::default(),
+                folders: FolderSync::default(),
             },
         )
         .await;
@@ -2778,6 +2785,7 @@ fn spawn_actor(
         pool_tx,
         hist_tx,
         settings_rx,
+        FolderChecks::default(),
     ));
     (tx, actor)
 }
@@ -2872,4 +2880,116 @@ async fn a_wait_the_server_named_is_kept_when_someone_asks_for_a_check() {
 
     tx.send(SyncCmd::Shutdown).await.unwrap();
     actor.await.unwrap();
+}
+
+/// A folder this device leaves out of its sync isn't opened by a cycle,
+/// though the server reports a change in it, until it's opened in the app,
+/// which checks it in full (#253).
+#[tokio::test]
+async fn folders_left_out_of_sync_wait_until_they_are_opened() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => {
+                format!("* CAPABILITY IMAP4rev1 IDLE LIST-STATUS\r\n{tag} OK capability\r\n")
+            }
+            "LIST" => format!(
+                "* LIST () \"/\" INBOX\r\n\
+                 * STATUS INBOX (MESSAGES 3 UIDNEXT 10 UNSEEN 1 UIDVALIDITY 7)\r\n\
+                 * LIST () \"/\" Groups\r\n\
+                 * STATUS Groups (MESSAGES 50 UIDNEXT 51 UNSEEN 4 UIDVALIDITY 7)\r\n\
+                 * LIST () \"/\" Lists\r\n\
+                 * STATUS Lists (MESSAGES 50 UIDNEXT 51 UNSEEN 4 UIDVALIDITY 7)\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            "SELECT" => {
+                let (exists, uid_next) = if command.contains("INBOX") {
+                    (3, 10)
+                } else {
+                    (50, 51)
+                };
+                format!(
+                    "* {exists} EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                     * OK [UIDNEXT {uid_next}] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            "UID" if fields[2] == "FETCH" => {
+                assert!(command.contains("FLAGS"), "{command:?}");
+                format!("* 1 FETCH (UID 50 FLAGS (\\Seen))\r\n{tag} OK fetched\r\n")
+            }
+            "UID" if fields[2] == "SEARCH" => format!("* SEARCH 50\r\n{tag} OK searched\r\n"),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox.id;
+    let (groups_mail, lists_id, lists_mail) = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
+            repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
+            let groups_id = synced_folder(conn, account_id, "Groups", 51, 50, 5)?;
+            let lists_id = synced_folder(conn, account_id, "Lists", 51, 50, 5)?;
+            Ok((
+                seed_unread(conn, account_id, groups_id, 50)?,
+                lists_id,
+                seed_unread(conn, account_id, lists_id, 50)?,
+            ))
+        })
+        .await
+        .unwrap();
+    let read = |message_id: i64| {
+        let ctx = ctx.clone();
+        async move {
+            ctx.db
+                .read(move |conn| Ok(repo::messages::get_row(conn, message_id)?.unwrap().is_read))
+                .await
+                .unwrap()
+        }
+    };
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let (hist_tx, _hist_rx) = mpsc::channel(1);
+    let unsynced = std::collections::BTreeSet::from(["Lists".to_owned()]);
+    for (cycle, checks) in [(1, HashSet::new()), (2, HashSet::from([lists_id]))] {
+        run_cycle(
+            &ctx,
+            &config,
+            &mut session,
+            &hist_tx,
+            &mut None,
+            &mut listed_now(),
+            CycleMode {
+                cycle,
+                foreground_only: false,
+                immediate_follow_up: false,
+                list_status: true,
+                inbox_pushed: PushedChanges::default(),
+                folders: FolderSync {
+                    unsynced: unsynced.clone(),
+                    checks,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        if cycle == 1 {
+            assert_eq!(
+                selected_folders(&commands.lock().unwrap()),
+                ["INBOX", "Groups"]
+            );
+            assert!(read(groups_mail).await);
+            assert!(!read(lists_mail).await);
+        }
+    }
+    imap::logout(session).await;
+    server.await.unwrap();
+    assert!(selected_folders(&commands.lock().unwrap()).contains(&"Lists"));
+    assert!(read(lists_mail).await);
 }

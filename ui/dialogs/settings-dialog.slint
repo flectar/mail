@@ -37,6 +37,7 @@ import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { FolderRoles, FolderRolesDialog } from "../folder-roles.slint";
+import { FolderVisibility, FoldersDialog } from "../folder-visibility.slint";
 import { SenderPicker } from "../components/sender-picker.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { InterfaceText, TypeScale } from "../typography.slint";
@@ -534,6 +535,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <int> undo_send_seconds: 10;
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
+    in-out property <bool> compose_in_window: false;
     in-out property <string> compose_text_size: "normal";
     // When an opened unread message counts as read: "immediately",
     // "afterTwoSeconds", "afterFiveSeconds" or "never".
@@ -643,6 +645,10 @@ export component SettingsDialog inherits Rectangle {
     private property <int> folder-roles-id: -1;
     private property <int> folder-roles-index: -1;
     private property <AccountRow> folder-roles-account: root.connected_accounts[root.folder-roles-index];
+    // The account whose Folders dialog is open (#253), or -1.
+    private property <int> folders-id: -1;
+    private property <int> folders-index: -1;
+    private property <AccountRow> folders-account: root.connected_accounts[root.folders-index];
     private property <string> profile-editor-error: "";
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -673,6 +679,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
+    callback save_compose_in_window(bool);
     callback save_mark_read(string);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -1322,6 +1329,17 @@ export component SettingsDialog inherits Rectangle {
         root.folder-roles-index = -1;
     }
 
+    function open-folders(account: AccountRow, index: int) {
+        root.folders-id = account.id;
+        root.folders-index = index;
+        FolderVisibility.load(account.id);
+    }
+
+    function close-folders() {
+        root.folders-id = -1;
+        root.folders-index = -1;
+    }
+
     function add-caldav(account: AccountRow) {
         root.caldav_account_id = account.id;
         root.caldav_connection_id = -1;
@@ -1819,6 +1837,20 @@ export component SettingsDialog inherits Rectangle {
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-compose-size(index); }
+                                    }
+                                    // Phones have one window.
+                                    if WindowChrome.available : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if WindowChrome.available : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Write in a new window");
+                                        description: @tr("New messages, replies, forwards and drafts open in a window of their own, so your mail stays in view.");
+                                        checked: root.compose_in_window;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.compose_in_window = checked;
+                                            root.save_compose_in_window(checked);
+                                        }
                                     }
                                 }
                             }
@@ -2953,6 +2985,8 @@ export component SettingsDialog inherits Rectangle {
                                 // IMAP and JMAP accounts download messages ahead of time
                                 // in the background, which this turns down or up (#253).
                                 private property <bool> has-download: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
+                                // Which folders show (#253): Gmail's labels are its own.
+                                private property <bool> has-shown-folders: account.mail_protocol == "imap" || account.mail_protocol == "jmap" || account.mail_protocol == "pop3";
                                 // Gmail's servers keep the standard wait.
                                 private property <bool> has-timeout: account.mail_protocol == "imap" || account.mail_protocol == "pop3" || account.mail_protocol == "jmap";
                                 private property <bool> unencrypted: account.incoming_security == "none" || (!account.receive_only && account.smtp_security == "none");
@@ -3004,7 +3038,8 @@ export component SettingsDialog inherits Rectangle {
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height
                                         : self.timeout-end;
-                                private property <length> contacts-end: root.compact ? self.kind-end : contacts-row.y + contacts-row.height - self.plain-end;
+                                private property <length> shown-end: self.has-shown-folders ? shown-row.y + shown-row.height - self.plain-end : self.kind-end;
+                                private property <length> contacts-end: root.compact ? self.shown-end : contacts-row.y + contacts-row.height - self.plain-end;
                                 private property <length> expanded-height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 height: self.expanded ? self.expanded-height : self.collapsed-height;
                                 animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
@@ -3372,11 +3407,45 @@ export component SettingsDialog inherits Rectangle {
                                             font-size: TypeScale.caption;
                                             wrap: word-wrap;
                                         }
+                                        // Which folders show in the sidebar (#253).
+                                        shown-row := Rectangle {
+                                            visible: drop-target.has-shown-folders;
+                                            x: drop-target.content-x;
+                                            y: drop-target.kind-end + drop-target.gap - drop-target.plain-lead;
+                                            width: parent.width - self.x - 16px;
+                                            height: 12px + shown-label.height + shown-description.height;
+                                            shown-label := Text {
+                                                x: 0px; y: drop-target.plain-top;
+                                                width: parent.width - shown-button.width - 16px; height: max(20px, self.preferred-height);
+                                                text: @tr("Folders");
+                                                color: root.body-text;
+                                                font-size: TypeScale.body;
+                                                font-weight: 600;
+                                                vertical-alignment: center;
+                                            }
+                                            shown-description := Text {
+                                                x: 0px; y: shown-label.y + shown-label.height + 1px;
+                                                width: shown-label.width; height: max(18px, self.preferred-height);
+                                                text: account.mail_protocol == "imap" ? @tr("Which folders show in the sidebar and sync") : @tr("Which folders show in the sidebar");
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                                vertical-alignment: center;
+                                            }
+                                            shown-button := Button {
+                                                x: parent.width - self.width;
+                                                y: drop-target.plain-control-y;
+                                                width: 136px;
+                                                height: 34px;
+                                                text: @tr("Choose…");
+                                                clicked => { root.open-folders(account, account-index); }
+                                            }
+                                        }
                                         // Contacts from the account's CardDAV server.
                                         contacts-row := Rectangle {
                                             visible: !root.compact;
                                             x: drop-target.content-x;
-                                            y: drop-target.kind-end + drop-target.gap - drop-target.plain-lead;
+                                            y: drop-target.shown-end + drop-target.gap - drop-target.plain-lead;
                                             width: parent.width - self.x - 16px;
                                             height: 12px + contacts-label.height + contacts-description.height;
                                             contacts-label := Text {
@@ -5044,6 +5113,27 @@ export component SettingsDialog inherits Rectangle {
                 AccountMailPreferences.default-sender-index = index;
             }
             close => { AccountMailPreferences.default-sender-picker-open = false; }
+        }
+
+        if root.folders-id >= 0
+            && root.folders-account.id == root.folders-id : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: @tr("Folders of {}", root.folders-account.email);
+
+            TouchArea { clicked => { root.close-folders(); } }
+            FoldersDialog {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(480px, parent.width - 24px);
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                account: root.folders-account;
+                close => { root.close-folders(); }
+            }
         }
 
         if root.folder-roles-id >= 0

@@ -9,6 +9,7 @@ export { ZoomApi } from "components/zoom-controls.slint";
 export { ReadReceipts, ReturnedReceipt } from "read-receipts.slint";
 export { FolderRoles, FolderRoleRow } from "folder-roles.slint";
 export { MessageSource } from "message-source.slint";
+export { FolderVisibility, FolderShownRow } from "folder-visibility.slint";
 export { Translation, TranslationLanguage } from "translation.slint";
 export { Ai, AiPromptRow } from "ai.slint";
 export { AiSummary } from "ai-summary.slint";
@@ -405,10 +406,12 @@ export global I18n {
         if (key == "{} of {} folders") { return @tr("{0} of {n} folder" | "{0} of {n} folders" % round(second-argument.to-float()), argument); }
         if (key == "Undo send preference saved.") { return @tr("Undo send preference saved."); }
         if (key == "Text style preference saved.") { return @tr("Text style preference saved."); }
+        if (key == "Writing window preference saved.") { return @tr("Writing window preference saved."); }
         if (key == "Could not save notifications: {}") { return @tr("Could not save notifications: {}", argument); }
         if (key == "Could not save the update preference: {}") { return @tr("Could not save the update preference: {}", argument); }
         if (key == "Could not save the undo send preference: {}") { return @tr("Could not save the undo send preference: {}", argument); }
         if (key == "Could not save the text style preference: {}") { return @tr("Could not save the text style preference: {}", argument); }
+        if (key == "Could not save the writing window preference: {}") { return @tr("Could not save the writing window preference: {}", argument); }
         if (key == "Could not save the signature: {}") { return @tr("Could not save the signature: {}", argument); }
         if (key == "Sync interval is active for this session.") { return @tr("Sync interval is active for this session."); }
         if (key == "Sync interval set to {} minutes.") { return @tr("Sync interval set to {} minutes.", argument); }
@@ -837,6 +840,9 @@ export global I18n {
         if (key == "Could not create folder: {}") { return @tr("Could not create folder: {}", argument); }
         if (key == "Could not rename folder: {}") { return @tr("Could not rename folder: {}", argument); }
         if (key == "Could not delete folder: {}") { return @tr("Could not delete folder: {}", argument); }
+        if (key == "Folder hidden. Show it again in Settings → Accounts.") { return @tr("Folder hidden. Show it again in Settings → Accounts."); }
+        if (key == "Could not hide folder: {}") { return @tr("Could not hide folder: {}", argument); }
+        if (key == "Could not change the folder: {}") { return @tr("Could not change the folder: {}", argument); }
         if (key == "Could not close preview: {}") { return @tr("Could not close preview: {}", argument); }
         if (key == "Opened the system print view.") { return @tr("Opened the system print view."); }
         if (key == "Could not print message: {}") { return @tr("Could not print message: {}", argument); }
@@ -1093,6 +1099,8 @@ export component AppWindow inherits Window {
     callback create_folder(int, int, string);
     callback rename_folder(int, string);
     callback delete_folder(int);
+    // Hide a folder from the sidebar and the Move to list (#253).
+    callback hide_folder(int);
     callback load_more();
     callback load_earlier_mail();
     callback sync_mail();
@@ -1151,6 +1159,7 @@ export component AppWindow inherits Window {
     callback save_sync_interval(int);
     callback save_undo_send(int);
     callback save_compose_text_style(string, string);
+    callback save_compose_in_window(bool);
     callback save_mark_read(string);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -1523,6 +1532,8 @@ export component AppWindow inherits Window {
     in-out property <int> undo_send_seconds: 10;
     // The font and size new messages start in.
     in-out property <string> compose_font: "default";
+    // On the desktop, messages are written in a window of their own (#254).
+    in-out property <bool> compose_in_window: false;
     in-out property <string> compose_text_size: "normal";
     in-out property <string> mark_read: "immediately";
     in-out property <bool> collect_outgoing_contacts: true;
@@ -2074,6 +2085,7 @@ export component AppWindow inherits Window {
             }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
+            request_folder_hide(id) => { root.hide_folder(id); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
             request_label_delete(id, name, account, global, has-descendants) => {
                 root.open-label-delete(id, name, account, global, has-descendants);
@@ -2391,6 +2403,7 @@ export component AppWindow inherits Window {
             sync_interval_minutes <=> root.sync_interval_minutes;
             undo_send_seconds <=> root.undo_send_seconds;
             compose_font <=> root.compose_font;
+            compose_in_window <=> root.compose_in_window;
             compose_text_size <=> root.compose_text_size;
             mark_read <=> root.mark_read;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
@@ -2504,6 +2517,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_undo_send(seconds) => { root.save_undo_send(seconds); }
             save_compose_text_style(font, size) => { root.save_compose_text_style(font, size); }
+            save_compose_in_window(enabled) => { root.save_compose_in_window(enabled); }
             save_mark_read(choice) => { root.save_mark_read(choice); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }

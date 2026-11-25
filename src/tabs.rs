@@ -3014,6 +3014,7 @@ mod tests {
             can_create_children: true,
             can_rename: true,
             can_delete: true,
+            can_hide: false,
             label: "Folder".into(),
             scope: Some(Scope::Folder(folder_id)),
             context: String::new(),

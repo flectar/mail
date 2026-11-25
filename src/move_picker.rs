@@ -596,6 +596,7 @@ mod tests {
             can_create_children: false,
             can_rename: false,
             can_delete: false,
+            can_hide: false,
             label: label.into(),
             scope: Some(scope),
             context: if account_id == 1 { "Work" } else { "Home" }.into(),

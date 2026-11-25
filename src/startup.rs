@@ -192,6 +192,8 @@ pub(crate) struct WarmStartMailbox {
     pub(crate) can_rename: bool,
     #[serde(default)]
     pub(crate) can_delete: bool,
+    #[serde(default)]
+    pub(crate) can_hide: bool,
     pub(crate) label: String,
     /// Absent for account headings, which are not navigation targets.
     #[serde(default)]
@@ -224,6 +226,7 @@ impl From<&mail::MailboxEntry> for WarmStartMailbox {
             can_create_children: mailbox.can_create_children,
             can_rename: mailbox.can_rename,
             can_delete: mailbox.can_delete,
+            can_hide: mailbox.can_hide,
             label: mailbox.label.clone(),
             scope: mailbox.scope,
             context: mailbox.context.clone(),
@@ -248,6 +251,7 @@ impl From<WarmStartMailbox> for mail::MailboxEntry {
             can_create_children: mailbox.can_create_children,
             can_rename: mailbox.can_rename,
             can_delete: mailbox.can_delete,
+            can_hide: mailbox.can_hide,
             label: mailbox.label,
             scope: mailbox.scope,
             context: mailbox.context,
@@ -1014,6 +1018,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     });
     app.set_undo_send_seconds(i32::try_from(settings.undo_send_seconds.clamp(0, 30)).unwrap_or(10));
     app.set_compose_font(settings.compose_font.as_str().into());
+    app.set_compose_in_window(settings.compose_in_window);
     app.set_compose_text_size(settings.compose_text_size.as_str().into());
     app.set_mark_read(settings.mark_read.as_str().into());
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
@@ -1479,6 +1484,7 @@ mod warm_start_tests {
             can_create_children: true,
             can_rename: false,
             can_delete: false,
+            can_hide: false,
             label: "Inbox".into(),
             scope: Some(PERSON_INBOX),
             context: "Person".into(),

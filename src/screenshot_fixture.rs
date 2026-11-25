@@ -164,6 +164,7 @@ fixture_row!(MailboxRow {
     can_create_children,
     can_rename,
     can_delete,
+    can_hide,
     label_has_emoji,
     label,
     scope,

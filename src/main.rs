@@ -46,6 +46,7 @@ mod files_controller;
 #[cfg(all(linux_desktop, feature = "flatpak"))]
 mod flatpak_secrets;
 mod folder_roles;
+mod folder_visibility;
 mod han_fallback;
 mod import_controller;
 mod invitation;
@@ -142,6 +143,8 @@ mod updates;
 mod when_picker;
 mod window_chrome;
 mod window_controller;
+#[cfg(desktop)]
+mod window_places;
 mod word_diff;
 
 slint::include_modules!();
@@ -490,6 +493,34 @@ enum MailListUpdateKind {
 
 struct MailMetadataUpdate {
     result: Result<mail::MailMetadata, String>,
+}
+
+/// A folder and every folder in it, as the sidebar lists them.
+fn folder_tree_ids(mailboxes: &[MailboxEntry], folder_id: i64) -> Vec<i64> {
+    let parents = mailboxes
+        .iter()
+        .filter(|mailbox| mailbox.folder_id >= 0)
+        .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
+        .collect::<HashMap<_, _>>();
+    std::iter::once(folder_id)
+        .chain(
+            parents
+                .keys()
+                .copied()
+                .filter(|&folder| folder != folder_id),
+        )
+        .filter(|&folder| {
+            let mut candidate = folder;
+            let mut visited = HashSet::new();
+            while candidate >= 0 && visited.insert(candidate) {
+                if candidate == folder_id {
+                    return true;
+                }
+                candidate = parents.get(&candidate).copied().unwrap_or(-1);
+            }
+            false
+        })
+        .collect()
 }
 
 struct FolderMutationUpdate {
@@ -1989,6 +2020,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    // The window comes back at the size and place it had (#254).
+    #[cfg(desktop)]
+    {
+        window_places::install(&platform.paths.data_dir, &runtime);
+        window_places::restore(window_places::Kind::Main, &app);
+    }
     motion::watch(&app, &runtime);
     app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
@@ -2037,6 +2074,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         startup_metrics.emit("started_in_tray", serde_json::Value::Null);
     } else {
         renderer_preferences::initialize_step(use_wgpu, || app.show())?;
+        #[cfg(desktop)]
+        window_places::shown(window_places::Kind::Main, &app);
         startup_metrics.emit(
             "window_shown",
             serde_json::json!({
@@ -3934,7 +3973,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let delete_folder_state = Rc::clone(&state);
     let delete_folder_runtime = runtime.clone();
-    let delete_folder_updates = folder_tx;
+    let delete_folder_updates = folder_tx.clone();
     app.on_delete_folder(move |folder_id| {
         let Some(core) = delete_folder_state.borrow().core.clone() else {
             return;
@@ -3942,33 +3981,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let folder_id = i64::from(folder_id);
         let (current_scope, removed_folders) = {
             let state = delete_folder_state.borrow();
-            let parents = state
-                .mailboxes
-                .iter()
-                .filter(|mailbox| mailbox.folder_id >= 0)
-                .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
-                .collect::<HashMap<_, _>>();
-            // The folder and everything under it.
-            let removed_folders = std::iter::once(folder_id)
-                .chain(
-                    parents
-                        .keys()
-                        .copied()
-                        .filter(|&folder| folder != folder_id),
-                )
-                .filter(|&folder| {
-                    let mut candidate = folder;
-                    let mut visited = HashSet::new();
-                    while candidate >= 0 && visited.insert(candidate) {
-                        if candidate == folder_id {
-                            return true;
-                        }
-                        candidate = parents.get(&candidate).copied().unwrap_or(-1);
-                    }
-                    false
-                })
-                .collect::<Vec<_>>();
-            (state.scope, removed_folders)
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
         };
         let selected_folder_is_deleted = matches!(
             current_scope,
@@ -3998,6 +4011,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     reveal_parent_id: None,
                     issued_scope: current_scope,
                     removed_folders,
+                })
+                .await;
+        });
+    });
+    // Hiding a folder takes it and the folders in it from the sidebar, as
+    // deleting would, and a list showing one goes to the inbox (#253).
+    let hide_folder_state = Rc::clone(&state);
+    let hide_folder_runtime = runtime.clone();
+    let hide_folder_updates = folder_tx;
+    app.on_hide_folder(move |folder_id| {
+        let Some(core) = hide_folder_state.borrow().core.clone() else {
+            return;
+        };
+        let folder_id = i64::from(folder_id);
+        let (current_scope, hidden_folders) = {
+            let state = hide_folder_state.borrow();
+            (state.scope, folder_tree_ids(&state.mailboxes, folder_id))
+        };
+        let scope = if matches!(current_scope, Scope::Folder(id) if hidden_folders.contains(&id)) {
+            Scope::UNIFIED_INBOX
+        } else {
+            current_scope
+        };
+        let updates = hide_folder_updates.clone();
+        hide_folder_runtime.spawn(async move {
+            let result = core.set_folder_hidden(folder_id, true).await;
+            let metadata = if result.is_ok() {
+                core.load_mail_metadata(scope).await.ok()
+            } else {
+                None
+            };
+            let message = match result {
+                Ok(()) => UiMessage::plain("Folder hidden. Show it again in Settings → Accounts."),
+                Err(error) => UiMessage::detail("Could not hide folder: {}", error),
+            };
+            let _ = updates
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                    issued_scope: current_scope,
+                    removed_folders: hidden_folders,
                 })
                 .await;
         });
@@ -6709,6 +6764,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     read_receipts::install(&app, &state, &runtime);
     folder_roles::install(&app, &state, &runtime);
     message_source::install(&app, &state, &runtime, platform.documents.clone());
+    folder_visibility::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);
@@ -7612,11 +7668,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .set(mail_pagination_generation_for_scope.get().wrapping_add(1));
         mail_pagination_in_progress_for_scope.set(false);
         app.set_mail_loading_more(false);
+        let scope = scope.parse().unwrap_or(Scope::UNIFIED_INBOX);
+        // A folder this device doesn't sync is checked as it's opened (#253).
+        if let Scope::Folder(folder_id) = scope
+            && let Some(core) = state_for_scope.borrow().core.clone()
+        {
+            runtime_for_scope.spawn(async move {
+                if let Err(error) = core.check_folder(folder_id).await {
+                    tracing::debug!(folder_id, %error, "an opened folder couldn't be checked");
+                }
+            });
+        }
         {
             let mut state = state_for_scope.borrow_mut();
             // An unknown key cannot come from the sidebar; keep the inbox
             // reachable rather than presenting a list for no mailbox.
-            state.set_scope(scope.parse().unwrap_or(Scope::UNIFIED_INBOX));
+            state.set_scope(scope);
             state.pending_selection = None;
             state.pending_selection_opens = false;
             state.restore_thread_message = None;
@@ -8062,6 +8129,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     };
     // Timers stop with the event loop, so a pending tab save is written now.
     app.global::<TabsUi>().invoke_flush();
+    // And where the windows were.
+    #[cfg(desktop)]
+    window_places::flush();
     // So are the messages still being written.
     composer::save_open_messages();
     // Messages sent with an undo delay leave now, not at the next start.
