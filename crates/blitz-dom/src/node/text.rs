@@ -88,6 +88,9 @@ pub struct TextLayout {
     /// nothing in them, so its lines are zero-height line boxes (CSS 2.1
     /// section 9.4.2).
     pub only_collapsible_space: bool,
+    /// The byte ranges of `text` where a preserved tab is laid out as the
+    /// spaces up to its tab stop, which copied text gives back as the tab.
+    pub tabs: Vec<std::ops::Range<usize>>,
 }
 
 impl TextLayout {

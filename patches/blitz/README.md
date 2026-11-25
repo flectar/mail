@@ -57,6 +57,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0037 compressible block-level images | A block-level image or other replaced element whose `max-width` is a percentage adds nothing to its column's minimum width, as an inline one already didn't, since the percentage resolves against zero for its min-content contribution (CSS Sizing 3 section 5.2.2), as in Blink. Taffy took its set width as fixed when it sized the cell to its content, so on phones a column holding a `display: block` image, as most mail images are, couldn't shrink below the image's width and squeezed the text beside it. An image showing its alt text keeps its width, as a broken image does in Chrome. |
 | 0038 percentage columns fill their table | The percentage columns of a table with a set width and no other columns share all of its width in proportion to their percentages, as in browsers, also when the percentages add up to less than 100% or a column's content outgrows its percentage. They became grid tracks with their percentages as flex factors, and grid takes factors that sum to less than 1 as summing to 1, so part of the table stayed empty, a gap that showed beside cells with a background colour. |
 | 0039 last baselines of block containers | A block container's last baseline is that of its last in-flow child that has one, which an inline block sits on (CSS 2.1 section 10.8.1), as in browsers. Taffy's block layout reports a first baseline only, so an inline block whose lines are in block children, such as paragraphs, lined up with its first line instead of its last, and a one-line inline block beside it sat at the top. Measured in a table cell, such a block is laid out to find that baseline. |
+| 0040 tab stops | A preserved tab, in `<pre>` or other text whose white space is kept, advances to the next multiple of `tab-size` columns (CSS Text 3 section 4.2), laid out as the spaces up to that stop, which is what browsers draw in a monospace font. Parley has no tab stops and drew each tab as a missing glyph, so plain-text mail with tab-separated columns showed boxes. In a proportional font, as the reader's plain-text view has, the columns line up roughly. Copied text gives the tabs back. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
@@ -64,7 +65,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0033 and 0035 to 0039 are local, and upstream main collects selection ranges as beta.4 does. 0034 backports upstream #1375 and #1449. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. 0009 to 0033 and 0035 to 0040 are local, and upstream main collects selection ranges as beta.4 does. 0034 backports upstream #1375 and #1449. Upstream main paints text shadows too (#984), which overlaps 0019. Drop the backported parts
 when a release contains them.
 
 Copied text, find in the reader and accessible names leave out 0011's edge
@@ -140,7 +141,8 @@ captions, 0030's details and summary, 0031's line box content, 0032's
 `:lang()`, 0033's superscript and subscript shifts, 0034's shrink-to-fit widths,
 0035's fixed tables with percentage widths, 0036's measured inline block
 baselines, 0037's compressible block-level images, 0038's percentage
-columns that fill their table and 0039's last baselines of block containers.
+columns that fill their table, 0039's last baselines of block containers
+and 0040's tab stops.
 Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.

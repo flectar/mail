@@ -2400,3 +2400,34 @@ fn an_inline_block_of_blocks_sits_on_its_last_line() {
     close(node(&doc, "#c").final_layout().location.y, 40.0);
     close(node(&doc, "#t").final_layout().size.height, 60.0);
 }
+
+#[test]
+fn a_preserved_tab_advances_to_its_tab_stop_and_copies_as_a_tab() {
+    // A preserved tab advances to the next multiple of `tab-size` columns
+    // (CSS Text 3 section 4.2), which in the monospace font `<pre>` has is
+    // that many spaces, so it is as wide as them, and copies as the tab. It
+    // was drawn as a missing glyph.
+    let mut doc = document(
+        "<style>pre{display:inline-block;margin:0}</style>
+         <div><pre id=a>ab\tc</pre></div>
+         <div><pre id=b>ab      c</pre></div>
+         <div><pre id=c style='tab-size:4'>ab\tc</pre></div>
+         <div><pre id=d>ab  c</pre></div>",
+    );
+    let width = |doc: &HtmlDocument, selector| node(doc, selector).final_layout().size.width;
+    close(width(&doc, "#a"), width(&doc, "#b"));
+    close(width(&doc, "#c"), width(&doc, "#d"));
+    let a = doc.query_selector("#a").unwrap().unwrap();
+    let len = doc
+        .get_node(a)
+        .unwrap()
+        .element_data()
+        .unwrap()
+        .inline_layout_data
+        .as_ref()
+        .unwrap()
+        .text
+        .len();
+    doc.set_text_selection(a, 0, a, len);
+    assert_eq!(doc.get_selected_text().as_deref(), Some("ab\tc"));
+}

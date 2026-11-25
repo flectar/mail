@@ -2926,16 +2926,33 @@ impl BaseDocument {
                 }
             }
         }
-        hidden.sort_by_key(|hidden| hidden.start);
+        // A preserved tab is laid out as the spaces up to its tab stop, and
+        // copies as the tab.
+        let mut replaced: Vec<(std::ops::Range<usize>, &str)> =
+            hidden.into_iter().map(|hidden| (hidden, "")).collect();
+        for tab in &inline_layout.tabs {
+            let tab = tab.start.max(range.start)..tab.end.min(range.end);
+            if !tab.is_empty()
+                && !replaced
+                    .iter()
+                    .any(|(hidden, _)| hidden.contains(&tab.start))
+            {
+                replaced.push((tab, "\t"));
+            }
+        }
+        replaced.sort_by_key(|(replaced, _)| replaced.start);
 
         let text = &inline_layout.text;
         let mut visible = String::new();
         let mut cursor = range.start;
-        for hidden in hidden {
-            if hidden.start > cursor {
-                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
+        for (replaced, with) in replaced {
+            if replaced.start > cursor {
+                visible.push_str(text.get(cursor..replaced.start).unwrap_or_default());
             }
-            cursor = cursor.max(hidden.end);
+            if replaced.start >= cursor {
+                visible.push_str(with);
+            }
+            cursor = cursor.max(replaced.end);
         }
         if cursor < range.end {
             visible.push_str(text.get(cursor..range.end).unwrap_or_default());

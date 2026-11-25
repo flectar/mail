@@ -1,0 +1,174 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index 73be7ec..28ef34d 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -2926,16 +2926,33 @@ impl BaseDocument {
+                 }
+             }
+         }
+-        hidden.sort_by_key(|hidden| hidden.start);
++        // A preserved tab is laid out as the spaces up to its tab stop, and
++        // copies as the tab.
++        let mut replaced: Vec<(std::ops::Range<usize>, &str)> =
++            hidden.into_iter().map(|hidden| (hidden, "")).collect();
++        for tab in &inline_layout.tabs {
++            let tab = tab.start.max(range.start)..tab.end.min(range.end);
++            if !tab.is_empty()
++                && !replaced
++                    .iter()
++                    .any(|(hidden, _)| hidden.contains(&tab.start))
++            {
++                replaced.push((tab, "\t"));
++            }
++        }
++        replaced.sort_by_key(|(replaced, _)| replaced.start);
+ 
+         let text = &inline_layout.text;
+         let mut visible = String::new();
+         let mut cursor = range.start;
+-        for hidden in hidden {
+-            if hidden.start > cursor {
+-                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
++        for (replaced, with) in replaced {
++            if replaced.start > cursor {
++                visible.push_str(text.get(cursor..replaced.start).unwrap_or_default());
++            }
++            if replaced.start >= cursor {
++                visible.push_str(with);
+             }
+-            cursor = cursor.max(hidden.end);
++            cursor = cursor.max(replaced.end);
+         }
+         if cursor < range.end {
+             visible.push_str(text.get(cursor..range.end).unwrap_or_default());
+diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
+index 6f6fd03..e0bb28d 100644
+--- a/crates/blitz-dom/src/layout/construct.rs
++++ b/crates/blitz-dom/src/layout/construct.rs
+@@ -1618,6 +1618,7 @@ pub(crate) fn build_inline_layout_into(
+     });
+     text_layout.text = builder.build_into(&mut text_layout.layout);
+     text_layout.only_collapsible_space = !edges.content_started && !edges.used;
++    text_layout.tabs = std::mem::take(&mut edges.tabs);
+     return;
+ 
+     fn build_inline_layout_recursive(
+@@ -1866,12 +1867,41 @@ pub(crate) fn build_inline_layout_into(
+ 
+                 let text =
+                     text_transformer.transform(&data.content, parent_text_transform, builder);
+-                let collapse = node
++                let parent_style = node
+                     .parent
+-                    .and_then(|parent| nodes[parent].primary_styles())
++                    .and_then(|parent| nodes[parent].primary_styles());
++                let collapse = parent_style
++                    .as_ref()
+                     .map(|s| stylo_to_parley::white_space_collapse(s.clone_white_space_collapse()))
+                     .unwrap_or(WhiteSpaceCollapse::Collapse);
+-                edges.push_text(builder, text, collapse);
++                // Parley has no tab stops and draws a preserved tab as a
++                // missing glyph. A tab advances to the next multiple of
++                // `tab-size` columns from the line's start (CSS Text 3 section
++                // 4.2), which in a monospace font, as `<pre>` has, is that many
++                // spaces, so it becomes them.
++                if matches!(
++                    collapse,
++                    WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::BreakSpaces
++                ) && text.contains('\t')
++                {
++                    let tab_size = parent_style.as_deref().map_or(8, |s| tab_columns(s));
++                    let column = builder
++                        .text()
++                        .rsplit('\n')
++                        .next()
++                        .map_or(0, |line| line.chars().count());
++                    let (expanded, tabs) = expand_tabs(text, column, tab_size);
++                    edges.push_text(builder, &expanded, collapse);
++                    // Preserved text is pushed whole, so it ends the text.
++                    if let Some(start) = builder.text().len().checked_sub(expanded.len()) {
++                        edges.tabs.extend(
++                            tabs.into_iter()
++                                .map(|tab| start + tab.start..start + tab.end),
++                        );
++                    }
++                } else {
++                    edges.push_text(builder, text, collapse);
++                }
+             }
+             NodeData::Comment { .. } => {
+                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+@@ -1965,6 +1995,50 @@ fn inline_edge_widths(style: &style::properties::ComputedValues) -> (f32, f32) {
+     }
+ }
+ 
++/// The columns between tab stops: `tab-size`, taking a length as the
++/// default 8.
++fn tab_columns(style: &style::properties::ComputedValues) -> usize {
++    match style.get_inherited_text().tab_size {
++        style::values::generics::length::LengthOrNumber::Number(columns) => {
++            columns.0.round() as usize
++        }
++        style::values::generics::length::LengthOrNumber::Length(_) => 8,
++    }
++}
++
++/// `text` with each tab replaced by the spaces up to the next multiple of
++/// `tab_size` columns, counting from `column` characters into a line, and
++/// the byte ranges of those spaces.
++fn expand_tabs(
++    text: &str,
++    mut column: usize,
++    tab_size: usize,
++) -> (String, Vec<std::ops::Range<usize>>) {
++    let mut expanded = String::with_capacity(text.len() + tab_size);
++    let mut tabs = Vec::new();
++    for c in text.chars() {
++        match c {
++            '\t' if tab_size == 0 => {}
++            '\t' => {
++                let spaces = tab_size - column % tab_size;
++                let start = expanded.len();
++                expanded.extend(std::iter::repeat_n(' ', spaces));
++                tabs.push(start..expanded.len());
++                column += spaces;
++            }
++            '\n' => {
++                expanded.push(c);
++                column = 0;
++            }
++            _ => {
++                expanded.push(c);
++                column += 1;
++            }
++        }
++    }
++    (expanded, tabs)
++}
++
+ /// A node's `vertical-align` in its line. Blink and WebKit lower `sub` by a
+ /// fifth of the parent's font size and raise `super` by a third of it, each
+ /// plus a device pixel (Blink's `InlineLayoutStateStack::ApplyBaselineShift`).
+@@ -2025,6 +2099,8 @@ struct InlineEdges {
+     end_depth: u32,
+     /// Whether any text may break between any two characters.
+     breaks_anywhere: bool,
++    /// Where preserved tabs were laid out as spaces.
++    tabs: Vec<std::ops::Range<usize>>,
+ }
+ 
+ impl InlineEdges {
+diff --git a/crates/blitz-dom/src/node/text.rs b/crates/blitz-dom/src/node/text.rs
+index 33c8184..05a1cc1 100644
+--- a/crates/blitz-dom/src/node/text.rs
++++ b/crates/blitz-dom/src/node/text.rs
+@@ -88,6 +88,9 @@ pub struct TextLayout {
+     /// nothing in them, so its lines are zero-height line boxes (CSS 2.1
+     /// section 9.4.2).
+     pub only_collapsible_space: bool,
++    /// The byte ranges of `text` where a preserved tab is laid out as the
++    /// spaces up to its tab stop, which copied text gives back as the tab.
++    pub tabs: Vec<std::ops::Range<usize>>,
+ }
+ 
+ impl TextLayout {
