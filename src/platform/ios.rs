@@ -2,6 +2,7 @@
 //! build.rs; this module owns their Rust side.
 mod documents;
 mod oauth;
+mod qr_scanner;
 mod security;
 mod spelling;
 
@@ -212,7 +213,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
         app_language: crate::AppLanguage::default(),
         // The app's own, through crate::platform::spell_checker.
         spelling: None,
-        qr_scanner: None,
+        qr_scanner: Some(Arc::new(qr_scanner::IosQrScanner)),
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),
