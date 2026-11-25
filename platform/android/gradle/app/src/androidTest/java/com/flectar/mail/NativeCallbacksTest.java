@@ -103,6 +103,20 @@ public final class NativeCallbacksTest {
     }
 
     @Test
+    public void qrScanResultsResolve() throws Throwable {
+        invoke("nativeNotificationPermissionAnswered", new Class<?>[]{});
+        // The scanner's answer with no scan waiting, which Rust ignores.
+        Method result = QrScanner.class.getDeclaredMethod(
+                "nativeResult", String.class, String.class);
+        result.setAccessible(true);
+        try {
+            result.invoke(null, null, null);
+        } catch (InvocationTargetException error) {
+            throw error.getCause();
+        }
+    }
+
+    @Test
     public void everyNativeDeclarationHasACallbackTest() {
         Set<String> declarations = new HashSet<>();
         for (Method method : FlectarActivity.class.getDeclaredMethods()) {

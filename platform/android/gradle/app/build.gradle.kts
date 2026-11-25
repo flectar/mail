@@ -89,6 +89,8 @@ dependencies {
     // AuthorizationClient is Google's supported API for authorizing an
     // Android application to Gmail and other Google user data.
     implementation("com.google.android.gms:play-services-auth:21.6.0")
+    // Google's code scanner, for pairing devices by QR code (QrScanner).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
