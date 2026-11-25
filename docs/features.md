@@ -193,8 +193,8 @@ the sidebar (right-click, or hold a finger on it on a phone) checks just that
 account.
 
 While a check runs for more than a moment, a small spinner turns beside the
-account's name in the sidebar; it holds still while motion is reduced. When the
-server doesn't accept an account's sign-in, or its checks keep failing for a
+account's name in the sidebar; while motion is reduced, it pulses in place. When
+the server doesn't accept an account's sign-in, or its checks keep failing for a
 minute, a red marker takes its place. Click or tap the marker to see why, with
 **Try again** to check right away, or **Sign in again** when the sign-in needs
 renewing. After a check you asked for, the marker shows at once. Flectar Mail
