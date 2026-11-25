@@ -31,7 +31,9 @@ use semantics::*;
 #[cfg(feature = "gpu-renderer")]
 use slint::wgpu_30::wgpu;
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
+    rc::Rc,
     sync::{
         Arc, LazyLock,
         atomic::{AtomicU8, AtomicUsize, Ordering},
@@ -173,9 +175,15 @@ pub struct RenderedEmail {
     pub links: Vec<EmailLink>,
 }
 
-pub struct GpuEmailRenderer {
+/// What every message a window shows can share: Vello's GPU pipeline on
+/// Slint's device, the CPU painter with its prepared glyphs and converted
+/// images, and whether the window is suspended or the system is short of
+/// memory. Each `GpuEmailRenderer` keeps one message, and renderers made with
+/// the same backend paint with it in turn. The painter's image cache is keyed
+/// by each image's own blob, so messages never see each other's images.
+#[derive(Default)]
+pub struct PaintBackend {
     suspended: bool,
-    email: Option<PreparedEmail>,
     #[cfg(feature = "gpu-renderer")]
     renderer: Option<vello::Renderer>,
     #[cfg(feature = "gpu-renderer")]
@@ -184,12 +192,37 @@ pub struct GpuEmailRenderer {
     scene: vello::Scene,
     #[cfg(all(test, feature = "gpu-renderer"))]
     gpu_teardown_count: usize,
+    cpu_painter: Option<VelloCpuImageRenderer>,
+    cpu_size: (u32, u32),
+    /// No overscan is painted before this, after the system reported memory
+    /// pressure.
+    low_memory_until: Option<Instant>,
+    /// Counts the times the GPU device was given up. Tiles painted before the
+    /// last time may belong to a device that is gone, whichever renderer gave
+    /// it up.
+    device_generation: u64,
+}
+
+impl PaintBackend {
+    #[cfg(feature = "gpu-renderer")]
+    fn shares_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        self.gpu_context
+            .as_ref()
+            .is_some_and(|(active_device, active_queue)| {
+                active_device == device && active_queue == queue
+            })
+    }
+}
+
+pub struct GpuEmailRenderer {
+    backend: Rc<RefCell<PaintBackend>>,
+    /// The backend's `device_generation` when `tiles` were painted.
+    tiles_generation: u64,
+    email: Option<PreparedEmail>,
     last_size: Option<(u32, u32, u32, u32, u32)>,
     dirty: bool,
     paint_dirty: bool,
     painted_selection: Vec<(NodeId, usize, usize)>,
-    cpu_painter: Option<VelloCpuImageRenderer>,
-    cpu_size: (u32, u32),
     tile_work_limit: usize,
     pub preparation_viewport: (u32, u32, f32),
     appearance: EmailAppearance,
@@ -225,9 +258,6 @@ pub struct GpuEmailRenderer {
     tiles: BTreeMap<u32, RenderedEmailTile>,
     /// Height of `tiles` in document pixels; see `email_tile_height`.
     tile_height: f32,
-    /// No overscan is painted before this, after the system reported memory
-    /// pressure.
-    low_memory_until: Option<Instant>,
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     resource_runtime: Option<tokio::runtime::Handle>,
@@ -240,23 +270,22 @@ pub struct GpuEmailRenderer {
 
 impl Default for GpuEmailRenderer {
     fn default() -> Self {
+        Self::with_backend(Rc::default())
+    }
+}
+
+impl GpuEmailRenderer {
+    /// A renderer that paints with `backend`, which other renderers may share.
+    pub fn with_backend(backend: Rc<RefCell<PaintBackend>>) -> Self {
+        let tiles_generation = backend.borrow().device_generation;
         Self {
-            suspended: false,
+            backend,
+            tiles_generation,
             email: None,
-            #[cfg(feature = "gpu-renderer")]
-            renderer: None,
-            #[cfg(feature = "gpu-renderer")]
-            gpu_context: None,
-            #[cfg(feature = "gpu-renderer")]
-            scene: vello::Scene::new(),
-            #[cfg(all(test, feature = "gpu-renderer"))]
-            gpu_teardown_count: 0,
             last_size: None,
             dirty: false,
             paint_dirty: false,
             painted_selection: Vec::new(),
-            cpu_painter: None,
-            cpu_size: (0, 0),
             tile_work_limit: usize::MAX,
             preparation_viewport: (INITIAL_WIDTH, INITIAL_HEIGHT, 1.0),
             appearance: EmailAppearance::default(),
@@ -289,7 +318,6 @@ impl Default for GpuEmailRenderer {
             visible_height: INITIAL_HEIGHT as f32,
             tiles: BTreeMap::new(),
             tile_height: EMAIL_TILE_HEIGHT,
-            low_memory_until: None,
             pointer_down: false,
             last_pointer_down: None,
             resource_runtime: None,
@@ -300,9 +328,25 @@ impl Default for GpuEmailRenderer {
             resource_notifier: None,
         }
     }
-}
 
-impl GpuEmailRenderer {
+    /// Drop tiles that a GPU device given up through another renderer owns.
+    fn catch_up_with_device(&mut self) {
+        let generation = self.backend.borrow().device_generation;
+        if self.tiles_generation != generation {
+            self.tiles_generation = generation;
+            self.forget_device_tiles();
+        }
+    }
+
+    /// The tiles may be textures on a device that is gone, so paint them
+    /// again and lay the message out for whichever device comes next.
+    fn forget_device_tiles(&mut self) {
+        self.last_size = None;
+        self.dirty = self.email.is_some();
+        self.region_dirty = self.email.is_some();
+        self.tiles.clear();
+    }
+
     /// Notify the UI event loop when Blitz has completed a resource request.
     /// This avoids an always-running timer while keeping the DOM on its owning
     /// Slint thread.
@@ -470,7 +514,7 @@ impl GpuEmailRenderer {
         self.painted_selection.clear();
         self.find_matches.clear();
         self.find_query.clear();
-        self.cpu_painter = None;
+        self.backend.borrow_mut().cpu_painter = None;
         // Completions may have arrived while the document was being prepared.
         self.resource_poll_ticks.store(1, Ordering::Release);
         self.dirty = false;
@@ -524,20 +568,23 @@ impl GpuEmailRenderer {
     }
 
     /// Keep the document, selection and scroll position, but release pixels
-    /// and raster scratch space while the native window is in the tray.
+    /// and raster scratch space while the native window is in the tray. No
+    /// renderer that shares the backend paints until it is resumed.
     pub fn set_suspended(&mut self, suspended: bool) {
-        self.suspended = suspended;
+        let mut backend = self.backend.borrow_mut();
+        backend.suspended = suspended;
         if suspended {
             self.tiles.clear();
-            self.cpu_painter = None;
+            backend.cpu_painter = None;
             if let Some(email) = self.email.as_mut() {
                 email.paint_cache.clear();
             }
             #[cfg(feature = "gpu-renderer")]
             {
-                self.scene = vello::Scene::new();
+                backend.scene = vello::Scene::new();
             }
         }
+        drop(backend);
         self.last_size = None;
         self.dirty = self.email.is_some();
     }
@@ -567,7 +614,7 @@ impl GpuEmailRenderer {
         self.selection_focus = None;
         self.metadata_revision += 1;
         self.resource_poll_ticks.store(0, Ordering::Release);
-        self.cpu_painter = None;
+        self.backend.borrow_mut().cpu_painter = None;
         self.last_size = None;
         self.dirty = false;
         self.region_dirty = false;
@@ -582,11 +629,7 @@ impl GpuEmailRenderer {
 
     #[cfg(feature = "gpu-renderer")]
     pub fn shares_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
-        self.gpu_context
-            .as_ref()
-            .is_some_and(|(active_device, active_queue)| {
-                active_device == device && active_queue == queue
-            })
+        self.backend.borrow().shares_gpu(device, queue)
     }
 
     #[cfg(feature = "gpu-renderer")]
@@ -595,11 +638,16 @@ impl GpuEmailRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), String> {
-        if self.gpu_context.is_some() && !self.shares_gpu(device, queue) {
+        let replaced = {
+            let backend = self.backend.borrow();
+            backend.gpu_context.is_some() && !backend.shares_gpu(device, queue)
+        };
+        if replaced {
             self.teardown_gpu();
         }
-        if self.renderer.is_none() {
-            self.renderer = Some(
+        let mut backend = self.backend.borrow_mut();
+        if backend.renderer.is_none() {
+            backend.renderer = Some(
                 vello::Renderer::new(
                     device,
                     vello::RendererOptions {
@@ -613,7 +661,7 @@ impl GpuEmailRenderer {
                 )
                 .map_err(|error| format!("could not initialize Vello GPU renderer: {error:?}"))?,
             );
-            self.gpu_context = Some((device.clone(), queue.clone()));
+            backend.gpu_context = Some((device.clone(), queue.clone()));
         }
 
         Ok(())
@@ -621,28 +669,41 @@ impl GpuEmailRenderer {
 
     /// Drop resources tied to Slint's WGPU device. The next frame will build
     /// the small Vello pipeline again against the new device after a suspend,
-    /// display change, or Android surface recreation.
+    /// display change, or Android surface recreation. Renderers that share the
+    /// backend drop their tiles before they paint again.
     #[cfg(feature = "gpu-renderer")]
     pub fn teardown_gpu(&mut self) {
-        #[cfg(test)]
         {
-            self.gpu_teardown_count += 1;
+            let mut backend = self.backend.borrow_mut();
+            #[cfg(test)]
+            {
+                backend.gpu_teardown_count += 1;
+            }
+            backend.renderer = None;
+            backend.gpu_context = None;
+            backend.scene = vello::Scene::new();
+            backend.device_generation += 1;
+            self.tiles_generation = backend.device_generation;
         }
-        self.renderer = None;
-        self.gpu_context = None;
-        self.scene = vello::Scene::new();
-        self.last_size = None;
-        self.dirty = self.email.is_some();
-        self.region_dirty = self.email.is_some();
-        self.tiles.clear();
+        self.forget_device_tiles();
     }
 
     /// Under memory pressure: keep the document and the tiles on screen, and
     /// drop the overscan tiles, the painter with its image cache, and the paint
     /// cache. Until `until` no overscan is painted, as WebKit keeps its tiles
     /// to the visible area under pressure. Returns whether tiles were dropped.
+    /// Renderers that share the backend paint no overscan either, and keep
+    /// their own tiles until they are given the same call.
     pub fn release_caches(&mut self, until: Instant) -> bool {
-        self.low_memory_until = Some(until);
+        {
+            let mut backend = self.backend.borrow_mut();
+            backend.low_memory_until = Some(until);
+            backend.cpu_painter = None;
+            #[cfg(feature = "gpu-renderer")]
+            {
+                backend.scene = vello::Scene::new();
+            }
+        }
         let visible = desired_tile_range(
             self.visible_scroll_y,
             self.visible_height,
@@ -652,13 +713,8 @@ impl GpuEmailRenderer {
         );
         let before = self.tiles.len();
         self.tiles.retain(|index, _| visible.contains(index));
-        self.cpu_painter = None;
         if let Some(email) = self.email.as_mut() {
             email.paint_cache.clear();
-        }
-        #[cfg(feature = "gpu-renderer")]
-        {
-            self.scene = vello::Scene::new();
         }
         self.tiles.len() != before
     }
@@ -668,8 +724,12 @@ impl GpuEmailRenderer {
     /// Resizing builds a new context and keeps the converted images and
     /// prepared glyphs, so the next tile only allocates the buffers again.
     pub fn release_paint_buffers(&mut self) {
-        let (width, height) = self.cpu_size;
-        if let Some(painter) = self.cpu_painter.as_mut() {
+        // Like the idle hook with the renderer, skip a backend in use.
+        let Ok(mut backend) = self.backend.try_borrow_mut() else {
+            return;
+        };
+        let (width, height) = backend.cpu_size;
+        if let Some(painter) = backend.cpu_painter.as_mut() {
             painter.resize(width, height);
         }
     }
@@ -682,6 +742,8 @@ impl GpuEmailRenderer {
     /// Tiles painted beyond each edge of the viewport.
     fn overscan(&self) -> u32 {
         if self
+            .backend
+            .borrow()
             .low_memory_until
             .is_some_and(|until| Instant::now() < until)
         {
@@ -874,7 +936,10 @@ impl GpuEmailRenderer {
     }
 
     pub fn needs_repaint(&self) -> bool {
-        !self.suspended && (self.dirty || self.paint_dirty || self.region_dirty)
+        let backend = self.backend.borrow();
+        let device_lost =
+            self.email.is_some() && self.tiles_generation != backend.device_generation;
+        !backend.suspended && (self.dirty || self.paint_dirty || self.region_dirty || device_lost)
     }
 
     /// Configure automatic fitting for either renderer.
@@ -933,9 +998,10 @@ impl GpuEmailRenderer {
         height: u32,
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
-        if self.suspended {
+        if self.backend.borrow().suspended {
             return Ok(None);
         }
+        self.catch_up_with_device();
         let start = render_timings_enabled().then(Instant::now);
         let layouts = self.layout_count;
         let tiles = self.tile_count;
@@ -1084,6 +1150,8 @@ impl GpuEmailRenderer {
             (y + tile_height <= top || y >= bottom, *index)
         });
         let mut rendered = 0;
+        let mut backend = self.backend.borrow_mut();
+        let backend = &mut *backend;
         for index in ordered {
             if self.tiles.contains_key(&index) {
                 continue;
@@ -1092,8 +1160,8 @@ impl GpuEmailRenderer {
                 break;
             }
             let tile = render_cpu_tile_cached(
-                &mut self.cpu_painter,
-                &mut self.cpu_size,
+                &mut backend.cpu_painter,
+                &mut backend.cpu_size,
                 email,
                 canvas_width,
                 self.content_height,
@@ -1128,9 +1196,10 @@ impl GpuEmailRenderer {
         height: f32,
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
-        if self.suspended || self.email.is_none() {
+        if self.backend.borrow().suspended || self.email.is_none() {
             return Ok(None);
         }
+        self.catch_up_with_device();
         let start = render_timings_enabled().then(Instant::now);
         let layouts = self.layout_count;
         let tiles = self.tile_count;
@@ -1248,6 +1317,8 @@ impl GpuEmailRenderer {
         );
         self.tiles
             .retain(|index, _| wanted.clone().any(|wanted| wanted == *index));
+        let mut backend = self.backend.borrow_mut();
+        let backend = &mut *backend;
         for index in wanted {
             if self.tiles.contains_key(&index) {
                 continue;
@@ -1285,7 +1356,7 @@ impl GpuEmailRenderer {
                 y: logical_y as f64,
             });
             let scene_start = render_timings_enabled().then(Instant::now);
-            let mut painter = VelloScenePainter::new(&mut self.scene);
+            let mut painter = VelloScenePainter::new(&mut backend.scene);
             paint_scene_cached(
                 &mut painter,
                 &mut email.document,
@@ -1300,14 +1371,14 @@ impl GpuEmailRenderer {
 
             let scene_elapsed = scene_start.map(|start| start.elapsed());
 
-            let render_result = self
+            let render_result = backend
                 .renderer
                 .as_mut()
                 .ok_or_else(|| "Vello renderer was not initialized".to_owned())?
                 .render_to_texture(
                     device,
                     queue,
-                    &self.scene,
+                    &backend.scene,
                     &texture_view,
                     &vello::RenderParams {
                         base_color: email.appearance.colors.canvas(),
@@ -1323,9 +1394,9 @@ impl GpuEmailRenderer {
                     start.elapsed().saturating_sub(scene_elapsed).as_secs_f64() * 1000.0
                 );
             }
-            self.scene.reset();
+            backend.scene.reset();
             if let Err(error) = render_result {
-                self.renderer = None;
+                backend.renderer = None;
                 return Err(format!("could not render email tile with Vello: {error:?}"));
             }
             let image = slint::Image::try_from(texture)
@@ -2470,10 +2541,10 @@ mod tests {
         let mut renderer = GpuEmailRenderer::default();
         renderer.set_email(prepare_email_html("<p>First message</p>").unwrap());
         renderer.clear();
-        assert_eq!(renderer.gpu_teardown_count, 0);
+        assert_eq!(renderer.backend.borrow().gpu_teardown_count, 0);
 
         renderer.teardown_gpu();
-        assert_eq!(renderer.gpu_teardown_count, 1);
+        assert_eq!(renderer.backend.borrow().gpu_teardown_count, 1);
     }
 
     #[test]
@@ -2557,10 +2628,10 @@ mod tests {
             .unwrap();
         let positions: Vec<_> = frame.tiles.iter().map(|t| (t.y, t.height)).collect();
         drop(frame);
-        assert!(renderer.cpu_painter.is_some());
+        assert!(renderer.backend.borrow().cpu_painter.is_some());
         renderer.set_suspended(true);
         assert!(renderer.tiles.is_empty());
-        assert!(renderer.cpu_painter.is_none());
+        assert!(renderer.backend.borrow().cpu_painter.is_none());
         assert!(renderer.has_document());
         assert!(!renderer.needs_repaint());
         assert!(

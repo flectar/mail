@@ -53,15 +53,18 @@ system fonts explicitly from `/system/fonts`.
 
 ## Prerequisites
 
-All paths are the ones this workspace uses by default; override through the
-environment variables understood by `scripts/env.sh`.
+Paths come from `scripts/env.sh` unless a step says otherwise.
 
 - HarmonyOS SDK root (`OHOS_SDK_ROOT`, default `~/.harmonybrew/opt/ohos-sdk`)
   plus its native subdirectory (`OHOS_SDK_NATIVE`).
-- `hdc` and a DevEco-created signing material directory
-  (`$HOME/Documents/ohos/config`, bound to the device UDID). The store
-  passphrase is fetched at build time by the local `sign-huawei.sh` helper and
-  is never stored in this repository.
+- `hdc` and explicit debug signing material: the AGC debug profile,
+  certificate and keystore through `DEBUG_PROFILE`, `DEBUG_CERT` and
+  `DEBUG_P12` (plus `DEBUG_KEY_ALIAS`, and `DEBUG_KEY_PWD`/
+  `DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`). A debug build without this material
+  stops before compiling, so no signing path is guessed.
+
+  Neither password is stored in this repository. Debug signing is local-only:
+  CI builds with `SKIP_SIGN=1` and never receives this material.
 - `node` with hvigor installed (`$HOME/arkts-build/node_modules/@ohos/hvigor`),
   and OpenJDK 17 (`$HOME/.harmonybrew/opt/openjdk@17`).
 - The Rust `aarch64-unknown-linux-ohos` target (built natively on the device).
@@ -89,14 +92,35 @@ Release builds are signed with the AGC material through `hap-sign-tool`:
 ```sh
 RELEASE_SIGN=1 \
 RELEASE_P12=release.p12 RELEASE_CERT=com.flectar.mail.cer \
-RELEASE_PROFILE=FlectarMailProfileRelease.p7b \
+RELEASE_PROFILE=ACLReleaseProfileRelease.p7b \
 RELEASE_KEY_ALIAS=releasekey RELEASE_KEY_PWD=... RELEASE_STORE_PWD=... \
 APP=mail PROFILE=release sh platform/ohos/scripts/build-hap.sh
 ```
 
-Without `RELEASE_SIGN=1` the script uses the DevEco auto-signing material,
-which is bound to the bundle it was issued for: if that material was generated
-for a different name, pass `BUNDLE=<that name>` for local debug builds.
+The ACL-enabled profile is required because the app declares
+`ohos.permission.READ_PASTEBOARD`.
+
+Without `RELEASE_SIGN=1` the script signs a debug hap and requires explicit
+material: set `DEBUG_PROFILE`, `DEBUG_CERT` and `DEBUG_P12`, plus
+`DEBUG_KEY_ALIAS` if it is not `releasekey`, and `DEBUG_KEY_PWD`/
+`DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`:
+
+```sh
+DEBUG_PROFILE=/path/to/ACLDebugProfileDebug.p7b \
+DEBUG_CERT=/path/to/com.flectar.mail.debug.cer \
+DEBUG_P12=/path/to/release.p12 DEBUG_PWD_FILE=/path/to/release.p12.pwd \
+APP=mail sh platform/ohos/scripts/build-hap.sh
+```
+
+The debug and release profiles are checked before the build: the profile must
+name the bundle, have the mode's type (`debug` for a debug build, `release`
+for `RELEASE_SIGN=1`), and still be valid. A mismatch stops the build before
+signing instead of producing a hap the device rejects with
+`verify signature failed`.
+
+Debug signing is for local device testing only: CI builds with `SKIP_SIGN=1`
+and never receives the keystore or its password. The password comes from
+`DEBUG_KEY_PWD`/`DEBUG_STORE_PWD` or `DEBUG_PWD_FILE`.
 
 `bm install -r -d` is deliberate: `hdc install` rejects the hap ("install
 version downgrade") because the shared bundle name carries the DevEco
@@ -111,10 +135,10 @@ tracked; an IDE build that bypasses the script needs that copy first.
 The platform is tier 3: it is built by a manually dispatched workflow
 (`.github/workflows/ohos.yml`), not on every pull request. The HarmonyOS SDK
 and hvigor are not anonymously downloadable, so the build job targets a
-self-hosted runner with the prerequisites above. Dispatch runs build unsigned
-(`SKIP_SIGN=1`); `sign: true` switches to `RELEASE_SIGN=1`, which consumes the
-`FLECTAR_OHOS_*` repository secrets through `hap-sign-tool` and never touches
-the pull request context.
+self-hosted runner with the prerequisites above. The workflow only builds. It
+checks formatting and clippy, runs the script with `SKIP_SIGN=1` and uploads
+the unsigned hap. It never receives signing material, so release signing stays
+the local `RELEASE_SIGN=1` step above.
 
 ## Why the hap is re-packed by hand
 
@@ -173,6 +197,14 @@ handled (and asserted) in the script, do not "simplify" them away:
   the base fallback); Traditional Chinese falls back to English. The
   notification permission is requested only after consent, once an account
   exists, and the page records that it asked so the prompt shows once.
+- **Network proxy**: the host reads HarmonyOS's system HTTP proxy through
+  Network Kit (`OH_NetConn_GetDefaultHttpProxy`) and skips it for the servers
+  in its exclusion list, by the rules of the system's own HTTP client. It
+  applies to HTTP(S) traffic (OAuth, AI, Sync and updates); a changed system
+  proxy is seen when the shared cache's minute expires. In automatic (PAC)
+  mode the call returns the local proxy that runs the script. Mail stays
+  direct unless it has its own SOCKS proxy, and a system proxy that asks for
+  a password needs the manual proxy fields.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
@@ -183,6 +215,10 @@ handled (and asserted) in the script, do not "simplify" them away:
   path. Import/export goes through the system document picker via the host
   `DocumentProvider`, and credentials live in the system Asset Store, never
   in plain files.
+- **Sync device name**: before the app starts, the host reads the market name
+  (`OH_GetMarketName`, or `OH_GetProductModel` when there is none), so Flectar
+  Mail Sync lists this device by a name people know instead of "Unnamed
+  device".
 
 ## Lint
 
