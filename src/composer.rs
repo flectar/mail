@@ -4405,7 +4405,7 @@ impl ComposeSession {
         preferences.set_composer_signature_names(ModelRc::new(VecModel::from(names)));
         *self.signatures.borrow_mut() = signatures.clone();
         preferences.set_composer_security(
-            account_mail_preferences::security_summary(&config.settings.security).into(),
+            account_mail_preferences::security_state(&config.settings.security).into(),
         );
         // A draft, and a message edited as new, have whatever signature they
         // had.

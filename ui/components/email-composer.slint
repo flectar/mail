@@ -1,6 +1,5 @@
-import { AccountMailPreferences, SenderPickerRow } from "account-mail-preferences.slint";
+import { AccountMailPreferences } from "account-mail-preferences.slint";
 import { SenderPicker } from "sender-picker.slint";
-import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
@@ -461,9 +460,15 @@ export component EmailComposer inherits Rectangle {
         }
 
         if !root.signature-mode : ComposerFromRow {
+            compact: root.compact;
             accounts: root.accounts;
             selected-account-id <=> root.selected-account-id;
             from-label <=> root.from-label;
+            sender-names: AccountMailPreferences.composer-sender-names;
+            sender-index: AccountMailPreferences.composer-sender-index;
+            signature-names: AccountMailPreferences.composer-signature-names;
+            signature-index: AccountMailPreferences.composer-signature-index;
+            security: AccountMailPreferences.composer-security;
             background-color: root.background-color;
             frame-border-color: root.subtle-border-color;
             hover-color: root.control-hover-color;
@@ -476,43 +481,25 @@ export component EmailComposer inherits Rectangle {
                 root.search-contacts(root.to, account-id);
                 AccountMailPreferences.composer-account-changed(account-id);
             }
-        }
-
-        if !root.signature-mode && AccountMailPreferences.composer-sender-names.length <= 10 : SettingsSelectRow {
-            compact: root.compact;
-            title: @tr("From");
-            description: @tr("Verified sender identity");
-            choices: AccountMailPreferences.composer-sender-names;
-            selected-index: AccountMailPreferences.composer-sender-index;
-            title-color: root.title-color; description-color: root.secondary-color;
-            selected(index, value) => {
+            sender-chosen(index) => {
                 if AccountMailPreferences.composer-preferences-ready {
                     AccountMailPreferences.composer-sender(index);
                 }
             }
-        }
-        // Past ten addresses, the sender is found by searching (#252).
-        if !root.signature-mode && AccountMailPreferences.composer-sender-names.length > 10 : SenderPickerRow {
-            compact: root.compact;
-            title: @tr("From");
-            description: @tr("Verified sender identity");
-            value: AccountMailPreferences.composer-sender-names[AccountMailPreferences.composer-sender-index];
-            title-color: root.title-color; description-color: root.secondary-color;
-            clicked => {
+            more-senders => {
                 AccountMailPreferences.composer-sender-query = "";
                 AccountMailPreferences.composer-sender-search("");
                 AccountMailPreferences.composer-sender-picker-open = true;
             }
+            signature-chosen(index) => {
+                if AccountMailPreferences.composer-preferences-ready {
+                    AccountMailPreferences.composer-signature(index);
+                }
+            }
         }
-
-        if !root.signature-mode : SettingsSelectRow {
-            compact: root.compact;
-            title: @tr("Signature");
-            description: AccountMailPreferences.composer-security;
-            choices: AccountMailPreferences.composer-signature-names;
-            selected-index: AccountMailPreferences.composer-signature-index;
-            title-color: root.title-color; description-color: root.secondary-color;
-            selected(index, value) => { if AccountMailPreferences.composer-preferences-ready { AccountMailPreferences.composer-signature(index); } }
+        if !root.signature-mode : Rectangle {
+            height: 1px;
+            background: root.subtle-border-color;
         }
         if !root.signature-mode : ComposerRecipients {
             open: root.open;
