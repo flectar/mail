@@ -67,6 +67,17 @@ export component LargeFilesCard inherits Rectangle {
     private property <bool> with-password: false;
     private property <string> login-name: "";
     private property <string> app-password: "";
+    private property <bool> can-connect: LinkServices.state == "idle" && root.server != ""
+        && (!root.with-password || (root.login-name != "" && root.app-password != ""));
+
+    function connect() {
+        if root.with-password {
+            LinkServices.connect-with-password(root.server, root.login-name, root.app-password);
+            root.app-password = "";
+        } else {
+            LinkServices.sign-in(root.server);
+        }
+    }
 
     changed shown => {
         if self.shown {
@@ -186,26 +197,37 @@ export component LargeFilesCard inherits Rectangle {
                 placeholder-text: @tr("App password");
                 enabled: LinkServices.state == "idle";
             }
-            HorizontalLayout {
+            // Phones stack the buttons, so neither label is cut short.
+            if !root.compact : HorizontalLayout {
                 spacing: 8px;
                 alignment: start;
                 Button {
                     width: max(96px, self.content-width);
                     primary: true;
                     text: root.with-password ? @tr("Connect") : @tr("Sign in");
-                    enabled: LinkServices.state == "idle" && root.server != ""
-                        && (!root.with-password || (root.login-name != "" && root.app-password != ""));
-                    clicked => {
-                        if root.with-password {
-                            LinkServices.connect-with-password(root.server, root.login-name, root.app-password);
-                            root.app-password = "";
-                        } else {
-                            LinkServices.sign-in(root.server);
-                        }
-                    }
+                    enabled: root.can-connect;
+                    clicked => { root.connect(); }
                 }
                 Button {
                     width: max(96px, self.content-width);
+                    text: root.with-password ? @tr("Sign in in the browser") : @tr("Use an app password");
+                    enabled: LinkServices.state == "idle";
+                    clicked => { root.with-password = !root.with-password; }
+                }
+            }
+            if root.compact : VerticalLayout {
+                spacing: 8px;
+                Button {
+                    height: max(32px, self.label-height);
+                    wrap-label: true;
+                    primary: true;
+                    text: root.with-password ? @tr("Connect") : @tr("Sign in");
+                    enabled: root.can-connect;
+                    clicked => { root.connect(); }
+                }
+                Button {
+                    height: max(32px, self.label-height);
+                    wrap-label: true;
                     text: root.with-password ? @tr("Sign in in the browser") : @tr("Use an app password");
                     enabled: LinkServices.state == "idle";
                     clicked => { root.with-password = !root.with-password; }
