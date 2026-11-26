@@ -97,6 +97,53 @@ const METADATA_HEADERS: &[&str] = &[
 
 type RemoteDraftAttachment = (Option<String>, Option<String>, String, Option<String>);
 
+/// What each Gmail API method costs of the user's quota, in units, as
+/// Google lists them at
+/// <https://developers.google.com/workspace/gmail/api/reference/quota>. A
+/// request that fails costs as much.
+pub(super) mod cost {
+    /// What a user may spend in a minute, in each project.
+    pub(super) const USER_MINUTE: u32 = 6_000;
+    pub(super) const GET_PROFILE: u32 = 1;
+    pub(super) const HISTORY_LIST: u32 = 2;
+    pub(super) const LABELS_LIST: u32 = 1;
+    pub(super) const LABELS_GET: u32 = 1;
+    pub(super) const LABELS_CREATE: u32 = 5;
+    pub(super) const LABELS_UPDATE: u32 = 5;
+    pub(super) const LABELS_DELETE: u32 = 5;
+    pub(super) const MESSAGES_LIST: u32 = 5;
+    /// messages.get with the `metadata` or `minimal` format.
+    pub(super) const MESSAGES_GET: u32 = 20;
+    /// messages.get with the `full`, `raw` or `html` format.
+    pub(super) const MESSAGES_GET_CONTENT: u32 = 60;
+    pub(super) const MESSAGES_ATTACHMENTS_GET: u32 = 20;
+    pub(super) const MESSAGES_MODIFY: u32 = 5;
+    pub(super) const MESSAGES_BATCH_MODIFY: u32 = 50;
+    pub(super) const MESSAGES_TRASH: u32 = 20;
+    pub(super) const MESSAGES_DELETE: u32 = 10;
+    pub(super) const MESSAGES_BATCH_DELETE: u32 = 50;
+    pub(super) const MESSAGES_SEND: u32 = 100;
+    pub(super) const MESSAGES_IMPORT: u32 = 25;
+    pub(super) const MESSAGES_INSERT: u32 = 25;
+    /// threads.get with the `metadata` or `minimal` format.
+    pub(super) const THREADS_GET: u32 = 40;
+    /// threads.get with the `full` format.
+    pub(super) const THREADS_GET_FULL: u32 = 120;
+    pub(super) const THREADS_MODIFY: u32 = 10;
+    pub(super) const THREADS_TRASH: u32 = 20;
+    pub(super) const DRAFTS_LIST: u32 = 5;
+    /// drafts.get with the `metadata` or `minimal` format.
+    pub(super) const DRAFTS_GET: u32 = 20;
+    pub(super) const DRAFTS_CREATE: u32 = 10;
+    pub(super) const DRAFTS_UPDATE: u32 = 15;
+    pub(super) const DRAFTS_DELETE: u32 = 10;
+    pub(super) const DRAFTS_SEND: u32 = 100;
+    pub(super) const SEND_AS_LIST: u32 = 1;
+    pub(super) const SEND_AS_GET: u32 = 1;
+    pub(super) const GET_VACATION: u32 = 1;
+    pub(super) const UPDATE_VACATION: u32 = 5;
+}
+
 #[derive(Clone)]
 struct GmailApi {
     http: Client,
@@ -166,6 +213,12 @@ impl GmailApi {
         headers
     }
 
+    /// A request of the account goes out that costs `units` of its quota,
+    /// which work in the background leaves room for (see [`cost`]).
+    fn spend(&self, units: u32) {
+        self.ctx.pace.account(self.account.id).spend(units);
+    }
+
     async fn token(&self) -> Result<String> {
         self.ctx
             .tokens
@@ -173,9 +226,10 @@ impl GmailApi {
             .await
     }
 
-    async fn get_json(&self, url: &str) -> Result<Value> {
+    async fn get_json(&self, url: &str, units: u32) -> Result<Value> {
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(units);
             let response = self
                 .http
                 .get(url)
@@ -193,9 +247,10 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
-    async fn post_json(&self, url: &str, body: &Value) -> Result<Value> {
+    async fn post_json(&self, url: &str, body: &Value, units: u32) -> Result<Value> {
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(units);
             let response = self
                 .http
                 .post(url)
@@ -214,9 +269,10 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
-    async fn put_json(&self, url: &str, body: &Value) -> Result<Value> {
+    async fn put_json(&self, url: &str, body: &Value, units: u32) -> Result<Value> {
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(units);
             let response = self
                 .http
                 .put(url)
@@ -235,9 +291,10 @@ impl GmailApi {
         Err(CoreError::NeedsReauth)
     }
 
-    async fn delete_json(&self, url: &str) -> Result<Value> {
+    async fn delete_json(&self, url: &str, units: u32) -> Result<Value> {
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(units);
             let response = self
                 .http
                 .delete(url)
@@ -257,7 +314,7 @@ impl GmailApi {
 
     async fn profile_history_id(&self) -> Result<String> {
         let history_id = self
-            .get_json(&format!("{GMAIL_API}/profile"))
+            .get_json(&format!("{GMAIL_API}/profile"), cost::GET_PROFILE)
             .await?
             .get("historyId")
             .and_then(Value::as_str)
@@ -272,7 +329,9 @@ impl GmailApi {
     }
 
     async fn labels(&self) -> Result<Vec<GmailLabel>> {
-        let value = self.get_json(&format!("{GMAIL_API}/labels")).await?;
+        let value = self
+            .get_json(&format!("{GMAIL_API}/labels"), cost::LABELS_LIST)
+            .await?;
         let labels = value
             .get("labels")
             .and_then(Value::as_array)
@@ -310,10 +369,13 @@ impl GmailApi {
     /// How many unread messages carry a label: only labels.get counts them.
     async fn unread_in_label(&self, label_id: &str) -> Result<i64> {
         let label = self
-            .get_json(&format!(
-                "{GMAIL_API}/labels/{}?fields=messagesUnread",
-                urlencode(label_id)
-            ))
+            .get_json(
+                &format!(
+                    "{GMAIL_API}/labels/{}?fields=messagesUnread",
+                    urlencode(label_id)
+                ),
+                cost::LABELS_GET,
+            )
             .await?;
         Ok(label
             .get("messagesUnread")
@@ -323,7 +385,7 @@ impl GmailApi {
 
     async fn sender_identities(&self) -> Result<Vec<crate::models::SenderIdentity>> {
         let value = self
-            .get_json(&format!("{GMAIL_API}/settings/sendAs"))
+            .get_json(&format!("{GMAIL_API}/settings/sendAs"), cost::SEND_AS_LIST)
             .await?;
         crate::sender_identities::parse_gmail_identities_value(&self.account, value)
     }
@@ -334,7 +396,7 @@ impl GmailApi {
         cutoff: Option<chrono::NaiveDate>,
     ) -> Result<(Vec<Value>, Option<String>)> {
         let url = messages_list_url(page_token, cutoff);
-        let response = self.get_json(&url).await?;
+        let response = self.get_json(&url, cost::MESSAGES_LIST).await?;
         let remote_messages = response
             .get("messages")
             .and_then(Value::as_array)
@@ -369,10 +431,13 @@ impl GmailApi {
         }
         let query = format!("rfc822msgid:<{message_id}>");
         let value = self
-            .get_json(&format!(
-                "{GMAIL_API}/messages?maxResults=10&includeSpamTrash=true&q={}",
-                urlencode(&query)
-            ))
+            .get_json(
+                &format!(
+                    "{GMAIL_API}/messages?maxResults=10&includeSpamTrash=true&q={}",
+                    urlencode(&query)
+                ),
+                cost::MESSAGES_LIST,
+            )
             .await?;
         for id in value
             .get("messages")
@@ -382,10 +447,10 @@ impl GmailApi {
             .filter_map(|message| message.get("id").and_then(Value::as_str))
         {
             let resource = self
-                .get_json(&format!(
-                    "{GMAIL_API}/messages/{}?format=metadata",
-                    urlencode(id)
-                ))
+                .get_json(
+                    &format!("{GMAIL_API}/messages/{}?format=metadata", urlencode(id)),
+                    cost::MESSAGES_GET,
+                )
                 .await?;
             let sent = resource
                 .get("labelIds")
@@ -411,8 +476,11 @@ impl GmailApi {
         }
         let boundary = format!("flectar_{:016x}_{}", rand::random::<u64>(), now_ms());
         let body = build_batch_body(ids, &boundary, &self.metadata_headers());
+        // Each request in a batch counts on its own.
+        let units = cost::MESSAGES_GET.saturating_mul(u32::try_from(ids.len()).unwrap_or(u32::MAX));
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(units);
             let response = self
                 .http
                 .post(url)
@@ -465,6 +533,7 @@ impl GmailApi {
         );
         for attempt in 0..2 {
             let token = self.token().await?;
+            self.spend(cost::MESSAGES_GET_CONTENT);
             let response = self
                 .http
                 .get(&url)
@@ -490,10 +559,15 @@ impl GmailApi {
     }
 
     async fn message_full(&self, message_id: &str) -> Result<Value> {
-        self.get_json(&format!(
-            "{GMAIL_API}/messages/{}?format=full",
-            urlencode(message_id)
-        ))
+        self.message_full_at(GMAIL_API, message_id).await
+    }
+
+    /// [`Self::message_full`] from the mailbox API at `base`.
+    async fn message_full_at(&self, base: &str, message_id: &str) -> Result<Value> {
+        self.get_json(
+            &format!("{base}/messages/{}?format=full", urlencode(message_id)),
+            cost::MESSAGES_GET_CONTENT,
+        )
         .await
     }
 
@@ -509,7 +583,12 @@ impl GmailApi {
                 url.push_str(&urlencode(&header));
             }
         }
-        self.get_json(&url).await
+        let units = if full {
+            cost::THREADS_GET_FULL
+        } else {
+            cost::THREADS_GET
+        };
+        self.get_json(&url, units).await
     }
 
     async fn history(&self, history_id: &str, page_token: Option<&str>) -> Result<HistoryPage> {
@@ -521,7 +600,7 @@ impl GmailApi {
             url.push_str("&pageToken=");
             url.push_str(&urlencode(token));
         }
-        let value = self.get_json(&url).await?;
+        let value = self.get_json(&url, cost::HISTORY_LIST).await?;
         parse_history_page(&value, history_id)
     }
 
@@ -535,6 +614,7 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/messages/{}/modify", urlencode(message_id)),
                 &json!({ "addLabelIds": add, "removeLabelIds": remove }),
+                cost::MESSAGES_MODIFY,
             )
             .await,
         )
@@ -550,6 +630,7 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/threads/{}/modify", urlencode(thread_id)),
                 &json!({ "addLabelIds": add, "removeLabelIds": remove }),
+                cost::THREADS_MODIFY,
             )
             .await,
         )
@@ -560,6 +641,7 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/messages/{}/trash", urlencode(message_id)),
                 &json!({}),
+                cost::MESSAGES_TRASH,
             )
             .await,
         )
@@ -567,8 +649,11 @@ impl GmailApi {
 
     async fn delete_message_permanently(&self, message_id: &str) -> Result<()> {
         ignore_not_found(
-            self.delete_json(&format!("{GMAIL_API}/messages/{}", urlencode(message_id)))
-                .await,
+            self.delete_json(
+                &format!("{GMAIL_API}/messages/{}", urlencode(message_id)),
+                cost::MESSAGES_DELETE,
+            )
+            .await,
         )
     }
 
@@ -592,7 +677,7 @@ impl GmailApi {
                 url.push_str("&pageToken=");
                 url.push_str(&urlencode(token));
             }
-            let page = self.get_json(&url).await?;
+            let page = self.get_json(&url, cost::MESSAGES_LIST).await?;
             ids.extend(
                 page.get("messages")
                     .and_then(Value::as_array)
@@ -625,6 +710,7 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/messages/batchModify"),
                 &json!({ "ids": batch, "removeLabelIds": ["UNREAD"] }),
+                cost::MESSAGES_BATCH_MODIFY,
             )
             .await?;
         }
@@ -642,7 +728,7 @@ impl GmailApi {
                 url.push_str("&pageToken=");
                 url.push_str(&urlencode(token));
             }
-            let page = self.get_json(&url).await?;
+            let page = self.get_json(&url, cost::MESSAGES_LIST).await?;
             if let Some(messages) = page.get("messages").and_then(Value::as_array) {
                 for message in messages {
                     if let Some(id) = message.get("id").and_then(Value::as_str) {
@@ -672,6 +758,7 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/messages/batchDelete"),
                 &json!({ "ids": batch }),
+                cost::MESSAGES_BATCH_DELETE,
             )
             .await?;
         }
@@ -683,18 +770,33 @@ impl GmailApi {
             self.post_json(
                 &format!("{GMAIL_API}/threads/{}/trash", urlencode(thread_id)),
                 &json!({}),
+                cost::THREADS_TRASH,
             )
             .await,
         )
     }
 
     async fn attachment(&self, message_id: &str, attachment_id: &str) -> Result<Vec<u8>> {
+        self.attachment_at(GMAIL_API, message_id, attachment_id)
+            .await
+    }
+
+    /// [`Self::attachment`] from the mailbox API at `base`.
+    async fn attachment_at(
+        &self,
+        base: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>> {
         let value = self
-            .get_json(&format!(
-                "{GMAIL_API}/messages/{}/attachments/{}",
-                urlencode(message_id),
-                urlencode(attachment_id)
-            ))
+            .get_json(
+                &format!(
+                    "{base}/messages/{}/attachments/{}",
+                    urlencode(message_id),
+                    urlencode(attachment_id)
+                ),
+                cost::MESSAGES_ATTACHMENTS_GET,
+            )
             .await?;
         let encoded = value
             .get("data")
@@ -729,7 +831,7 @@ impl GmailApi {
             });
         }
         let value = self
-            .post_json(&format!("{GMAIL_API}/labels"), &body)
+            .post_json(&format!("{GMAIL_API}/labels"), &body, cost::LABELS_CREATE)
             .await?;
         Ok(GmailLabel {
             id: required_string(&value, "id")?.to_owned(),
@@ -761,6 +863,7 @@ impl GmailApi {
         self.put_json(
             &format!("{GMAIL_API}/labels/{}", urlencode(provider_id)),
             &body,
+            cost::LABELS_UPDATE,
         )
         .await?;
         Ok(())
@@ -768,8 +871,11 @@ impl GmailApi {
 
     async fn delete_label(&self, provider_id: &str) -> Result<()> {
         ignore_not_found(
-            self.delete_json(&format!("{GMAIL_API}/labels/{}", urlencode(provider_id)))
-                .await,
+            self.delete_json(
+                &format!("{GMAIL_API}/labels/{}", urlencode(provider_id)),
+                cost::LABELS_DELETE,
+            )
+            .await,
         )
     }
 
@@ -783,7 +889,7 @@ impl GmailApi {
                 url.push_str("&pageToken=");
                 url.push_str(&urlencode(token));
             }
-            let value = self.get_json(&url).await?;
+            let value = self.get_json(&url, cost::DRAFTS_LIST).await?;
             for draft in value
                 .get("drafts")
                 .and_then(Value::as_array)
@@ -833,17 +939,27 @@ impl GmailApi {
         });
         match draft_id.filter(|value| !value.is_empty()) {
             Some(id) => {
-                self.put_json(&format!("{GMAIL_API}/drafts/{}", urlencode(id)), &body)
+                self.put_json(
+                    &format!("{GMAIL_API}/drafts/{}", urlencode(id)),
+                    &body,
+                    cost::DRAFTS_UPDATE,
+                )
+                .await
+            }
+            None => {
+                self.post_json(&format!("{GMAIL_API}/drafts"), &body, cost::DRAFTS_CREATE)
                     .await
             }
-            None => self.post_json(&format!("{GMAIL_API}/drafts"), &body).await,
         }
     }
 
     async fn delete_draft(&self, draft_id: &str) -> Result<()> {
         ignore_not_found(
-            self.delete_json(&format!("{GMAIL_API}/drafts/{}", urlencode(draft_id)))
-                .await,
+            self.delete_json(
+                &format!("{GMAIL_API}/drafts/{}", urlencode(draft_id)),
+                cost::DRAFTS_DELETE,
+            )
+            .await,
         )
     }
 
@@ -855,6 +971,7 @@ impl GmailApi {
                 "raw": URL_SAFE_NO_PAD.encode(raw),
                 "threadId": thread_id,
             }),
+            cost::MESSAGES_SEND,
         )
         .await
     }
@@ -863,6 +980,7 @@ impl GmailApi {
         self.post_json(
             &format!("{GMAIL_API}/drafts/send"),
             &json!({ "id": draft_id }),
+            cost::DRAFTS_SEND,
         )
         .await
     }
@@ -870,10 +988,10 @@ impl GmailApi {
     /// The draft as Gmail holds it now, with the id of its message, which
     /// changes with every edit.
     async fn get_draft(&self, draft_id: &str) -> Result<Value> {
-        self.get_json(&format!(
-            "{GMAIL_API}/drafts/{}?format=minimal",
-            urlencode(draft_id)
-        ))
+        self.get_json(
+            &format!("{GMAIL_API}/drafts/{}?format=minimal", urlencode(draft_id)),
+            cost::DRAFTS_GET,
+        )
         .await
     }
 
@@ -884,7 +1002,10 @@ impl GmailApi {
     /// configured Reply-To, which Gmail only applies itself in its web UI.
     async fn validate_sender_identity(&self, email: &str) -> Result<Option<Address>> {
         let value = self
-            .get_json(&format!("{GMAIL_API}/settings/sendAs/{}", urlencode(email)))
+            .get_json(
+                &format!("{GMAIL_API}/settings/sendAs/{}", urlencode(email)),
+                cost::SEND_AS_GET,
+            )
             .await
             .map_err(|error| match error {
                 CoreError::NotFound(_) => CoreError::Other(format!(
@@ -1613,8 +1734,10 @@ impl From<&AutoReply> for VacationSettings {
 }
 
 async fn read_vacation(api: &GmailApi, base: &str) -> Result<AutoReply> {
-    let settings: VacationSettings =
-        serde_json::from_value(api.get_json(&format!("{base}/settings/vacation")).await?)?;
+    let settings: VacationSettings = serde_json::from_value(
+        api.get_json(&format!("{base}/settings/vacation"), cost::GET_VACATION)
+            .await?,
+    )?;
     Ok(settings.into())
 }
 
@@ -1648,7 +1771,11 @@ impl VacationResponder {
         let body = serde_json::to_value(VacationSettings::from(reply))?;
         let saved: VacationSettings = serde_json::from_value(
             self.api
-                .put_json(&format!("{}/settings/vacation", self.base), &body)
+                .put_json(
+                    &format!("{}/settings/vacation", self.base),
+                    &body,
+                    cost::UPDATE_VACATION,
+                )
                 .await?,
         )?;
         Ok(saved.into())
@@ -1732,11 +1859,14 @@ impl Uploader {
         let query = format!("rfc822msgid:<{}>", message_id.trim_matches(['<', '>']));
         let value = self
             .api
-            .get_json(&format!(
-                "{}/messages?maxResults=1&includeSpamTrash=true&q={}",
-                self.base,
-                urlencode(&query)
-            ))
+            .get_json(
+                &format!(
+                    "{}/messages?maxResults=1&includeSpamTrash=true&q={}",
+                    self.base,
+                    urlencode(&query)
+                ),
+                cost::MESSAGES_LIST,
+            )
             .await?;
         Ok(value
             .get("messages")
@@ -1752,6 +1882,7 @@ impl Uploader {
              &neverMarkSpam=true&processForCalendar=false",
             raw,
             label_ids,
+            cost::MESSAGES_IMPORT,
         )
         .await
     }
@@ -1764,6 +1895,7 @@ impl Uploader {
             "messages?uploadType=multipart&internalDateSource=dateHeader",
             raw,
             label_ids,
+            cost::MESSAGES_INSERT,
         )
         .await
     }
@@ -1781,7 +1913,13 @@ impl Uploader {
 
     /// Upload a raw message with these labels to `endpoint`, a path under
     /// the upload API with its query.
-    async fn upload(&self, endpoint: &str, raw: &[u8], label_ids: &[&str]) -> Result<()> {
+    async fn upload(
+        &self,
+        endpoint: &str,
+        raw: &[u8],
+        label_ids: &[&str],
+        units: u32,
+    ) -> Result<()> {
         let boundary = format!("flectar-{:032x}", rand::random::<u128>());
         let metadata = json!({ "labelIds": label_ids });
         let mut body = Vec::with_capacity(raw.len() + 512);
@@ -1799,6 +1937,7 @@ impl Uploader {
         let timeout = HTTP_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
         for attempt in 0..2 {
             let token = self.api.token().await?;
+            self.api.spend(units);
             let response = self
                 .api
                 .http
@@ -5078,7 +5217,7 @@ async fn search_server(
             url.push_str("&pageToken=");
             url.push_str(&urlencode(token));
         }
-        let response = api.get_json(&url).await?;
+        let response = api.get_json(&url, cost::MESSAGES_LIST).await?;
         let page = response
             .get("messages")
             .and_then(Value::as_array)

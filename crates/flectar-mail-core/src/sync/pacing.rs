@@ -1,7 +1,7 @@
 //! When sync asks a server again (#251): after a failure, after the server
 //! asked to wait, between checks for new mail, and when many accounts start
 //! at once. Also how many connections an IMAP account opens for work in the
-//! background.
+//! background, and how much of its server's quota an account spent lately.
 //!
 //! A failure such as a dropped connection is tried again soon, sooner than
 //! most clients do, since it is usually the network. A server that asked to
@@ -12,7 +12,7 @@
 
 use crate::error::{CoreError, LimitKind};
 use crate::models::{AccountSettings, CheckInterval, now_ms};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -40,6 +40,10 @@ const BULK_CONNECTIONS: usize = 3;
 /// Accounts that download their older headers at the same time.
 const HISTORY_TURNS: usize = 3;
 static HISTORY_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+/// How long a server counts what a request cost against the account's
+/// quota: Gmail limits the units a user spends in a minute.
+const QUOTA_WINDOW: Duration = Duration::from_secs(60);
 
 /// Accounts that start together connect at once up to this many; the rest
 /// take turns.
@@ -279,6 +283,9 @@ struct PaceState {
     bulk_owed: usize,
     /// The account's first connection waits until then.
     start: Option<Instant>,
+    /// What the account's requests cost in the last [`QUOTA_WINDOW`] and
+    /// when each went out, oldest first.
+    spent: VecDeque<(Instant, u32)>,
 }
 
 impl AccountPace {
@@ -290,6 +297,7 @@ impl AccountPace {
                 bulk_allowed: BULK_CONNECTIONS,
                 bulk_owed: 0,
                 start: None,
+                spent: VecDeque::new(),
             }),
             bulk: Arc::new(Semaphore::new(BULK_CONNECTIONS)),
         }
@@ -370,6 +378,15 @@ impl AccountPace {
             .filter(|start| *start > Instant::now())
     }
 
+    /// A request of the account went out that costs `units` of its
+    /// server's quota.
+    pub(crate) fn spend(&self, units: u32) {
+        let now = Instant::now();
+        let mut state = lock(&self.state);
+        forget_spent(&mut state.spent, now);
+        state.spent.push_back((now, units));
+    }
+
     fn fewer_connections(&self, state: &mut PaceState) {
         if state.bulk_allowed <= 1 {
             return;
@@ -440,6 +457,16 @@ impl Drop for BulkPermit {
             state.bulk_owed -= 1;
             permit.forget();
         }
+    }
+}
+
+/// Drops what was spent a [`QUOTA_WINDOW`] or more before `now`.
+fn forget_spent(spent: &mut VecDeque<(Instant, u32)>, now: Instant) {
+    while spent
+        .front()
+        .is_some_and(|(at, _)| now.saturating_duration_since(*at) >= QUOTA_WINDOW)
+    {
+        spent.pop_front();
     }
 }
 
