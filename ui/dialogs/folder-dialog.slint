@@ -126,10 +126,12 @@ export component FolderDialog inherits Rectangle {
             spacing: 8px;
             Rectangle { horizontal-stretch: 1; }
             Button {
+                min-width: max(64px, self.content-width);
                 text: @tr("Cancel");
                 clicked => { root.cancel(); }
             }
             Button {
+                min-width: max(64px, self.content-width);
                 text: root.mode == "delete" ? @tr("Delete")
                     : root.mode == "create" && root.item-kind == "label" ? @tr("Create label")
                     : root.mode == "create" ? @tr("Create folder")

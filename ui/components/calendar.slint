@@ -1014,10 +1014,10 @@ export component FunctionalCalendarView inherits Rectangle {
             padding: 0px;
             spacing: 8px;
             cross-axis-alignment: center;
-            Button { text: @tr("Month"); height: LayoutMetrics.touch-target; selected: root.view-mode != "agenda"; clicked => { root.set-view("month"); } }
-            Button { text: @tr("Agenda"); height: LayoutMetrics.touch-target; selected: root.view-mode == "agenda"; clicked => { root.set-view("agenda"); } }
+            Button { min-width: max(64px, self.content-width); text: @tr("Month"); height: LayoutMetrics.touch-target; selected: root.view-mode != "agenda"; clicked => { root.set-view("month"); } }
+            Button { min-width: max(64px, self.content-width); text: @tr("Agenda"); height: LayoutMetrics.touch-target; selected: root.view-mode == "agenda"; clicked => { root.set-view("agenda"); } }
             Rectangle { horizontal-stretch: 1; }
-            Button { text: @tr("Today"); height: LayoutMetrics.touch-target; clicked => { root.today(); } }
+            Button { min-width: max(64px, self.content-width); text: @tr("Today"); height: LayoutMetrics.touch-target; clicked => { root.today(); } }
         }
         if root.view-mode == "agenda": HorizontalBox {
             x: 16px;
