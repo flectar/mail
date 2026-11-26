@@ -9,7 +9,7 @@ import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 export component AttachmentPreviewDialog inherits Rectangle {
     in property <bool> compact: false;
     visible: MailAttachments.open;
-    background: #00000088; z: 2000;
+    background: AppTheme.scrim; z: 2000;
     accessible-role: groupbox; accessible-label: MailAttachments.name;
     changed visible => { if root.visible { keys.focus(); } }
     TouchArea {}

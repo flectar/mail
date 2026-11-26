@@ -3,6 +3,7 @@ import { EmailTemplateRow } from "../models.slint";
 import { Button } from "button.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton, LineEdit, TextEdit } from "controls.slint";
+import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 export component EmailTemplates inherits Rectangle {
@@ -78,7 +79,7 @@ export component EmailTemplates inherits Rectangle {
     }
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     z: 7000;
     accessible-role: groupbox;
     accessible-label: @tr("Email templates");

@@ -270,11 +270,13 @@ fn register_desktop_events(app: &AppWindow) {
             }
             // Tab shortcuts work wherever focus is, as in a browser, except in
             // the composer and the calendar editor, which keep their keys.
+            // Like the dimmed tabs, they wait while a dialog is open.
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
                     && !app.global::<crate::ComposerUi>().get_open()
-                    && !app.get_calendar_editor_shown() =>
+                    && !app.get_calendar_editor_shown()
+                    && !app.get_dialog_open() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {
                     app.global::<crate::TabsUi>()

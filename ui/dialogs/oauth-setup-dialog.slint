@@ -31,7 +31,7 @@ export component OAuthSetupDialog inherits Rectangle {
     private property <string> draft-ms-id;
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     accessible-role: groupbox;
     accessible-label: @tr("Sign-in settings");
     changed open => {

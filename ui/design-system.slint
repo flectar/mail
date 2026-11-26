@@ -241,6 +241,10 @@ export global AppTheme {
     out property <color> destructive: #b73731;
     out property <color> destructive-hover: #c8443d;
     out property <color> destructive-pressed: #922d28;
+    // Dims the window behind a modal dialog, alike in both themes. Every
+    // dialog's own scrim and the window backdrop share it, so they meet
+    // without a seam.
+    out property <color> scrim: #00000066;
 }
 
 export global ThemeUtilities {

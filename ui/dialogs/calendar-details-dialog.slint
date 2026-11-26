@@ -1,5 +1,6 @@
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
+import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 component DetailField inherits Rectangle {
@@ -169,7 +170,7 @@ export component CalendarDetailsDialog inherits Rectangle {
     callback remove-event;
 
     visible: root.open;
-    background: #20212466;
+    background: AppTheme.scrim;
     z: 900;
 
     TouchArea {

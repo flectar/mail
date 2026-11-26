@@ -70,7 +70,7 @@ export component MoveDialog inherits Rectangle {
     // Everything on the card but the rows.
     private property <length> chrome-height: root.compact ? 136px : 124px;
 
-    background: #00000066;
+    background: AppTheme.scrim;
     forward-focus: search-field;
     accessible-role: groupbox;
     accessible-label: MovePickerUi.mode == "copy" ? @tr("Copy to") : @tr("Move to");

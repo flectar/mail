@@ -12,6 +12,7 @@ import { CalendarAgenda, CalendarAgendaFilter } from "calendar-agenda.slint";
 import { CalendarAgendaRow, CalendarAgendaFilterRow } from "../models.slint";
 import { ScrollFade } from "scroll-fade.slint";
 import { WindowControlsClearance } from "../window-chrome.slint";
+import { DialogArea } from "window-backdrop.slint";
 import { TabSwitcherButton } from "tab-overview.slint";
 import { TabsUi } from "tabs-ui.slint";
 
@@ -506,6 +507,15 @@ export component FunctionalCalendarView inherits Rectangle {
     private property <bool> detail-repeats: false;
     private property <string> detail-recurrence-id: "";
     private property <bool> delete-confirmation-open: false;
+    // The event details and the delete confirmation cover the whole view.
+    // The window dims around it while one is open.
+    out property <DialogArea> dialog-area: {
+        open: root.detail-open || root.delete-confirmation-open,
+        x: root.absolute-position.x,
+        y: root.absolute-position.y,
+        width: root.width,
+        height: root.height,
+    };
     // The list a "+N more" opens, over its day.
     private property <string> day-list-title;
     private property <[CalendarEventRow]> day-list-events;

@@ -6,6 +6,7 @@ import { NetworkPage } from "../network.slint";
 import { InvitationSettings } from "../invitation-settings.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
+import { DialogArea } from "../components/window-backdrop.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
 import { SystemNotifications } from "../system-notifications.slint";
@@ -778,6 +779,38 @@ export component SettingsDialog inherits Rectangle {
     private property <bool> sync-remove-confirmation: false;
     private property <string> sync-remove-id;
     private property <string> sync-remove-name;
+
+    // Whether one of the dialogs at the end of this page is open; keep it in
+    // step with them. They cover the whole page, and the window dims around
+    // it while one is open.
+    private property <bool> dialog-open: root.caldav_account_id > 0
+        || root.carddav_account_id > 0
+        || root.account_form_open
+        || root.profile-editor-open
+        || MailRules.editing
+        || (root.account-profile-picker-open
+            && root.account-profile-picker-account.id == root.account-profile-picker-id)
+        || AccountMailPreferences.default-sender-picker-open
+        || (root.folders-id >= 0 && root.folders-account.id == root.folders-id)
+        || (root.folder-roles-id >= 0 && root.folder-roles-account.id == root.folder-roles-id)
+        || root.delete_data_confirmation
+        || root.withdraw_privacy_confirmation
+        || root.delete_local_mail_confirmation
+        || root.delete_account_confirmation
+        || root.delete-profile-confirmation
+        || root.remove-calendar-confirmation
+        || SyncUi.recovery-words.length > 0
+        || SyncUi.dialog == "invite" || SyncUi.dialog == "join" || SyncUi.dialog == "redeem"
+        || root.sync-delete-confirmation
+        || root.sync-remove-confirmation
+        || root.oauth-setup-open;
+    out property <DialogArea> dialog-area: {
+        open: root.dialog-open,
+        x: root.absolute-position.x,
+        y: root.absolute-position.y,
+        width: root.width,
+        height: root.height,
+    };
 
     private property <[string]> density-options: [
         @tr("list density" => "Comfortable"),
@@ -4413,7 +4446,7 @@ export component SettingsDialog inherits Rectangle {
             visible: root.caldav_account_id > 0;
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 900;
             accessible-role: groupbox;
             accessible-label: root.caldav_connection_id > 0 ? @tr("CalDAV settings") : @tr("Add CalDAV calendar");
@@ -4561,7 +4594,7 @@ export component SettingsDialog inherits Rectangle {
         if root.carddav_account_id > 0 : Rectangle {
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 900;
             accessible-role: groupbox;
             accessible-label: root.carddav_manage_existing ? @tr("CardDAV settings") : @tr("Connect CardDAV");
@@ -4711,7 +4744,7 @@ export component SettingsDialog inherits Rectangle {
             visible: root.account_form_open;
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 900;
             accessible-role: groupbox;
             accessible-label: root.account_editing ? @tr("Edit mail account") : @tr("Connect a mail account");
@@ -4903,7 +4936,7 @@ export component SettingsDialog inherits Rectangle {
             visible: root.profile-editor-open;
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 950;
             accessible-role: groupbox;
             accessible-label: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Edit profile");
@@ -5049,7 +5082,7 @@ export component SettingsDialog inherits Rectangle {
         if MailRules.editing : Rectangle {
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 950;
             accessible-role: groupbox;
             accessible-label: MailRules.editing-id == 0 ? @tr("New rule") : @tr("Edit rule");
@@ -5070,7 +5103,7 @@ export component SettingsDialog inherits Rectangle {
             && root.account-profile-picker-account.id == root.account-profile-picker-id : Rectangle {
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 950;
             accessible-role: groupbox;
             accessible-label: @tr("Choose a profile for {}", root.account-profile-picker-account.name);
@@ -5121,7 +5154,7 @@ export component SettingsDialog inherits Rectangle {
             && root.folders-account.id == root.folders-id : Rectangle {
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 950;
             accessible-role: groupbox;
             accessible-label: @tr("Folders of {}", root.folders-account.email);
@@ -5142,7 +5175,7 @@ export component SettingsDialog inherits Rectangle {
             && root.folder-roles-account.id == root.folder-roles-id : Rectangle {
             width: parent.width;
             height: parent.height;
-            background: #00000088;
+            background: AppTheme.scrim;
             z: 950;
             accessible-role: groupbox;
             accessible-label: @tr("Special folders of {}", root.folder-roles-account.email);
