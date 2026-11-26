@@ -933,6 +933,26 @@ impl GpuEmailRenderer {
         self.email.is_some()
     }
 
+    /// The backend it paints with, for renderers that share it.
+    pub fn backend(&self) -> Rc<RefCell<PaintBackend>> {
+        Rc::clone(&self.backend)
+    }
+
+    /// The height of the message as it's shown, in logical pixels.
+    pub fn displayed_height(&self) -> f32 {
+        if self.email.is_some() {
+            self.content_height * self.zoom
+        } else {
+            0.0
+        }
+    }
+
+    /// Out of view, hold no pixels. The next region in view is painted again.
+    pub fn set_offscreen(&mut self) {
+        self.tiles.clear();
+        self.region_dirty = self.email.is_some();
+    }
+
     pub fn needs_repaint(&self) -> bool {
         let backend = self.backend.borrow();
         let device_lost =

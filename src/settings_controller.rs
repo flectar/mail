@@ -884,6 +884,40 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_open_messages = Rc::clone(state);
+    let runtime_for_open_messages = runtime.clone();
+    app.on_save_keep_messages_open(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let core = state_for_open_messages.borrow().core.clone();
+        match core
+            .map(|core| runtime_for_open_messages.block_on(core.set_keep_messages_open(enabled)))
+        {
+            None => app.set_sync_status(UiMessage::plain(
+                "Message-opening preference updated for this session.",
+            )),
+            Some(Ok(())) => {
+                app.set_sync_status(UiMessage::plain("Message-opening preference saved."))
+            }
+            Some(Err(error)) => {
+                app.set_keep_messages_open(!enabled);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save message-opening preference: {}",
+                    error,
+                ));
+            }
+        }
+        // Turned off, only the active message stays open.
+        if !app.get_keep_messages_open()
+            && let Err(error) =
+                render_current(&app, &state_for_open_messages, &runtime_for_open_messages)
+        {
+            app.set_render_status(UiMessage::detail("Message load failed: {}", error));
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_date_groups = Rc::clone(state);
     let runtime_for_date_groups = runtime.clone();
     app.on_save_group_mail_by_date(move |enabled| {

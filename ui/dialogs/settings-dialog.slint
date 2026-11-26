@@ -521,6 +521,7 @@ export component SettingsDialog inherits Rectangle {
     in property <string> spelling_system: "";
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> conversation_view: true;
+    in-out property <bool> keep_messages_open: false;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
@@ -660,6 +661,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_spelling_enabled(bool);
     callback save_group_mail_by_date(bool);
     callback save_conversation_view(bool);
+    callback save_keep_messages_open(bool);
     callback choose_download_directory();
     callback clear_download_directory();
     // Save a profile's name and color, and make the checked accounts of
@@ -1806,6 +1808,20 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.conversation_view = checked;
                                             root.save_conversation_view(checked);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Keep messages open");
+                                        description: @tr("Messages you open in a conversation stay open when you open another. Turn this off to read one at a time.");
+                                        checked: root.keep_messages_open;
+                                        enabled: root.conversation_view;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.keep_messages_open = checked;
+                                            root.save_keep_messages_open(checked);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

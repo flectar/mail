@@ -70,6 +70,7 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "groupByDate",
     "showTabs",
     "conversationView",
+    "keepMessagesOpen",
     "workspaceLayout",
     "monochromeSidebarIcons",
     "language",

@@ -481,7 +481,12 @@ fn render(windows: &Windows, reader: &WindowReader) {
             shown.subject = row.subject.clone();
             reconcile_model_rows_by(
                 &reader.thread_rows,
-                crate::mail_view_model::make_thread_rows(&messages, index, &state.favicon_icons),
+                crate::mail_view_model::make_thread_rows(
+                    &messages,
+                    index,
+                    &state.favicon_icons,
+                    &[],
+                ),
                 |row| row.index,
                 PartialEq::eq,
             );

@@ -49,6 +49,12 @@ Replies stay grouped in chronological order, with the active message expanded
 inside the reading pane. To list, open and act on every message on its own, turn
 off **Conversation view** in Settings → General.
 
+With **Keep messages open** in Settings → General, a message you open stays open
+when you open another one, so you can read several at once. The one you opened
+last has the zoom and find controls and the reply buttons, and clicking another
+open message moves them there. The arrow at the right of an open message's
+header closes it.
+
 Opening an unread message marks it read. **Mark messages as read** in Settings →
 General can wait 2 or 5 seconds instead, so messages you only pass over, such
 as with the arrow keys, stay unread. **Never** leaves marking to you.

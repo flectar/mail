@@ -1042,6 +1042,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_group_mail_by_date(settings.group_mail_by_date);
     app.set_show_tabs(settings.show_tabs);
     app.set_conversation_view(settings.conversation_view);
+    app.set_keep_messages_open(settings.keep_messages_open);
     app.set_show_account_markers(settings.show_account_badges);
     app.set_workspace_layout(
         match settings.workspace_layout.as_str() {
