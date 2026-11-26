@@ -29,6 +29,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, watch};
 
+mod prefetch;
+
 const GMAIL_API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 const GMAIL_BATCH_API: &str = "https://gmail.googleapis.com/batch/gmail/v1";
 const SYNC_PAGE_SIZE: usize = 100;
@@ -4681,6 +4683,12 @@ pub(super) fn spawn(
     let actor_ctx = ctx.clone();
     let actor_config = config.clone();
     vec![
+        // Bodies downloaded ahead of time, so opening mail doesn't wait.
+        crate::net::timeouts::spawn(prefetch::run(
+            ctx.clone(),
+            config.clone(),
+            settings_rx.clone(),
+        )),
         crate::net::timeouts::spawn(async move {
             run_actor(actor_ctx, actor_config, rx, settings_rx).await
         }),
