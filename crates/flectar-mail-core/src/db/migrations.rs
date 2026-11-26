@@ -91,6 +91,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/072_sealed_deletions.sql")),
     Migration::Plain(include_str!("migrations/073_sync_turned_away.sql")),
     Migration::Plain(include_str!("migrations/074_sign_in_holds.sql")),
+    Migration::Plain(include_str!("migrations/075_gmail_text_decoded_twice.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1817,6 +1818,68 @@ mod tests {
         };
         assert_eq!(matches("keptterm"), 1);
         assert_eq!(matches("leftoverterm"), 0);
+    }
+
+    #[test]
+    fn upgrade_downloads_again_gmail_text_decoded_twice() {
+        let mut conn = staged(74);
+        conn.execute_batch(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (1, 'me@gmail.example', 'gmail', 'oauth2', 'gmail', 'me', 'h', 993,
+                       'h', 587, 0, '{}'),
+                      (2, 'me@imap.example', 'generic', 'password', 'imap', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO folders (id, account_id, path, role)
+               VALUES (1, 1, 'INBOX', 'inbox'), (2, 2, 'INBOX', 'inbox');
+             INSERT INTO threads (id, account_id, subject_norm) VALUES (1, 1, 's'), (2, 2, 's');
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, gm_msgid, uid, subject, from_addr, date,
+               body_state, raw_path, is_draft
+             ) VALUES
+               (1, 1, 1, 1, 'g1', NULL, 'garbled', 'a@mail.example', 1, 'cached', NULL, 0),
+               (2, 1, 1, 1, 'g2', NULL, 'ascii', 'a@mail.example', 2, 'cached', NULL, 0),
+               (3, 1, 1, 1, 'g3', NULL, 'read whole', 'a@mail.example', 3, 'cached', '/m.eml', 0),
+               (4, 1, 1, 1, 'g4', NULL, 'draft', 'a@mail.example', 4, 'cached', NULL, 1),
+               (5, 1, 1, 1, 'g5', NULL, 'html', 'a@mail.example', 5, 'cached', NULL, 0),
+               (6, 2, 2, 2, NULL, 6, 'imap', 'a@mail.example', 6, 'cached', NULL, 0);
+             INSERT INTO message_bodies (message_id, text_body, html_body) VALUES
+               (1, 'AtualizaÃ§Ãµes', NULL),
+               (2, 'Thanks', '<p>Thanks</p>'),
+               (3, 'Atualizações', NULL),
+               (4, 'Atualizações', NULL),
+               (5, NULL, '<p>Спасибо</p>'),
+               (6, 'Atualizações', NULL);",
+        )
+        .unwrap();
+
+        upgrade_to(&mut conn, 75).unwrap();
+
+        let states = conn
+            .prepare("SELECT id, body_state FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let again: Vec<i64> = states
+            .iter()
+            .filter(|(_, state)| state == "none")
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(again, [1, 5]);
+        // The body kept shows until the new one arrives.
+        let kept: String = conn
+            .query_row(
+                "SELECT text_body FROM message_bodies WHERE message_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, "AtualizaÃ§Ãµes");
     }
 
     #[test]
