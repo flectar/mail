@@ -226,14 +226,17 @@ waits for a slow server, or a slow connection to it, before it gives up. Every
 wait grows alike, from connecting and signing in to downloading attachments,
 and a change takes effect at once.
 
-An IMAP or JMAP account downloads its messages in the background, as far back
-as its **Mail history** goes, so they open at once and without a connection.
-**Download** in the account's card changes what comes ahead of time.
+An IMAP, JMAP or Gmail account downloads its messages in the background, as
+far back as its **Mail history** goes, so they open at once and without a
+connection. **Download** in the account's card changes what comes ahead of time.
 **Headers only** leaves each message on the server until you open it,
 **Messages** is where every account starts, and **Messages and attachments**
 also downloads attachments up to 25 MB, one at a time, so they open offline
 too. Larger ones download when you open them, and each device keeps its own
-choice.
+choice. Google limits how much an app may ask of a Gmail account in a minute,
+so a Gmail account downloads with at most a third of that and leaves the rest
+for opening mail and for your other devices. A large mailbox can take some
+hours the first time.
 
 On a metered connection, such as mobile data or a hotspot, downloading ahead of
 time can wait. With **Pause downloads** on in Settings → Network, accounts

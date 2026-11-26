@@ -117,7 +117,8 @@ pub fn next_attachment_to_prefetch(
          FROM attachments a JOIN messages m ON m.id = a.message_id
          WHERE m.account_id = ?1 AND m.is_draft = 0
            AND a.file_path IS NULL
-           AND (a.imap_section IS NOT NULL OR a.jmap_blob_id IS NOT NULL)
+           AND (a.imap_section IS NOT NULL OR a.jmap_blob_id IS NOT NULL
+                OR a.provider_attachment_id IS NOT NULL)
            AND (a.size IS NULL OR a.size <= ?3)
            AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
            AND m.folder_id NOT IN (SELECT value FROM json_each(?5))

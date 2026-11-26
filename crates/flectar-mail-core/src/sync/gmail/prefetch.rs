@@ -11,8 +11,8 @@
 //! Gmail counts every request against a quota of units a user spends in a
 //! minute, and a whole message costs 60 of them (see [`cost`]). The walk only
 //! spends what the account's other requests of that minute leave of
-//! [`BACKGROUND_UNITS`], so opening mail, sync and the app on the user's
-//! other devices keep the rest.
+//! [`cost::BACKGROUND_MINUTE`], so opening mail, sync and the app on the
+//! user's other devices keep the rest.
 
 use super::{GMAIL_API, GmailApi, SyncCtx, cost, hydrate_at, store_hydrated_body};
 use crate::db::repo::{self, messages::GmailQueued};
@@ -27,13 +27,11 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
-/// What the walk may spend in a minute, together with everything else the
-/// account sent in it: a third of a user's quota.
-const BACKGROUND_UNITS: u32 = cost::USER_MINUTE / 3;
 /// Between two bodies, so they spread over the minute rather than go out
 /// together: 1.8 s.
-const SPACING: Duration =
-    Duration::from_millis(60_000 * cost::MESSAGES_GET_CONTENT as u64 / BACKGROUND_UNITS as u64);
+const SPACING: Duration = Duration::from_millis(
+    60_000 * cost::MESSAGES_GET_CONTENT as u64 / cost::BACKGROUND_MINUTE as u64,
+);
 /// Bodies looked up at a time.
 const BATCH: i64 = 10;
 /// How often to look for missing bodies when none are left, or when the walk
@@ -111,7 +109,7 @@ async fn run_at(
         for message in queue {
             // The account's own requests come first: wait for the minute to
             // leave room, and spread the bodies over it.
-            let room = pace.room_at(cost::MESSAGES_GET_CONTENT, BACKGROUND_UNITS);
+            let room = pace.room_at(cost::MESSAGES_GET_CONTENT, cost::BACKGROUND_MINUTE);
             let spaced = last_sent.map_or(room, |sent| room.max(sent + SPACING));
             tokio::time::sleep_until(spaced).await;
             if !wanted(&ctx, &settings_rx) || pace.paused().is_some() {
@@ -300,7 +298,7 @@ mod tests {
 
     #[test]
     fn bodies_spread_over_a_minute_within_a_third_of_the_quota() {
-        assert_eq!(BACKGROUND_UNITS, 2_000);
+        assert_eq!(cost::BACKGROUND_MINUTE, 2_000);
         assert_eq!(SPACING, Duration::from_millis(1_800));
         // At most 33 bodies a minute, about 2,000 an hour.
         assert_eq!(60_000 / SPACING.as_millis(), 33);
@@ -424,8 +422,9 @@ mod tests {
         assert_eq!(kept, [1, 2, 3, 4]);
         // Three whole messages: 180 units in this minute.
         let pace = ctx.pace.account(config.id);
-        assert!(pace.room_at(BACKGROUND_UNITS - 180, BACKGROUND_UNITS) <= Instant::now());
-        assert!(pace.room_at(BACKGROUND_UNITS - 179, BACKGROUND_UNITS) > Instant::now());
+        let share = cost::BACKGROUND_MINUTE;
+        assert!(pace.room_at(share - 180, share) <= Instant::now());
+        assert!(pace.room_at(share - 179, share) > Instant::now());
     }
 
     #[tokio::test]
