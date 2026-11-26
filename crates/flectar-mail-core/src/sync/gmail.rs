@@ -2811,10 +2811,14 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
     collect_part_specs(resource.get("payload").unwrap_or(&Value::Null), &mut specs)?;
     let mut hydrated = HydratedBody::default();
     for spec in specs {
-        let bytes = match (&spec.encoded_data, &spec.provider_attachment_id) {
-            (Some(data), _) => decode_gmail_data(data)?,
-            (None, Some(attachment_id)) => api.attachment(message_id, attachment_id).await?,
-            (None, None) => Vec::new(),
+        // Gmail hands text over inline converted to UTF-8, while a part too
+        // large to come inline downloads on its own as the sender wrote it.
+        let (bytes, inline) = match (&spec.encoded_data, &spec.provider_attachment_id) {
+            (Some(data), _) => (decode_gmail_data(data)?, true),
+            (None, Some(attachment_id)) => {
+                (api.attachment(message_id, attachment_id).await?, false)
+            }
+            (None, None) => (Vec::new(), true),
         };
         let is_text_body = !spec.is_attachment
             && !spec.mime_type.eq_ignore_ascii_case("message/rfc822")
@@ -2822,7 +2826,11 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
                 || spec.mime_type == "text/html"
                 || spec.mime_type == "text/calendar");
         if is_text_body {
-            let decoded = decode_text_part(&bytes, spec.charset.as_deref());
+            let decoded = if inline {
+                decode_inline_text(&bytes, spec.charset.as_deref())
+            } else {
+                decode_text_part(&bytes, spec.charset.as_deref())
+            };
             match spec.mime_type.as_str() {
                 "text/plain" if hydrated.text.is_none() => hydrated.text = Some(decoded),
                 "text/html" if hydrated.html.is_none() => {
@@ -2889,6 +2897,21 @@ fn returned_receipt(resource: &Value, report: &[u8]) -> Option<crate::mime::Disp
     )
 }
 
+/// Text a part carries inline. Gmail's `format=full` converts it to UTF-8
+/// but leaves the part's header naming the charset the sender used, so
+/// decoding it again as, say, ISO-8859-1 turns "ç" into "Ã§". The named
+/// charset only applies to bytes that aren't UTF-8.
+fn decode_inline_text(bytes: &[u8], charset: Option<&str>) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        Err(_) => decode_text_part(bytes, charset),
+    }
+}
+
+/// Text in the charset its part names, as a part downloaded on its own
+/// (`messages.attachments.get`) comes: the sender's own bytes. Those of
+/// ISO-2022-JP, Japanese mail's charset, are all ASCII, so they would pass
+/// for UTF-8.
 fn decode_text_part(bytes: &[u8], charset: Option<&str>) -> String {
     let encoding = charset
         .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
@@ -5142,6 +5165,68 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_part_gmail_already_converted_is_not_decoded_twice() {
+        // Gmail sends a part declared ISO-8859-1 as UTF-8 bytes.
+        let bytes = "Atualizações está 🤩".as_bytes();
+        assert_eq!(
+            decode_inline_text(bytes, Some("iso-8859-1")),
+            "Atualizações está 🤩"
+        );
+        assert_eq!(
+            decode_inline_text("こんにちは".as_bytes(), Some("iso-2022-jp")),
+            "こんにちは"
+        );
+        // Bytes that are not UTF-8 still use the declared charset.
+        assert_eq!(
+            decode_inline_text(b"Atualiza\xe7\xf5es", Some("iso-8859-1")),
+            "Atualizações"
+        );
+    }
+
+    #[test]
+    fn text_downloaded_on_its_own_keeps_its_charset() {
+        // ISO-2022-JP's bytes are all ASCII, so they pass for UTF-8.
+        let (bytes, _, _) = encoding_rs::ISO_2022_JP.encode("こんにちは");
+        assert!(std::str::from_utf8(&bytes).is_ok());
+        assert_eq!(decode_text_part(&bytes, Some("iso-2022-jp")), "こんにちは");
+        assert_eq!(
+            decode_text_part(b"Atualiza\xe7\xf5es", Some("iso-8859-1")),
+            "Atualizações"
+        );
+    }
+
+    #[tokio::test]
+    async fn inline_text_named_in_another_charset_reads_as_sent() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let data = |text: &str| URL_SAFE_NO_PAD.encode(text);
+        let resource = json!({
+            "id": "latin", "threadId": "t-latin",
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": [],
+                "parts": [
+                    {
+                        "partId": "0", "mimeType": "text/plain", "filename": "",
+                        "headers": [{"name": "Content-Type",
+                                     "value": "text/plain; charset=\"ISO-8859-1\""}],
+                        "body": {"size": 13, "data": data("Atualizações")},
+                    },
+                    {
+                        "partId": "1", "mimeType": "text/html", "filename": "",
+                        "headers": [{"name": "Content-Type",
+                                     "value": "text/html; charset=windows-1251"}],
+                        "body": {"size": 18, "data": data("<p>Спасибо</p>")},
+                    },
+                ],
+            },
+        });
+        let api = GmailApi::new(ctx, config).unwrap();
+        let body = hydrate_parts(&api, &resource).await.unwrap();
+        assert_eq!(body.text.as_deref(), Some("Atualizações"));
+        assert!(body.html.unwrap().contains("Спасибо"));
+    }
 
     /// A Gmail account 1 with Inbox, Sent, Spam, Archive and All Mail.
     pub(super) async fn gmail_account() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
