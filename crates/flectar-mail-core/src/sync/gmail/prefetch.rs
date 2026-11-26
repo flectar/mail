@@ -7,10 +7,11 @@
 //! body, Inbox first and newest first, within the account's mail history, and
 //! stores them the same way an open does.
 
-use super::{GmailApi, SyncCtx, hydrate_parts, store_hydrated_body};
+use super::{GmailApi, SyncCtx, hydrate, store_hydrated_body};
 use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::models::{AccountConfig, AccountSettings, DownloadPolicy, now_ms};
+use crate::sync::engine::note_limit;
 use rusqlite::{Connection, params};
 use std::collections::HashSet;
 use std::time::Duration;
@@ -21,10 +22,11 @@ use tokio::sync::watch;
 const IDLE_INTERVAL: Duration = Duration::from_secs(60);
 /// Bodies fetched between pauses.
 const BATCH: usize = 10;
-/// Pause between batches. A body costs 5 quota units for messages.get plus 5
-/// per separate attachment part; 10 bodies every 5 s stays near 600 units a
-/// minute, a tenth of Google's 6,000 per user, leaving room for sync and opens.
-const PACE: Duration = Duration::from_secs(5);
+/// Pause between batches. messages.get costs 20 quota units (see
+/// `BACKFILL_INTERVAL` in gmail.rs), plus one attachments.get per separate
+/// part. 10 bodies every 10 s is about 1,200 units a minute, a fifth of
+/// Google's 6,000 per user, leaving room for sync and opens.
+const PACE: Duration = Duration::from_secs(10);
 /// Messages larger than this are left for when they are opened: their
 /// attachment parts are downloaded whole while reading the body.
 const MAX_MESSAGE_BYTES: i64 = 10 * 1024 * 1024;
@@ -56,13 +58,19 @@ pub(super) async fn run(
             }
         }
         let (mail_history, download) = {
-            let settings = settings_rx.borrow();
+            let settings = settings_rx.borrow_and_update();
             (settings.mail_history, settings.download)
         };
-        // Only the headers are wanted: messages download when they're
-        // opened, as the IMAP backfill does (#253).
-        if download == DownloadPolicy::Headers {
+        // Only the headers are wanted, or downloads wait on a metered
+        // connection: messages download when they're opened, as with the IMAP
+        // backfill (#253).
+        if download == DownloadPolicy::Headers || ctx.metered.downloads_wait() {
             delay = IDLE_INTERVAL;
+            continue;
+        }
+        // Gmail asked the account to wait; asking again can make it longer.
+        if let Some(pause) = ctx.pace.account(account_id).paused() {
+            delay = until(pause.until);
             continue;
         }
         let cutoff_ms = mail_history.cutoff_ms_at(now_ms());
@@ -88,7 +96,9 @@ pub(super) async fn run(
         for (message_id, provider_message_id) in batch {
             let stored = async {
                 let resource = api.message_full(&provider_message_id).await?;
-                let body = hydrate_parts(&api, &resource).await?;
+                // As an open does: a forwarded message comes from the raw
+                // message (#455).
+                let body = hydrate(&ctx, &config, &api, &resource).await?;
                 store_hydrated_body(&ctx, &config, provider_message_id.clone(), body).await
             }
             .await;
@@ -100,15 +110,23 @@ pub(super) async fn run(
                         }
                     }
                 }
-                Err(error) if retry_later(&error) => {
-                    tracing::debug!(account_id, %error, "Gmail prefetch: paused");
-                    delay = IDLE_INTERVAL;
-                    break;
-                }
-                Err(error) => {
-                    tracing::warn!(account_id, message_id, %error, "Gmail prefetch: skipped a message");
-                    failed.insert(message_id);
-                }
+                Err(error) => match outcome(&error) {
+                    Outcome::Limited => {
+                        tracing::debug!(account_id, %error, "Gmail prefetch: asked to wait");
+                        delay = note_limit(&ctx, account_id, &error)
+                            .map_or(IDLE_INTERVAL, |pause| until(pause.until));
+                        break;
+                    }
+                    Outcome::Later => {
+                        tracing::debug!(account_id, %error, "Gmail prefetch: paused");
+                        delay = IDLE_INTERVAL;
+                        break;
+                    }
+                    Outcome::Skip => {
+                        tracing::warn!(account_id, message_id, %error, "Gmail prefetch: skipped a message");
+                        failed.insert(message_id);
+                    }
+                },
             }
         }
         if !touched.is_empty() {
@@ -119,12 +137,33 @@ pub(super) async fn run(
     }
 }
 
-/// Network trouble, quota and sign-in problems pass; the message is fine.
-fn retry_later(error: &CoreError) -> bool {
-    matches!(
-        error,
-        CoreError::Offline | CoreError::Network(_) | CoreError::Auth(_) | CoreError::NeedsReauth
-    )
+/// What a failed fetch means for the walk.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    /// Gmail asked to slow down: the account waits as long as it said.
+    Limited,
+    /// Network or sign-in trouble passes; the message is fine.
+    Later,
+    /// Something about this message: left for when it's opened.
+    Skip,
+}
+
+fn outcome(error: &CoreError) -> Outcome {
+    match error {
+        CoreError::RateLimited { .. } => Outcome::Limited,
+        CoreError::Offline
+        | CoreError::Network(_)
+        | CoreError::Auth(_)
+        | CoreError::NeedsReauth => Outcome::Later,
+        _ => Outcome::Skip,
+    }
+}
+
+/// How long until `instant`, at least one batch's pause.
+fn until(instant: tokio::time::Instant) -> Duration {
+    instant
+        .saturating_duration_since(tokio::time::Instant::now())
+        .max(PACE)
 }
 
 /// Up to `limit` Gmail messages of `account_id` still without a body, as
@@ -158,7 +197,7 @@ fn missing_bodies(
          WHERE m.account_id = ?1
            AND m.body_state = 'none'
            AND m.gm_msgid IS NOT NULL
-           AND (?2 IS NULL OR m.date >= ?2)
+           AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
            AND COALESCE(m.size, 0) <= ?3
            AND NOT EXISTS (SELECT 1 FROM folders f
                            WHERE f.id = m.folder_id AND f.role IN ('spam', 'trash'))
@@ -202,7 +241,7 @@ mod tests {
             "INSERT INTO accounts (
                id, email, provider, auth_kind, mail_protocol, username, incoming_host,
                incoming_port, smtp_host, smtp_port, created_at, settings_json
-             ) VALUES (1, 'me@gmail.test', 'gmail', 'oauth2', 'gmail', 'me', 'h', 993,
+             ) VALUES (1, 'me@mail.example', 'gmail', 'oauth2', 'gmail', 'me', 'h', 993,
                        'h', 587, 0, '{}');
              INSERT INTO folders (id, account_id, path, role) VALUES
                (1, 1, 'INBOX', 'inbox'),
@@ -213,13 +252,13 @@ mod tests {
                id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
                date, snippet, body_state, gm_msgid, size
              ) VALUES
-               (1, 1, 1, 2, 'old archived', 'a@test.dev', '[]', '[]', 100, '', 'none', 'g1', 1),
-               (2, 1, 1, 2, 'new archived', 'a@test.dev', '[]', '[]', 300, '', 'none', 'g2', 1),
-               (3, 1, 1, 2, 'old in inbox', 'a@test.dev', '[]', '[]', 200, '', 'none', 'g3', 1),
-               (4, 1, 1, 2, 'cached', 'a@test.dev', '[]', '[]', 400, '', 'cached', 'g4', 1),
-               (5, 1, 1, 3, 'spam', 'a@test.dev', '[]', '[]', 500, '', 'none', 'g5', 1),
-               (6, 1, 1, 2, 'huge', 'a@test.dev', '[]', '[]', 600, '', 'none', 'g6', 99999999),
-               (7, 1, 1, 2, 'too old', 'a@test.dev', '[]', '[]', 10, '', 'none', 'g7', 1);
+               (1, 1, 1, 2, 'old archived', 'a@mail.example', '[]', '[]', 100, '', 'none', 'g1', 1),
+               (2, 1, 1, 2, 'new archived', 'a@mail.example', '[]', '[]', 300, '', 'none', 'g2', 1),
+               (3, 1, 1, 2, 'old in inbox', 'a@mail.example', '[]', '[]', 200, '', 'none', 'g3', 1),
+               (4, 1, 1, 2, 'cached', 'a@mail.example', '[]', '[]', 400, '', 'cached', 'g4', 1),
+               (5, 1, 1, 3, 'spam', 'a@mail.example', '[]', '[]', 500, '', 'none', 'g5', 1),
+               (6, 1, 1, 2, 'huge', 'a@mail.example', '[]', '[]', 600, '', 'none', 'g6', 99999999),
+               (7, 1, 1, 2, 'too old', 'a@mail.example', '[]', '[]', 10, '', 'none', 'g7', 1);
              INSERT INTO message_folders (message_id, folder_id, since) VALUES (3, 1, 0);",
         )
         .unwrap();
@@ -248,6 +287,20 @@ mod tests {
         let conn = seeded(true);
         let rows = missing_bodies(&conn, 1, Some(50), 1, &[3]).unwrap();
         assert_eq!(ids(rows), [2]);
+    }
+
+    #[test]
+    fn quota_waits_network_pauses_and_others_skip() {
+        let limited = CoreError::RateLimited {
+            service: "Gmail".into(),
+            kind: crate::error::LimitKind::Requests,
+            retry_after: None,
+            detail: "userRateLimitExceeded".into(),
+        };
+        assert_eq!(outcome(&limited), Outcome::Limited);
+        assert_eq!(outcome(&CoreError::Offline), Outcome::Later);
+        assert_eq!(outcome(&CoreError::NeedsReauth), Outcome::Later);
+        assert_eq!(outcome(&CoreError::Other("bad part".into())), Outcome::Skip);
     }
 
     #[test]
