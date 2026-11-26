@@ -2813,20 +2813,24 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
     collect_part_specs(resource.get("payload").unwrap_or(&Value::Null), &mut specs)?;
     let mut hydrated = HydratedBody::default();
     for spec in specs {
-        // Gmail hands text over inline converted to UTF-8, while a part too
-        // large to come inline downloads on its own as the sender wrote it.
-        let (bytes, inline) = match (&spec.encoded_data, &spec.provider_attachment_id) {
-            (Some(data), _) => (decode_gmail_data(data)?, true),
-            (None, Some(attachment_id)) => {
-                (api.attachment(message_id, attachment_id).await?, false)
-            }
-            (None, None) => (Vec::new(), true),
-        };
         let is_text_body = !spec.is_attachment
             && !spec.mime_type.eq_ignore_ascii_case("message/rfc822")
             && (spec.mime_type == "text/plain"
                 || spec.mime_type == "text/html"
                 || spec.mime_type == "text/calendar");
+        let is_report = hydrated.disposition_report.is_none()
+            && crate::mime::is_disposition_report_part(&spec.mime_type);
+        // Gmail hands text over inline converted to UTF-8, while a part too
+        // large to come inline downloads on its own as the sender wrote it.
+        // Files download when they're opened, so only the text and a read
+        // receipt's report do here.
+        let (bytes, inline) = match (&spec.encoded_data, &spec.provider_attachment_id) {
+            (Some(data), _) => (decode_gmail_data(data)?, true),
+            (None, Some(attachment_id)) if is_text_body || is_report => {
+                (api.attachment(message_id, attachment_id).await?, false)
+            }
+            (None, _) => (Vec::new(), true),
+        };
         if is_text_body {
             let decoded = if inline {
                 decode_inline_text(&bytes, spec.charset.as_deref())
@@ -2843,9 +2847,7 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
             }
             continue;
         }
-        if hydrated.disposition_report.is_none()
-            && crate::mime::is_disposition_report_part(&spec.mime_type)
-        {
+        if is_report {
             hydrated.disposition_report = returned_receipt(resource, &bytes);
         }
         let has_provider_attachment = spec.provider_attachment_id.is_some();
@@ -5234,6 +5236,60 @@ mod tests {
         let body = hydrate_parts(&api, &resource).await.unwrap();
         assert_eq!(body.text.as_deref(), Some("Atualizações"));
         assert!(body.html.unwrap().contains("Спасибо"));
+    }
+
+    #[tokio::test]
+    async fn reading_a_body_leaves_its_files_for_when_they_open() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let resource = json!({
+            "id": "files", "threadId": "t-files",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": [],
+                "parts": [
+                    {
+                        "partId": "0", "mimeType": "text/plain", "filename": "",
+                        "headers": [{"name": "Content-Type",
+                                     "value": "text/plain; charset=UTF-8"}],
+                        "body": {"size": 11, "data": URL_SAFE_NO_PAD.encode("The report.")},
+                    },
+                    {
+                        "partId": "1", "mimeType": "application/pdf", "filename": "report.pdf",
+                        "headers": [{"name": "Content-Disposition",
+                                     "value": "attachment; filename=\"report.pdf\""}],
+                        "body": {"size": 2_000_000, "attachmentId": "pdf-1"},
+                    },
+                    {
+                        "partId": "2", "mimeType": "image/png", "filename": "logo.png",
+                        "headers": [{"name": "Content-ID", "value": "<logo>"},
+                                    {"name": "Content-Disposition", "value": "inline"}],
+                        "body": {"size": 40_000, "attachmentId": "png-1"},
+                    },
+                ],
+            },
+        });
+        // No sign-in is kept here, so downloading a file would fail the read.
+        let api = GmailApi::new(ctx, config).unwrap();
+        let body = hydrate_parts(&api, &resource).await.unwrap();
+        assert_eq!(body.text.as_deref(), Some("The report."));
+        let files: Vec<_> = body
+            .attachments
+            .iter()
+            .map(|file| {
+                (
+                    file.provider_attachment_id.as_deref(),
+                    file.size,
+                    file.inline_bytes.is_none(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            files,
+            [
+                (Some("pdf-1"), 2_000_000, true),
+                (Some("png-1"), 40_000, true)
+            ]
+        );
     }
 
     /// A Gmail account 1 with Inbox, Sent, Spam, Archive and All Mail.
