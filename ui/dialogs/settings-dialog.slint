@@ -3018,7 +3018,7 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> has-push: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
                                 // IMAP and JMAP accounts download messages ahead of time
                                 // in the background, which this turns down or up (#253).
-                                private property <bool> has-download: account.mail_protocol == "imap" || account.mail_protocol == "jmap";
+                                private property <bool> has-download: account.mail_protocol == "imap" || account.mail_protocol == "jmap" || account.mail_protocol == "gmail";
                                 // Which folders show (#253): Gmail's labels are its own.
                                 private property <bool> has-shown-folders: account.mail_protocol == "imap" || account.mail_protocol == "jmap" || account.mail_protocol == "pop3";
                                 // Gmail's servers keep the standard wait.
