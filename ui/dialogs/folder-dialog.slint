@@ -1,4 +1,5 @@
 import { Button } from "../components/button.slint";
+import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 // Folder editing belongs to the application overlay layer. Keeping this out of
@@ -20,7 +21,7 @@ export component FolderDialog inherits Rectangle {
     callback submit(string);
     callback confirm-delete;
 
-    background: #00000066;
+    background: AppTheme.scrim;
     forward-focus: folder-name-input;
     accessible-role: groupbox;
     accessible-label: root.mode == "create" && root.item-kind == "label" ? @tr("New label")

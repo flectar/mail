@@ -110,7 +110,7 @@ export component WhenDialog inherits Rectangle {
         : root.reminding ? @image-url("../icons/lucide/outline/bell.svg")
         : @image-url("../icons/lucide/outline/alarm-clock.svg");
 
-    background: #00000066;
+    background: AppTheme.scrim;
     forward-focus: keys;
     accessible-role: groupbox;
     accessible-label: root.title;

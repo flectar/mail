@@ -34,7 +34,7 @@ export component UnsubscribeDialog inherits Rectangle {
     private property <bool> cleaning: Unsubscribe.stage == "done" && Unsubscribe.inbox-count > 0;
 
     visible: Unsubscribe.stage != "";
-    background: #00000088;
+    background: AppTheme.scrim;
     z: 1000;
     accessible-role: groupbox;
     accessible-label: root.title;

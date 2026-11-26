@@ -1,5 +1,6 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
+import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 // Explains the browser fallback without hiding the privacy implications of
@@ -23,7 +24,7 @@ export component RenderingInfoDialog inherits Rectangle {
     private property <int> selected-action: 2;
 
     visible: root.open;
-    background: #00000088;
+    background: AppTheme.scrim;
     z: 1000;
     accessible-role: groupbox;
     accessible-label: @tr("About email rendering");

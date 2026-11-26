@@ -1,11 +1,11 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
+import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 export component CalendarEventDialog inherits Rectangle {
     in property <bool> compact: false;
-    in property <bool> dark-mode: false;
     in property <color> accent;
     in property <color> border;
     in property <color> border-subtle;
@@ -30,7 +30,7 @@ export component CalendarEventDialog inherits Rectangle {
             y: 0px;
             width: parent.width;
             height: parent.height;
-            background: root.dark-mode ? #00000088 : #20212455;
+            background: AppTheme.scrim;
             z: 500;
             TouchArea { clicked => { root.calendar_editor_open = false; } }
 

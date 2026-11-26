@@ -570,7 +570,7 @@ export component FilesView inherits Rectangle {
     }
 
     if FilesUi.dialog != "" : Rectangle {
-        background: #00000060;
+        background: AppTheme.scrim;
         TouchArea { }
         Rectangle {
             x: (parent.width - self.width) / 2; y: max(16px, (parent.height - self.height) / 2);
@@ -681,7 +681,7 @@ export component FilesView inherits Rectangle {
         }
     }
     if root.setup : Rectangle {
-        background: #00000088; z: 100;
+        background: AppTheme.scrim; z: 100;
         TouchArea {}
         Rectangle {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;

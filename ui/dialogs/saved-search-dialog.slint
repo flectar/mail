@@ -13,7 +13,7 @@ export component SavedSearchDialog inherits Rectangle {
         : root.stage == "edit" ? @tr("Edit saved search")
         : @tr("Delete saved search?");
 
-    background: #00000066;
+    background: AppTheme.scrim;
     accessible-role: groupbox;
     accessible-label: root.heading;
 

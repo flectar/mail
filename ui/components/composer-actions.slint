@@ -3,7 +3,7 @@ import { ComposeAttachment, ComposeLink } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { SettingsSelect } from "settings-components.slint";
 import { TranslationWords } from "../translation.slint";
@@ -1247,7 +1247,7 @@ export component ImageAltEditor inherits Rectangle {
     callback apply(string);
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     z: 6000;
     TouchArea { }
 
@@ -1374,7 +1374,7 @@ export component LinkEditor inherits Rectangle {
     callback remove();
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     z: 6000;
     TouchArea { }
 
@@ -1521,7 +1521,7 @@ export component TranslateEditor inherits Rectangle {
     callback apply(int);
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     z: 6000;
     TouchArea { }
 
@@ -1617,7 +1617,7 @@ export component DiscardConfirmation inherits Rectangle {
     callback discard();
 
     visible: root.open;
-    background: #00000066;
+    background: AppTheme.scrim;
     // Above the link editor and the templates, which a window's own close
     // button can leave open.
     z: 8000;
