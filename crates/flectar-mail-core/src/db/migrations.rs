@@ -92,6 +92,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/073_sync_turned_away.sql")),
     Migration::Plain(include_str!("migrations/074_sign_in_holds.sql")),
     Migration::Plain(include_str!("migrations/075_gmail_text_decoded_twice.sql")),
+    Migration::Plain(include_str!("migrations/076_gmail_body_downloads.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -495,6 +496,10 @@ mod tests {
         assert_eq!(
             index_columns("idx_messages_pending_body_page"),
             ["folder_id", "date", "id"]
+        );
+        assert_eq!(
+            index_columns("idx_messages_gmail_pending_body"),
+            ["account_id", "date", "id"]
         );
         assert_eq!(index_columns("idx_contacts_unfolded"), ["id"]);
         assert_eq!(

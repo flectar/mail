@@ -387,6 +387,28 @@ impl AccountPace {
         state.spent.push_back((now, units));
     }
 
+    /// When `units` more keep what the account spent in the last minute
+    /// within `ceiling`: now, or once enough of it is a minute old. Work in
+    /// the background waits for it, so it only spends what the rest leaves.
+    pub(crate) fn room_at(&self, units: u32, ceiling: u32) -> Instant {
+        let now = Instant::now();
+        let mut state = lock(&self.state);
+        forget_spent(&mut state.spent, now);
+        let (units, ceiling) = (u64::from(units), u64::from(ceiling));
+        let mut spent: u64 = state.spent.iter().map(|(_, cost)| u64::from(*cost)).sum();
+        if spent + units <= ceiling {
+            return now;
+        }
+        for (at, cost) in &state.spent {
+            spent -= u64::from(*cost);
+            if spent + units <= ceiling {
+                return *at + QUOTA_WINDOW;
+            }
+        }
+        // More than the ceiling on its own: once nothing else counts.
+        state.spent.back().map_or(now, |(at, _)| *at + QUOTA_WINDOW)
+    }
+
     fn fewer_connections(&self, state: &mut PaceState) {
         if state.bulk_allowed <= 1 {
             return;
@@ -753,5 +775,35 @@ mod tests {
         tokio::time::advance(START_TOGETHER).await;
         pace.starting(9);
         assert_eq!(pace.account(9).take_start(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn background_work_spends_what_the_last_minute_left() {
+        let pace = Pace::default();
+        let account = pace.account(1);
+        let start = Instant::now();
+        assert_eq!(account.room_at(60, 2_000), start);
+        // Every task of the account counts toward the same minute.
+        pace.account(1).spend(1_500);
+        tokio::time::advance(Duration::from_secs(10)).await;
+        account.spend(400);
+        assert_eq!(account.room_at(60, 2_000), Instant::now());
+        account.spend(100);
+        // 2,000 spent: room comes when the first 1,500 is a minute old.
+        assert_eq!(account.room_at(60, 2_000), start + QUOTA_WINDOW);
+        assert_eq!(pace.account(2).room_at(60, 2_000), Instant::now());
+        tokio::time::advance(Duration::from_secs(50)).await;
+        assert_eq!(account.room_at(60, 2_000), Instant::now());
+        // Nothing older than a minute counts.
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(account.room_at(1_999, 2_000), Instant::now());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cost_over_the_ceiling_waits_for_an_empty_minute() {
+        let account = Pace::default().account(1);
+        account.spend(20);
+        let last = Instant::now();
+        assert_eq!(account.room_at(3_000, 2_000), last + QUOTA_WINDOW);
     }
 }

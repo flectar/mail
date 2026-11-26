@@ -2881,7 +2881,7 @@ async fn hydrate_at(
     resource: &Value,
 ) -> Result<HydratedBody> {
     if !shows_messages(resource.get("payload").unwrap_or(&Value::Null)) {
-        return hydrate_parts(api, resource).await;
+        return hydrate_parts(api, base, resource).await;
     }
     let provider_message_id = required_string(resource, "id")?;
     let size = resource
@@ -2946,7 +2946,9 @@ fn shows_messages(part: &Value) -> bool {
             .is_some_and(|parts| parts.iter().any(shows_messages))
 }
 
-async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody> {
+/// A message's body from its parts as Gmail gives them, with the mailbox API
+/// at `base` for the parts that download on their own.
+async fn hydrate_parts(api: &GmailApi, base: &str, resource: &Value) -> Result<HydratedBody> {
     let message_id = required_string(resource, "id")?;
     let mut specs = Vec::new();
     collect_part_specs(resource.get("payload").unwrap_or(&Value::Null), &mut specs)?;
@@ -2965,9 +2967,10 @@ async fn hydrate_parts(api: &GmailApi, resource: &Value) -> Result<HydratedBody>
         // receipt's report do here.
         let (bytes, inline) = match (&spec.encoded_data, &spec.provider_attachment_id) {
             (Some(data), _) => (decode_gmail_data(data)?, true),
-            (None, Some(attachment_id)) if is_text_body || is_report => {
-                (api.attachment(message_id, attachment_id).await?, false)
-            }
+            (None, Some(attachment_id)) if is_text_body || is_report => (
+                api.attachment_at(base, message_id, attachment_id).await?,
+                false,
+            ),
             (None, _) => (Vec::new(), true),
         };
         if is_text_body {
@@ -3231,6 +3234,8 @@ async fn store_hydrated_body(
             }
 
             repo::search::index_message(&tx, local_message_id)?;
+            // A body that failed to download before has it now.
+            repo::sync_failures::clear_content(&tx, local_message_id)?;
             // Rules that waited for this body go on (#238).
             let fresh = crate::rules::resume(&tx, local_message_id)?
                 .filter(|resumed| resumed.announced)
@@ -4846,25 +4851,31 @@ pub(super) fn spawn(
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let actor_ctx = ctx.clone();
     let actor_config = config.clone();
+    // One waiting wake-up stands for every newer one.
+    let (prefetch_tx, prefetch_rx) = mpsc::channel(1);
     vec![
         // Bodies downloaded ahead of time, so opening mail doesn't wait.
         crate::net::timeouts::spawn(prefetch::run(
             ctx.clone(),
             config.clone(),
             settings_rx.clone(),
+            prefetch_rx,
         )),
         crate::net::timeouts::spawn(async move {
-            run_actor(actor_ctx, actor_config, rx, settings_rx).await
+            run_actor(actor_ctx, actor_config, rx, settings_rx, prefetch_tx).await
         }),
         crate::net::timeouts::spawn(async move { run_reader(ctx, config, body_rx).await }),
     ]
 }
 
+/// `prefetch` wakes the walk of bodies to download ahead of time once a pass
+/// reached Gmail.
 async fn run_actor(
     ctx: SyncCtx,
     config: AccountConfig,
     mut rx: mpsc::Receiver<SyncCmd>,
     mut settings_rx: watch::Receiver<AccountSettings>,
+    prefetch: mpsc::Sender<()>,
 ) {
     let account_id = config.id;
     debug_assert_eq!(config.provider, Provider::Gmail);
@@ -4963,6 +4974,8 @@ async fn run_actor(
                 backoff.reset();
                 ctx.pace.account(account_id).reached();
                 set_state(&ctx, account_id, "idle").await;
+                // New mail's bodies follow it in.
+                let _ = prefetch.try_send(());
                 ctx.bus.emit(CoreEvent::NetworkState { online: true });
                 let (done, total) = ctx
                     .db
@@ -5372,7 +5385,7 @@ mod tests {
             },
         });
         let api = GmailApi::new(ctx, config).unwrap();
-        let body = hydrate_parts(&api, &resource).await.unwrap();
+        let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
         assert_eq!(body.text.as_deref(), Some("Atualizações"));
         assert!(body.html.unwrap().contains("Спасибо"));
     }
@@ -5409,7 +5422,7 @@ mod tests {
         });
         // No sign-in is kept here, so downloading a file would fail the read.
         let api = GmailApi::new(ctx, config).unwrap();
-        let body = hydrate_parts(&api, &resource).await.unwrap();
+        let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
         assert_eq!(body.text.as_deref(), Some("The report."));
         let files: Vec<_> = body
             .attachments
@@ -6179,7 +6192,7 @@ mod returned_receipt_tests {
         .await
         .unwrap();
         let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
-        let body = hydrate_parts(&api, &resource).await.unwrap();
+        let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
         assert!(body.disposition_report.is_some());
         let threads = store_hydrated_body(&ctx, &config, "receipt".into(), body)
             .await
@@ -6215,12 +6228,23 @@ mod search_tests {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     /// A request the stand-in answered: method, target and body.
-    pub(super) type Request = (String, String, String);
+    pub(in crate::sync::gmail) type Request = (String, String, String);
 
     /// A stand-in for Gmail's API and batch endpoint that answers each
     /// request with `answer`'s content type and body, and keeps the requests.
     pub(super) async fn stand_in(
         answer: impl Fn(&Request) -> (String, String) + Send + Sync + 'static,
+    ) -> (String, Arc<Mutex<Vec<Request>>>) {
+        stand_in_answering(move |request| {
+            let (content_type, body) = answer(request);
+            (200, content_type, body)
+        })
+        .await
+    }
+
+    /// [`stand_in`] answering with `answer`'s status too.
+    pub(in crate::sync::gmail) async fn stand_in_answering(
+        answer: impl Fn(&Request) -> (u16, String, String) + Send + Sync + 'static,
     ) -> (String, Arc<Mutex<Vec<Request>>>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -6253,10 +6277,14 @@ mod search_tests {
                     let mut body = vec![0; length];
                     stream.read_exact(&mut body).await.unwrap();
                     let request = (method, target, String::from_utf8(body).unwrap());
-                    let (content_type, body) = answer(&request);
+                    let (status, content_type, body) = answer(&request);
                     requests.lock().unwrap().push(request);
+                    let reason = StatusCode::from_u16(status)
+                        .ok()
+                        .and_then(|status| status.canonical_reason())
+                        .unwrap_or("Status");
                     let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\
+                        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\n\
                          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                         body.len()
                     );
