@@ -1,0 +1,123 @@
+diff --git a/crates/blitz-dom/assets/default.css b/crates/blitz-dom/assets/default.css
+index 8790d04..e76f79e 100644
+--- a/crates/blitz-dom/assets/default.css
++++ b/crates/blitz-dom/assets/default.css
+@@ -638,8 +638,8 @@ li {
+ 
+ /* leafs */
+ 
+-/* <hr> noshade and color attributes are handled completely by
+- * HTMLHRElement::MapAttributesIntoRule.
++/* <hr> align, color, noshade, size and width attributes are presentational
++ * hints (presentational_hints.rs).
+  * https://html.spec.whatwg.org/#the-hr-element-2
+  */
+ hr {
+@@ -656,10 +656,6 @@ hr {
+     display: block;
+ }
+ 
+-hr[size="1"] {
+-    border-style: solid none none none;
+-}
+-
+ /* Note that we only intend for the alt content to show up if the image is
+  * broken. But non-broken images/inputs will have a replaced box, and thus we
+  * won't we don't generate the pseudo-element anyways. This prevents
+diff --git a/crates/blitz-dom/src/presentational_hints.rs b/crates/blitz-dom/src/presentational_hints.rs
+index e52796e..e449b0f 100644
+--- a/crates/blitz-dom/src/presentational_hints.rs
++++ b/crates/blitz-dom/src/presentational_hints.rs
+@@ -366,6 +366,27 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
+                     let _ = write!(css, "font-size:{size};");
+                 }
+             }
++            // `<hr>` as Blink maps it: `color` and `noshade` make a solid
++            // rule filled with the colour, or for `noshade` with Blink's dark
++            // gray (#808080, darker than CSS `darkgray`), and `size` sets the
++            // height, or drops the bottom border at 1 or less.
++            "color" if *tag == local_name!("hr") => {
++                css.push_str("border-style:solid;");
++                if let Some(color) = parse_legacy_color(value) {
++                    let _ = write!(css, "border-color:{color};background-color:{color};");
++                }
++            }
++            "noshade" if *tag == local_name!("hr") && self::attr(elem, "color").is_none() => {
++                css.push_str("border-style:solid;border-color:#808080;background-color:#808080;");
++            }
++            "size" if *tag == local_name!("hr") => {
++                match parse_non_negative_integer(value).unwrap_or(0) {
++                    0 | 1 => css.push_str("border-bottom-width:0;"),
++                    size => {
++                        let _ = write!(css, "height:{}px;", size - 2);
++                    }
++                }
++            }
+             "hidden" => css.push_str("display:none;"),
+             _ => {}
+         }
+diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
+index 82dc461..5c35a63 100644
+--- a/crates/blitz-paint/src/render/border.rs
++++ b/crates/blitz-paint/src/render/border.rs
+@@ -5,7 +5,8 @@ use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _,
+ use peniko::{Color, Fill};
+ use smallvec::SmallVec;
+ use style::color::AbsoluteColor;
+-use style::values::computed::{BorderStyle, OutlineStyle};
++use style::values::computed::{BorderStyle, Display, OutlineStyle};
++use style::values::specified::box_::{DisplayInside, DisplayOutside};
+ 
+ use crate::{color::ToColorColor as _, kurbo_css::Edge, render::ElementCx};
+ 
+@@ -72,6 +73,16 @@ fn beveled_edge_color(color: Color, edge: Edge, inset: bool) -> Color {
+     }
+ }
+ 
++/// Whether a box is a table, a table part or a caption (Blink's
++/// `IsDisplayTableType`).
++fn is_table_type(display: Display) -> bool {
++    display.inside() == DisplayInside::Table
++        || matches!(
++            display.outside(),
++            DisplayOutside::InternalTable | DisplayOutside::TableCaption
++        )
++}
++
+ /// The (outer half, inner half) colours of a single edge of a `groove`/`ridge`
+ /// border.
+ ///
+@@ -245,6 +256,17 @@ impl ElementCx<'_, '_> {
+         // and inner halves of a `groove`/`ridge`).
+         let mut borders: SmallVec<[(Color, BezPath); 8]> = SmallVec::new();
+ 
++        // Like Blink (`ComputedStyleUtils::BorderSideColor`), an `inset`,
++        // `outset`, `groove` or `ridge` edge resolves `currentcolor` against
++        // rgb(238, 238, 238) instead of the text colour, unless the box is a
++        // table or a table part. This is what makes a default `<hr>`, whose
++        // text colour is gray, pale.
++        let bevel_current_color = if is_table_type(style.clone_display()) {
++            current_color
++        } else {
++            AbsoluteColor::srgb_legacy(238, 238, 238, 1.0)
++        };
++
+         for &edge in &[Edge::Top, Edge::Right, Edge::Bottom, Edge::Left] {
+             let (color, edge_style) = match edge {
+                 Edge::Top => (&border.border_top_color, border.border_top_style),
+@@ -252,7 +274,14 @@ impl ElementCx<'_, '_> {
+                 Edge::Bottom => (&border.border_bottom_color, border.border_bottom_style),
+                 Edge::Left => (&border.border_left_color, border.border_left_style),
+             };
+-            let color = color.resolve_to_absolute(&current_color).as_srgb_color();
++            let current_color = match edge_style {
++                BorderStyle::Inset
++                | BorderStyle::Outset
++                | BorderStyle::Groove
++                | BorderStyle::Ridge => &bevel_current_color,
++                _ => &current_color,
++            };
++            let color = color.resolve_to_absolute(current_color).as_srgb_color();
+ 
+             if color.components[3] <= 0.0 {
+                 continue;

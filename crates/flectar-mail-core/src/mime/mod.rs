@@ -1354,7 +1354,30 @@ fn is_data_url(url: &str) -> bool {
         .eq("data:".chars())
 }
 
-static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
+/// The URL schemes mail may link and load from.
+const MAIL_URL_SCHEMES: [&str; 6] = ["http", "https", "mailto", "tel", "cid", "data"];
+
+static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(mail_sanitizer);
+
+/// A `<body>`'s attributes, which are cleaned as a `<div>`'s, with its text
+/// colour, background and margins kept as well, which browsers render.
+static BODY_SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
+    let mut b = mail_sanitizer();
+    b.add_tag_attributes(
+        "div",
+        [
+            "text",
+            "background",
+            "leftmargin",
+            "topmargin",
+            "marginwidth",
+            "marginheight",
+        ],
+    );
+    b
+});
+
+fn mail_sanitizer() -> ammonia::Builder<'static> {
     let mut b = ammonia::Builder::default();
     b.add_generic_attributes([
         "style",
@@ -1377,30 +1400,66 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
         "html", "head", "body", "meta", "title", "table", "thead", "tbody", "tfoot", "tr", "td",
         "th", "center", "font", "img", "style",
     ])
+    // Elements that browsers render, which ammonia's defaults leave out and
+    // other mail clients' sanitizers keep. Dropping one drops its box and its
+    // style with it.
+    .add_tags(["section", "main", "address", "big", "nobr", "dir", "menu"])
     // Not `http-equiv`, which can refresh or redirect the page it is in.
     .add_tag_attributes("meta", ["name", "content"])
     .add_tag_attributes("img", ["src", "alt", "width", "height"])
     .add_tag_attributes("font", ["face", "size", "color"])
-    .add_tag_attributes("a", ["href", "title"])
+    // An anchor's `name` is where a link to `#name` in the message lands.
+    // Thunderbird, Roundcube and DOMPurify keep it too.
+    .add_tag_attributes("a", ["href", "title", "name"])
     // Whether a collapsible section starts open, and the group of which only
     // one may be open at a time. DOMPurify keeps both too.
     .add_tag_attributes("details", ["open", "name"])
-    .url_schemes(std::collections::HashSet::from([
-        "http", "https", "mailto", "tel", "cid", "data",
-    ]))
+    // Presentational attributes that browsers render, as other mail
+    // clients' sanitizers keep them.
+    .add_tag_attributes("img", ["hspace", "vspace"])
+    .add_tag_attributes("table", ["background", "frame", "rules"])
+    .add_tag_attributes("thead", ["background"])
+    .add_tag_attributes("tbody", ["background"])
+    .add_tag_attributes("tfoot", ["background"])
+    .add_tag_attributes("tr", ["background"])
+    .add_tag_attributes("td", ["background", "nowrap"])
+    .add_tag_attributes("th", ["background", "nowrap"])
+    .add_tag_attributes("hr", ["noshade"])
+    .add_tag_attributes("br", ["clear"])
+    .add_tag_attributes("ol", ["type", "reversed"])
+    .add_tag_attributes("ul", ["type"])
+    .add_tag_attributes("li", ["type", "value"])
+    // A `background` is an image URL, which ammonia checks only in `src`.
     // `data:` is for pictures a message carries. As a link target it is a
     // page the message wrote, which a browser shows at an address that
     // names no site, so links keep their text and lose such targets.
-    .attribute_filter(|_, attribute, value| {
-        (attribute != "href" || !is_data_url(value)).then(|| value.into())
+    // Ammonia takes one attribute filter, so it does both.
+    .attribute_filter(|_element, attribute, value| {
+        let keep = match attribute {
+            "background" => is_mail_url(value),
+            "href" => !is_data_url(value),
+            _ => true,
+        };
+        keep.then_some(std::borrow::Cow::Borrowed(value))
     })
+    .url_schemes(std::collections::HashSet::from(MAIL_URL_SCHEMES))
     // CSS is needed by the native Blitz renderer for email typography and
     // layout. It is still inert here because executable script content stays
     // stripped and the renderer does not execute HTML.
     .clean_content_tags(std::collections::HashSet::from(["script"]))
     .link_rel(Some("noopener noreferrer"));
     b
-});
+}
+
+/// Whether ammonia would keep a URL in a `src`: one with a mail URL scheme,
+/// or a relative one.
+fn is_mail_url(value: &str) -> bool {
+    match url::Url::parse(value) {
+        Ok(url) => MAIL_URL_SCHEMES.contains(&url.scheme()),
+        Err(url::ParseError::RelativeUrlWithoutBase) => true,
+        Err(_) => false,
+    }
+}
 
 pub fn sanitize_html(html: &str) -> String {
     let Some(body) = html_document_section(html, "body") else {
@@ -1417,9 +1476,9 @@ pub fn sanitize_html(html: &str) -> String {
         .map(|section| SANITIZER.clean(section.content).to_string())
         .unwrap_or_default();
     let body_content = SANITIZER.clean(body.content).to_string();
-    let body_attributes = sanitize_container_attributes(body.attributes);
+    let body_attributes = sanitize_container_attributes(body.attributes, &BODY_SANITIZER);
     let html_attributes = html_document_section(html, "html")
-        .map(|section| sanitize_container_attributes(section.attributes))
+        .map(|section| sanitize_container_attributes(section.attributes, &SANITIZER))
         .unwrap_or_default();
 
     let capacity = "<html><head></head><body></body></html>".len()
@@ -1510,12 +1569,12 @@ fn html_tag_end(html: &str, start: usize) -> Option<usize> {
 /// Reuse Ammonia's attribute policy by cleaning the attributes on an allowed
 /// neutral element, then transplanting the serialized safe attributes onto
 /// html/body. Event handlers and other unknown attributes never pass through.
-fn sanitize_container_attributes(attributes: &str) -> String {
+fn sanitize_container_attributes(attributes: &str, sanitizer: &ammonia::Builder) -> String {
     if attributes.trim().is_empty() {
         return String::new();
     }
     let probe = format!("<div{attributes}></div>");
-    let cleaned = SANITIZER.clean(&probe).to_string();
+    let cleaned = sanitizer.clean(&probe).to_string();
     let Some(start) = find_html_tag(&cleaned, "div", 0, false) else {
         return String::new();
     };
@@ -1585,45 +1644,91 @@ pub fn body_text<'a>(
         })
 }
 
-/// `src="cid:<id>"` / `src='cid:<id>'` in a body (id in group 2 or 3).
-static CID_SRC: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r#"(?i)src\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)')"#).unwrap());
+/// A `cid:` reference to an inline image in a body: an image's `src` or a
+/// `background` attribute (the attribute's name in group 1, the Content-ID
+/// in group 2 or 3), or a CSS `url()` (the Content-ID in groups 4 to 7), as
+/// in a style sheet or a `style` attribute, where serialized HTML writes a
+/// double quote as `&quot;`.
+static CID_REFERENCE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(
+        r#"(?i)(src|background)\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)')|url\(\s*(?:"cid:([^"]+)"|'cid:([^']+)'|&quot;cid:([^&]+)&quot;|cid:([^)\s"']+))"#,
+    )
+    .unwrap()
+});
+
+/// A `cid:` reference in a body: its Content-ID, and the range of the body
+/// that the image's URL replaces, with the text written before and after
+/// the URL. An attribute's whole value is replaced, quotes included.
+struct CidReference<'h> {
+    id: &'h str,
+    range: std::ops::Range<usize>,
+    before: &'static str,
+    after: &'static str,
+}
+
+fn cid_references(html: &str) -> impl Iterator<Item = CidReference<'_>> {
+    CID_REFERENCE.captures_iter(html).filter_map(|caps| {
+        if let Some(name) = caps.get(1) {
+            let id = caps.get(2).or_else(|| caps.get(3))?;
+            let before = if name.as_str().eq_ignore_ascii_case("src") {
+                "src=\""
+            } else {
+                "background=\""
+            };
+            Some(CidReference {
+                id: id.as_str(),
+                range: caps.get(0)?.range(),
+                before,
+                after: "\"",
+            })
+        } else {
+            let id = (4..=7).find_map(|group| caps.get(group))?;
+            Some(CidReference {
+                id: id.as_str(),
+                range: id.start() - "cid:".len()..id.end(),
+                before: "",
+                after: "",
+            })
+        }
+    })
+}
 
 /// Normalize a Content-ID / `cid:` reference for matching (drop `<>` + spaces).
 pub fn normalize_cid(id: &str) -> String {
     id.trim().trim_matches(|c| c == '<' || c == '>').to_string()
 }
 
-/// Normalized Content-IDs that are actually referenced by image sources.
-/// Callers use this before loading attachment blobs so unrelated inline parts
-/// never consume I/O or memory merely because they share the message.
+/// Normalized Content-IDs that are actually referenced by image sources and
+/// backgrounds. Callers use this before loading attachment blobs so unrelated
+/// inline parts never consume I/O or memory merely because they share the
+/// message.
 pub fn referenced_cids(html: &str) -> std::collections::HashSet<String> {
-    CID_SRC
-        .captures_iter(html)
-        .filter_map(|captures| captures.get(1).or_else(|| captures.get(2)))
-        .map(|value| normalize_cid(value.as_str()))
+    cid_references(html)
+        .map(|reference| normalize_cid(reference.id))
         .collect()
 }
 
-/// Rewrite inline `src="cid:<id>"` references to `data:` URIs using `map`
-/// (keyed by [`normalize_cid`]). Unknown cids are left untouched - the browser
-/// still can't fetch them, but nothing else is changed.
-pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, String>) -> String {
-    let data_for = |caps: &regex::Captures| {
-        let cid = caps.get(1).or_else(|| caps.get(2))?.as_str();
-        map.get(cid.trim().trim_matches(|c| c == '<' || c == '>'))
+/// Replace each `cid:` reference that `image` finds an image for with the
+/// image's URL, which is `url_len` bytes long and which `write_url` writes.
+fn rewrite_cid_references<V>(
+    html: &str,
+    image: impl Fn(&str) -> Option<V>,
+    url_len: impl Fn(&V) -> usize,
+    write_url: impl Fn(&mut String, &V),
+) -> String {
+    let image_for = |reference: &CidReference| {
+        image(reference.id.trim().trim_matches(|c| c == '<' || c == '>'))
     };
     let mut capacity = html.len();
     let mut found = false;
-    for caps in CID_SRC.captures_iter(html) {
-        let Some(data_uri) = data_for(&caps) else {
+    for reference in cid_references(html) {
+        let Some(image) = image_for(&reference) else {
             continue;
         };
         found = true;
         capacity = capacity
-            .checked_add("src=\"\"".len())
-            .and_then(|size| size.checked_add(data_uri.len()))
-            .and_then(|size| size.checked_sub(caps.get(0).unwrap().len()))
+            .checked_add(reference.before.len() + url_len(&image) + reference.after.len())
+            .and_then(|size| size.checked_sub(reference.range.len()))
             .expect("rewritten CID HTML length overflow");
     }
     if !found {
@@ -1631,20 +1736,30 @@ pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, Strin
     }
     let mut rewritten = String::with_capacity(capacity);
     let mut offset = 0;
-    for caps in CID_SRC.captures_iter(html) {
-        let whole = caps.get(0).unwrap();
-        rewritten.push_str(&html[offset..whole.start()]);
-        if let Some(data_uri) = data_for(&caps) {
-            rewritten.push_str("src=\"");
-            rewritten.push_str(data_uri);
-            rewritten.push('"');
-        } else {
-            rewritten.push_str(whole.as_str());
-        }
-        offset = whole.end();
+    for reference in cid_references(html) {
+        let Some(image) = image_for(&reference) else {
+            continue;
+        };
+        rewritten.push_str(&html[offset..reference.range.start]);
+        rewritten.push_str(reference.before);
+        write_url(&mut rewritten, &image);
+        rewritten.push_str(reference.after);
+        offset = reference.range.end;
     }
     rewritten.push_str(&html[offset..]);
     rewritten
+}
+
+/// Rewrite inline `cid:<id>` image sources and backgrounds to `data:` URIs
+/// using `map` (keyed by [`normalize_cid`]). Unknown cids are left untouched -
+/// the browser still can't fetch them, but nothing else is changed.
+pub fn rewrite_cid_src(html: &str, map: &std::collections::HashMap<String, String>) -> String {
+    rewrite_cid_references(
+        html,
+        |id| map.get(id),
+        |data_uri| data_uri.len(),
+        |rewritten, data_uri| rewritten.push_str(data_uri),
+    )
 }
 
 /// Write cached CID image bytes directly into the final HTML. This avoids a
@@ -1655,46 +1770,21 @@ pub fn rewrite_cid_src_with_images(
 ) -> String {
     use base64::Engine;
 
-    let image_for = |caps: &regex::Captures| {
-        let cid = caps.get(1).or_else(|| caps.get(2))?.as_str();
-        map.get(cid.trim().trim_matches(|c| c == '<' || c == '>'))
-    };
-    let mut capacity = html.len();
-    let mut found = false;
-    for caps in CID_SRC.captures_iter(html) {
-        let Some((mime, bytes)) = image_for(&caps) else {
-            continue;
-        };
-        found = true;
-        let encoded_len = base64::encoded_len(bytes.len(), true)
-            .expect("bounded inline CID image cannot overflow base64 length");
-        let replacement_len = "src=\"data:;base64,\"".len() + mime.len() + encoded_len;
-        capacity = capacity
-            .checked_add(replacement_len)
-            .and_then(|size| size.checked_sub(caps.get(0).unwrap().len()))
-            .expect("rewritten CID HTML length overflow");
-    }
-    if !found {
-        return html.to_owned();
-    }
-    let mut rewritten = String::with_capacity(capacity);
-    let mut offset = 0;
-    for caps in CID_SRC.captures_iter(html) {
-        let whole = caps.get(0).unwrap();
-        rewritten.push_str(&html[offset..whole.start()]);
-        if let Some((mime, bytes)) = image_for(&caps) {
-            rewritten.push_str("src=\"data:");
+    rewrite_cid_references(
+        html,
+        |id| map.get(id),
+        |(mime, bytes)| {
+            let encoded_len = base64::encoded_len(bytes.len(), true)
+                .expect("bounded inline CID image cannot overflow base64 length");
+            "data:;base64,".len() + mime.len() + encoded_len
+        },
+        |rewritten, (mime, bytes)| {
+            rewritten.push_str("data:");
             rewritten.push_str(mime);
             rewritten.push_str(";base64,");
-            base64::engine::general_purpose::STANDARD.encode_string(bytes, &mut rewritten);
-            rewritten.push('"');
-        } else {
-            rewritten.push_str(whole.as_str());
-        }
-        offset = whole.end();
-    }
-    rewritten.push_str(&html[offset..]);
-    rewritten
+            base64::engine::general_purpose::STANDARD.encode_string(bytes, rewritten);
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1758,6 +1848,27 @@ mod cid_tests {
         );
         let out = rewrite_cid_src(r#"<img src="cid:abc@host">"#, &map);
         assert!(out.contains("data:image/gif;base64,BBBB"));
+    }
+
+    #[test]
+    fn rewrites_background_attributes_and_css_urls() {
+        let map = HashMap::from([("bg@x".to_string(), "data:image/png;base64,AA".to_string())]);
+        let html = concat!(
+            r#"<body BACKGROUND='cid:bg@x'><table background="cid:<bg@x>">"#,
+            r#"<td style="background:url(cid:bg@x) top;background-image:url(&quot;cid:bg@x&quot;)">"#,
+            r#"<style>p{background:url( 'cid:bg@x' )}i{background:url("cid:gone")}</style>"#,
+        );
+        assert_eq!(
+            rewrite_cid_src(html, &map),
+            concat!(
+                r#"<body background="data:image/png;base64,AA"><table background="data:image/png;base64,AA">"#,
+                r#"<td style="background:url(data:image/png;base64,AA) top;background-image:url(&quot;data:image/png;base64,AA&quot;)">"#,
+                r#"<style>p{background:url( 'data:image/png;base64,AA' )}i{background:url("cid:gone")}</style>"#,
+            )
+        );
+        let cids = referenced_cids(html);
+        assert_eq!(cids.len(), 2);
+        assert!(cids.contains("bg@x") && cids.contains("gone"));
     }
 }
 
@@ -4852,6 +4963,71 @@ mod tests {
     }
 
     #[test]
+    fn sanitizing_html_keeps_presentational_attributes_browsers_render() {
+        let cleaned = sanitize_html(
+            r##"<html><body text="#333333" background="https://example.com/bg.png" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0" link="#00f" onload="x()">
+            <table background="cid:bg@mail" frame="box" rules="all" bordercolor="red"><tr background="https://e.com/r.png"><td nowrap background="data:image/png;base64,AAAA">a</td><th nowrap>b</th></tr></table>
+            <hr noshade size="1" color="#ccc"><br clear="all"><img src="https://e.com/i.png" hspace="10" vspace="5" align="left">
+            <ol type="a" start="3" reversed><li type="I" value="7">x</li></ol><ul type="square"><li>y</li></ul>
+            <div type="x" value="y" nowrap background="https://e.com/d.png">d</div>
+            </body></html>"##,
+        );
+        for kept in [
+            r##"<body text="#333333" background="https://example.com/bg.png" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0">"##,
+            r#"<table background="cid:bg@mail" frame="box" rules="all">"#,
+            r#"<tr background="https://e.com/r.png">"#,
+            r#"<td nowrap="" background="data:image/png;base64,AAAA">"#,
+            r#"<th nowrap="">"#,
+            r##"<hr noshade="" size="1" color="#ccc">"##,
+            r#"<br clear="all">"#,
+            r#"hspace="10""#,
+            r#"vspace="5""#,
+            r#"<ol type="a" start="3" reversed="">"#,
+            r#"<li type="I" value="7">"#,
+            r#"<ul type="square">"#,
+            "<div>d</div>",
+        ] {
+            assert!(cleaned.contains(kept), "{kept} missing in {cleaned}");
+        }
+        for dropped in ["bordercolor", "onload", "link="] {
+            assert!(!cleaned.contains(dropped), "{dropped} kept in {cleaned}");
+        }
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_the_boxes_browsers_render() {
+        let cleaned = sanitize_html(
+            r#"<main style="max-width:600px"><section class="hero" style="padding:24px">Hi <big>big</big> <nobr>no break</nobr></section><address>Street 1</address><dir><li>a</li></dir><menu><li>b</li></menu></main>"#,
+        );
+        for kept in [
+            r#"<main style="max-width:600px">"#,
+            r#"<section class="hero" style="padding:24px">"#,
+            "<big>big</big>",
+            "<nobr>no break</nobr>",
+            "<address>Street 1</address>",
+            "<dir><li>a</li></dir>",
+            "<menu><li>b</li></menu>",
+        ] {
+            assert!(cleaned.contains(kept), "{kept} missing in {cleaned}");
+        }
+    }
+
+    #[test]
+    fn background_urls_keep_only_mail_schemes() {
+        let cleaned = sanitize_html(
+            r#"<table background="javascript:alert(1)"><tr><td background="vbscript:x">a</td><td background="images/bg.png">b</td></tr></table>"#,
+        );
+        assert!(!cleaned.contains("javascript:"), "cleaned: {cleaned}");
+        assert!(!cleaned.contains("vbscript:"), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains(r#"<td background="images/bg.png">"#),
+            "cleaned: {cleaned}"
+        );
+        assert!(is_mail_url("cid:part1@mail"));
+        assert!(!is_mail_url("file:///etc/passwd"));
+    }
+
+    #[test]
     fn sanitizing_html_keeps_collapsible_sections() {
         let cleaned = sanitize_html(
             r#"<details open name="faq" ontoggle="steal()"><summary>Question</summary><p>Answer</p></details><details><summary><h3>Changelog</h3></summary><ul><li>Fix</li></ul></details>"#,
@@ -4870,6 +5046,17 @@ mod tests {
             "cleaned: {cleaned}"
         );
         assert!(!cleaned.contains("ontoggle"), "cleaned: {cleaned}");
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_anchor_names() {
+        let cleaned = sanitize_html(
+            r##"<a href="#part2">Part 2</a><p>One</p><a name="part2"></a><h2>Part 2</h2>"##,
+        );
+        assert!(
+            cleaned.contains(r#"<a name="part2" "#),
+            "cleaned: {cleaned}"
+        );
     }
 
     #[test]

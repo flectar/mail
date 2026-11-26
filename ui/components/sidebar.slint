@@ -2,7 +2,7 @@ import { ScrollFade } from "scroll-fade.slint";
 import { ListView, VerticalBox } from "std-widgets.slint";
 import { MailboxRole, MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
 import { MailboxWords } from "../mailbox-words.slint";
-import { SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
+import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
 import { SidebarStyle } from "sidebar-row.slint";
 import { Button } from "button.slint";
 import { IconButton, LineEdit } from "controls.slint";
@@ -132,6 +132,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     in property <int> account-count;
     callback select-scope(string);
     callback compose;
+    callback show-settings;
     callback manage-accounts;
     // An account heading's Account settings: Settings opens on that account.
     callback account-settings(int);
@@ -922,6 +923,16 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 title-color: root.title-color;
                 muted-color: root.muted-color;
             }
+        }
+
+        if root.touch-mode : DrawerSettingsItem {
+            background-color: root.background-color;
+            selection-background: root.selection-background;
+            accent-color: root.accent-color;
+            body-color: root.body-color;
+            muted-color: root.muted-color;
+            divider-color: root.divider-color;
+            clicked => { root.show-settings(); }
         }
     }
 }

@@ -7,7 +7,8 @@ import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { AccountRow } from "../models.slint";
-import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { DialogArea } from "../components/window-backdrop.slint";
+import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -165,6 +166,7 @@ export component FilesView inherits Rectangle {
     in property <string> layout-mode: "default";
     in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
     callback list-pane-width-committed(length);
+    callback show-settings;
     in property <[AccountRow]> account-model;
     in-out property <bool> sidebar-collapsed: false;
     in-out property <bool> navigation-open <=> FilesUi.navigation-open;
@@ -232,6 +234,15 @@ export component FilesView inherits Rectangle {
 
     Timer { interval: 60s; running: root.active && FilesUi.connected && !FilesUi.attachments && !FilesUi.busy && FilesUi.dialog == "" && !FilesUi.preview-open; triggered => { FilesUi.command("poll", "", ""); } }
     in-out property <bool> setup <=> FilesUi.setup-open;
+    // The dialogs below cover the whole view. The window dims around it
+    // while one is open.
+    out property <DialogArea> dialog-area: {
+        open: FilesUi.dialog != "" || root.setup,
+        x: root.absolute-position.x,
+        y: root.absolute-position.y,
+        width: root.width,
+        height: root.height,
+    };
     private property <bool> connection-attempted: false;
     changed setup => { root.connection-attempted = false; }
     private property <int> connection-revision: FilesUi.connection-revision;
@@ -557,12 +568,19 @@ export component FilesView inherits Rectangle {
                     navigate(action, value, scope) => { root.navigate(action, value, scope); }
                     setup => { root.navigation-open = false; root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
                 }
+                DrawerSettingsItem {
+                    divider-inset: 12px;
+                    clicked => {
+                        root.navigation-open = false;
+                        root.show-settings();
+                    }
+                }
             }
         }
     }
 
     if FilesUi.dialog != "" : Rectangle {
-        background: #00000060;
+        background: AppTheme.scrim;
         TouchArea { }
         Rectangle {
             x: (parent.width - self.width) / 2; y: max(16px, (parent.height - self.height) / 2);
@@ -673,7 +691,7 @@ export component FilesView inherits Rectangle {
         }
     }
     if root.setup : Rectangle {
-        background: #00000088; z: 100;
+        background: AppTheme.scrim; z: 100;
         TouchArea {}
         Rectangle {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;

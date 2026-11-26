@@ -339,6 +339,15 @@ pub fn compute_replaced_layout(
 
     // Clamp following rules in table at
     // https://www.w3.org/TR/CSS22/visudet.html#min-max-widths
+    //
+    // The table is for a width and height that are both `auto`. A minimum
+    // doesn't change a specified size on the other axis (sections 10.3.2 and
+    // 10.6.2 of CSS 2.1), so a spacer with `height: 1px; min-width: 540px` is
+    // 540 by 1, not 540 by 540. A maximum still scales both, unlike in CSS
+    // 2.1, so that an image shrunk to fit by the reader's `max-width: 100%`
+    // keeps its proportions, although senders give most images both sizes.
+    let specified_width = style_size.width.is_some();
+    let specified_height = style_size.height.is_some();
     let size = match (width_violation, height_violation) {
         // No constraint violation
         (Violation::None, Violation::None) => size,
@@ -355,7 +364,11 @@ pub fn compute_replaced_layout(
             let min_width = min_size.width.unwrap();
             Size {
                 width: min_width,
-                height: (min_width * inv_aspect_ratio).maybe_min(max_size.height),
+                height: if specified_height {
+                    size.height
+                } else {
+                    (min_width * inv_aspect_ratio).maybe_min(max_size.height)
+                },
             }
         }
         // h > max-height
@@ -370,7 +383,11 @@ pub fn compute_replaced_layout(
         (Violation::None, Violation::Min) => {
             let min_height = min_size.height.unwrap();
             Size {
-                width: (min_height * aspect_ratio).maybe_min(max_size.width),
+                width: if specified_width {
+                    size.width
+                } else {
+                    (min_height * aspect_ratio).maybe_min(max_size.width)
+                },
                 height: min_height,
             }
         }
@@ -394,16 +411,27 @@ pub fn compute_replaced_layout(
         (Violation::Min, Violation::Min) => {
             let min_width = min_size.width.unwrap();
             let min_height = min_size.height.unwrap();
-            if min_width / size.width <= min_height / size.height {
-                Size {
-                    width: (min_height * aspect_ratio).maybe_min(max_size.width),
-                    height: min_height,
-                }
-            } else {
-                Size {
+            let from_height = Size {
+                width: (min_height * aspect_ratio)
+                    .max(min_width)
+                    .maybe_min(max_size.width),
+                height: min_height,
+            };
+            let from_width = Size {
+                width: min_width,
+                height: (min_width * inv_aspect_ratio)
+                    .max(min_height)
+                    .maybe_min(max_size.height),
+            };
+            match (specified_width, specified_height) {
+                (true, true) => Size {
                     width: min_width,
-                    height: (min_width * inv_aspect_ratio).maybe_min(max_size.height),
-                }
+                    height: min_height,
+                },
+                (true, false) => from_width,
+                (false, true) => from_height,
+                (false, false) if min_width / size.width <= min_height / size.height => from_height,
+                (false, false) => from_width,
             }
         }
         // (w < min-width) and (h > max-height)

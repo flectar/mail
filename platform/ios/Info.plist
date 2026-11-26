@@ -24,6 +24,8 @@
   <string>$(CURRENT_PROJECT_VERSION)</string>
   <key>LSRequiresIPhoneOS</key>
   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>Flectar Mail uses the camera only to scan the QR code another of your devices shows, when you add a device to Flectar Mail Sync.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Flectar Mail connects to mail servers on your local network.</string>
   <key>UIBackgroundModes</key>

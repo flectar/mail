@@ -1,0 +1,55 @@
+diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
+index 5112ff5..9d0bd5c 100644
+--- a/crates/blitz-dom/src/layout/table.rs
++++ b/crates/blitz-dom/src/layout/table.rs
+@@ -856,9 +856,24 @@ pub(crate) fn build_table_context(
+             .iter()
+             .all(|hint| is_length(hint) || is_percent(hint));
+     let grow_lengths = !is_fixed && table_width_is_definite && no_auto_columns;
++    // Grid takes flex factors that sum to less than 1 as summing to 1, which
++    // left part of the table empty when the percentages fell short of 100%
++    // or a column's content outgrew its percentage. Browsers give the whole
++    // width to the percentage columns in proportion, so the smallest
++    // percentage is a factor of 1 and every set of columns sums to 1 or more.
++    let smallest_percent = column_hints
++        .iter()
++        .filter_map(|hint| hint.percent)
++        .filter(|&percent| percent > 0.0)
++        .fold(f32::INFINITY, f32::min);
+     let grow = Growth {
+         lengths: grow_lengths,
+         percents: grow_lengths && !column_hints.iter().any(is_length),
++        percent_scale: if smallest_percent.is_finite() {
++            1.0 / smallest_percent
++        } else {
++            1.0
++        },
+     };
+     style.grid_template_columns = column_hints
+         .iter()
+@@ -903,6 +918,7 @@ pub(crate) fn build_table_context(
+                 let growth = Growth {
+                     lengths: false,
+                     percents: false,
++                    percent_scale: 1.0,
+                 };
+                 (hint.track(true, growth), (FixedColumn::Length, 0.0))
+             };
+@@ -1585,6 +1601,8 @@ impl TableCollector {
+ struct Growth {
+     lengths: bool,
+     percents: bool,
++    /// Turns a percentage into a flex factor of at least 1.
++    percent_scale: f32,
+ }
+ 
+ /// What the cells of one column ask for, before it becomes a grid track.
+@@ -1680,7 +1698,7 @@ impl ColumnHint {
+         // overflow a `width="50"` column.
+         let max = if let Some(percent) = self.percent {
+             if grow.percents {
+-                taffy::MaxTrackSizingFunction::fr(percent.max(f32::EPSILON))
++                taffy::MaxTrackSizingFunction::fr((percent * grow.percent_scale).max(f32::EPSILON))
+             } else {
+                 // A percentage is the column's preferred share of the table.
+                 taffy::MaxTrackSizingFunction::percent(percent)

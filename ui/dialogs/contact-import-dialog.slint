@@ -16,7 +16,7 @@ export component ContactImportDialog inherits Rectangle {
     private property <bool> idle: ContactImport.new-count == 0 && root.choice == 0;
 
     visible: ContactImport.stage != "";
-    background: #00000088;
+    background: AppTheme.scrim;
     z: 1000;
     accessible-role: groupbox;
     accessible-label: @tr("Import contacts");

@@ -97,6 +97,8 @@ pub mod pdf_preview;
 mod photo_shrink;
 pub mod platform;
 mod preview_controls;
+pub mod qr_scanner;
+pub use qr_scanner::{QrScannerHost, ScanError, ScanFuture, ScanResult, ScanTexts};
 mod read_marking;
 mod read_receipts;
 mod reader_clipboard;
@@ -1700,6 +1702,9 @@ pub struct PlatformContext {
     /// The system's spell checker, where the app has none of its own for the
     /// platform: Android's. `None` elsewhere.
     pub spelling: Option<Arc<dyn SpellingHost>>,
+    /// The phone's QR code scanner, for pairing devices in Flectar Mail
+    /// Sync. `None` on computers, which show codes but don't scan them.
+    pub qr_scanner: Option<Arc<dyn QrScannerHost>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1718,6 +1723,7 @@ impl PlatformContext {
             privacy_consent: PrivacyConsent::default(),
             app_language: AppLanguage::default(),
             spelling: None,
+            qr_scanner: None,
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1742,6 +1748,7 @@ impl PlatformContext {
             privacy_consent: PrivacyConsent::default(),
             app_language: AppLanguage::default(),
             spelling: None,
+            qr_scanner: None,
             documents,
             credentials,
             oauth_redirects,
@@ -7541,14 +7548,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
 
     import_controller::register_import_callbacks(&app, &platform.documents, &state, &runtime);
-    device_sync.register(
-        &app,
-        &state,
-        &runtime,
-        platform.external_urls.clone(),
-        platform.documents.clone(),
-        platform.paths.temp_dir(),
-    );
+    device_sync.register(&app, &state, &runtime, &platform);
 
     register_renderer_input_callbacks(
         &ReaderRef::main(&app),

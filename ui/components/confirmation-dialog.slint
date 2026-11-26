@@ -35,7 +35,7 @@ export component ConfirmationDialog inherits Rectangle {
     private property <bool> confirm-selected: false;
 
     visible: root.open;
-    background: #00000088;
+    background: AppTheme.scrim;
     z: 1000;
     // Slint has no dialog accessibility role; groupbox is the closest
     // semantic container, while the focused scope owns keyboard interaction.

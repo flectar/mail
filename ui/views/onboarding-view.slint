@@ -251,7 +251,16 @@ export component OnboardingView inherits Rectangle {
                     wrap: word-wrap;
                 }
                 // Stacked like the buttons above: translations of these labels
-                // run long.
+                // run long. A phone scans the code its other device shows,
+                // and a computer shows one for a phone to scan.
+                if SyncUi.can-scan : Button {
+                    height: 40px;
+                    text: @tr("Scan QR code");
+                    icon: @image-url("../icons/lucide/outline/scan-qr.svg");
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && !SyncUi.busy;
+                    clicked => { root.join-sync("scan"); }
+                }
                 Button {
                     height: 40px;
                     text: @tr("Enter code");
@@ -259,6 +268,14 @@ export component OnboardingView inherits Rectangle {
                     has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && !SyncUi.busy;
                     clicked => { root.join-sync("code"); }
+                }
+                if SyncUi.qr-pairing && !SyncUi.can-scan : Button {
+                    height: 40px;
+                    text: @tr("Show QR code");
+                    icon: @image-url("../icons/lucide/outline/qr-code.svg");
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && !SyncUi.busy;
+                    clicked => { root.join-sync("qr"); }
                 }
                 Button {
                     height: 40px;

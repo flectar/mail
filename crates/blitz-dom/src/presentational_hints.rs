@@ -10,8 +10,8 @@
 //!
 //! Attribute values are untrusted. Each value is parsed into a number, color
 //! or keyword before it is written to the declaration list; raw attribute text
-//! is never copied into CSS, except font family names, which are serialized as
-//! escaped CSS strings.
+//! is never copied into CSS, except font family names and `background` URLs,
+//! which are serialized as escaped CSS strings.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -32,20 +32,46 @@ use crate::node::{ElementData, Node, NodeData};
 
 type HintBlock = ServoArc<Locked<PropertyDeclarationBlock>>;
 
-/// Hint blocks for one document, keyed by their canonical CSS text.
+/// Hint blocks for one document, keyed by their canonical CSS text, and the
+/// URL their `background` URLs resolve against.
 #[derive(Default)]
-pub struct PresentationalHintCache(Mutex<HashMap<Box<str>, HintBlock>>);
+pub struct PresentationalHintCache(Mutex<HintCache>);
+
+#[derive(Default)]
+struct HintCache {
+    blocks: HashMap<Box<str>, HintBlock>,
+    url: Option<UrlExtraData>,
+}
+
+impl PresentationalHintCache {
+    /// Resolve the document's hints against `url` from now on. Blocks
+    /// resolved against another URL are dropped.
+    pub(crate) fn set_url(&self, url: UrlExtraData) {
+        let mut cache = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.url.as_ref() != Some(&url) {
+            cache.blocks.clear();
+            cache.url = Some(url);
+        }
+    }
+}
 
 impl std::fmt::Debug for PresentationalHintCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.0.lock().map(|map| map.len()).unwrap_or_default();
+        let len = self
+            .0
+            .lock()
+            .map(|cache| cache.blocks.len())
+            .unwrap_or_default();
         f.debug_struct("PresentationalHintCache")
             .field("len", &len)
             .finish()
     }
 }
 
-// Hints never contain URLs, so they resolve against an inert base.
+// The base of hints outside a document, which have no document URL.
 static HINT_URL_DATA: LazyLock<UrlExtraData> = LazyLock::new(|| {
     UrlExtraData(ServoArc::new(
         url::Url::parse("about:blank").expect("static URL is valid"),
@@ -76,7 +102,7 @@ where
         // Word and Outlook put `lang` on most paragraphs and spans; a shared
         // block keeps those elements sharing styles. The key cannot collide
         // with a declaration list, which never contains NUL.
-        let block = cached_block(node, format!("\0{lang}"), || {
+        let block = cached_block(node, format!("\0{lang}"), |_| {
             PropertyDeclarationBlock::with_one(
                 PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
                 Importance::Normal,
@@ -100,14 +126,8 @@ where
         return;
     }
 
-    let block = cached_block(node, css.clone(), || {
-        parse_style_attribute(
-            &css,
-            &HINT_URL_DATA,
-            None,
-            QuirksMode::NoQuirks,
-            CssRuleType::Style,
-        )
+    let block = cached_block(node, css.clone(), |url| {
+        parse_style_attribute(&css, url, None, QuirksMode::NoQuirks, CssRuleType::Style)
     });
     hints.push(ApplicableDeclarationBlock::from_declarations(
         block,
@@ -116,11 +136,12 @@ where
     ));
 }
 
-/// The document's shared block for `key`, built on first use.
+/// The document's shared block for `key`, built on first use against the
+/// document's URL.
 fn cached_block(
     node: &Node,
     key: String,
-    build: impl FnOnce() -> PropertyDeclarationBlock,
+    build: impl FnOnce(&UrlExtraData) -> PropertyDeclarationBlock,
 ) -> HintBlock {
     let wrap = |block| ServoArc::new(node.guard().wrap(block));
 
@@ -130,7 +151,7 @@ fn cached_block(
     }
     let NodeData::Document(data) = &doc.data else {
         // Detached subtrees are styled rarely; they just skip the cache.
-        return wrap(build());
+        return wrap(build(&HINT_URL_DATA));
     };
 
     let mut cache = data
@@ -138,11 +159,11 @@ fn cached_block(
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(block) = cache.get(key.as_str()) {
+    if let Some(block) = cache.blocks.get(key.as_str()) {
         return block.clone();
     }
-    let block = wrap(build());
-    cache.insert(key.into_boxed_str(), block.clone());
+    let block = wrap(build(cache.url.as_ref().unwrap_or(&HINT_URL_DATA)));
+    cache.blocks.insert(key.into_boxed_str(), block.clone());
     block
 }
 
@@ -197,12 +218,34 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             if let Some(padding) = attr(table, "cellpadding").and_then(parse_non_negative_integer) {
                 let _ = write!(css, "padding:{padding}px;");
             }
-            if table_border_width(table).is_some_and(|width| width > 0)
-                && attr(table, "rules").is_none()
-                && attr(table, "frame").is_none()
-            {
-                // No colour: cell borders follow the cell's `currentcolor`.
-                css.push_str("border-width:1px;border-style:inset;");
+            // Blink's cell borders: `rules` picks the sides, otherwise a
+            // nonzero `border` draws all four, solid when `bordercolor` is set
+            // and inset when not. `frame` only changes the table's own border.
+            // Cells take the table's border colour through their rows, as in
+            // Blink (its `TableCellBorderColorInherit`).
+            let borders = match table_rules(table) {
+                Some(Rules::All) => Some("border-width:1px;border-style:solid;"),
+                Some(Rules::Cols) => Some(
+                    "border-left-width:1px;border-right-width:1px;\
+                     border-left-style:solid;border-right-style:solid;",
+                ),
+                Some(Rules::Rows) => Some(
+                    "border-top-width:1px;border-bottom-width:1px;\
+                     border-top-style:solid;border-bottom-style:solid;",
+                ),
+                Some(Rules::None | Rules::Groups) => None,
+                None if table_border_width(table).is_some_and(|width| width > 0) => {
+                    Some(if has_border_color(table) {
+                        "border-width:1px;border-style:solid;"
+                    } else {
+                        "border-width:1px;border-style:inset;"
+                    })
+                }
+                None => None,
+            };
+            if let Some(borders) = borders {
+                css.push_str(borders);
+                css.push_str("border-color:inherit;");
             }
         }
     }
@@ -218,8 +261,13 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 value,
                 css,
             ),
+            // Blink maps a table part's `valign` and also a table's, which
+            // places an inline table in its line, to `vertical-align`, other
+            // values than its four keywords as CSS, of which only keywords
+            // are taken here.
             "valign"
                 if is_cell
+                    || *tag == local_name!("table")
                     || *tag == local_name!("tr")
                     || *tag == local_name!("tbody")
                     || *tag == local_name!("thead")
@@ -232,6 +280,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     "middle" => "middle",
                     "bottom" => "bottom",
                     "baseline" => "baseline",
+                    "sub" => "sub",
+                    "super" => "super",
+                    "text-top" => "text-top",
+                    "text-bottom" => "text-bottom",
                     _ => continue,
                 };
                 let _ = write!(css, "vertical-align:{keyword};");
@@ -282,11 +334,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             }
             "border" => {
                 if *tag == local_name!("table") {
+                    // The style comes with `frame`, `rules` and `bordercolor`
+                    // after the loop.
                     if let Some(width) = table_border_width(elem) {
                         let _ = write!(css, "border-width:{width}px;");
-                        if width > 0 {
-                            css.push_str("border-style:outset;");
-                        }
                     }
                 } else if *tag == local_name!("img")
                     || *tag == local_name!("object")
@@ -345,9 +396,93 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     let _ = write!(css, "font-size:{size};");
                 }
             }
+            // `<hr>` as Blink maps it: `color` and `noshade` make a solid
+            // rule filled with the colour, or for `noshade` with Blink's dark
+            // gray (#808080, darker than CSS `darkgray`), and `size` sets the
+            // height, or drops the bottom border at 1 or less.
+            "color" if *tag == local_name!("hr") => {
+                css.push_str("border-style:solid;");
+                if let Some(color) = parse_legacy_color(value) {
+                    let _ = write!(css, "border-color:{color};background-color:{color};");
+                }
+            }
+            "noshade" if *tag == local_name!("hr") && self::attr(elem, "color").is_none() => {
+                css.push_str("border-style:solid;border-color:#808080;background-color:#808080;");
+            }
+            "size" if *tag == local_name!("hr") => {
+                match parse_non_negative_integer(value).unwrap_or(0) {
+                    0 | 1 => css.push_str("border-bottom-width:0;"),
+                    size => {
+                        let _ = write!(css, "height:{}px;", size - 2);
+                    }
+                }
+            }
+            // As in Blink, `all` clears both sides, and `clear`'s own keywords
+            // apply as they are.
+            "clear" if *tag == local_name!("br") => {
+                let value = value.trim_matches(|c: char| c.is_ascii_whitespace());
+                let clear = if value.eq_ignore_ascii_case("all") {
+                    Some("both")
+                } else {
+                    [
+                        "left",
+                        "right",
+                        "both",
+                        "none",
+                        "inline-start",
+                        "inline-end",
+                    ]
+                    .into_iter()
+                    .find(|keyword| value.eq_ignore_ascii_case(keyword))
+                };
+                if let Some(clear) = clear {
+                    let _ = write!(css, "clear:{clear};");
+                }
+            }
+            // List types as Blink maps them: an `<ol>` takes its letters
+            // case-sensitively, a `<ul>` its names in any case, and an `<li>`
+            // either.
+            "type" if *tag == local_name!("ol") => {
+                if let Some(style) = ordered_list_type(value) {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            "type" if *tag == local_name!("ul") => {
+                if let Some(style) = unordered_list_type(value) {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            "type" if *tag == local_name!("li") => {
+                if let Some(style) = ordered_list_type(value).or_else(|| unordered_list_type(value))
+                {
+                    let _ = write!(css, "list-style-type:{style};");
+                }
+            }
+            // A URL, resolved against the document like Blink's
+            // `CompleteURL`, as a CSS string the attribute can't escape.
+            "background"
+                if *tag == local_name!("body")
+                    || *tag == local_name!("table")
+                    || *tag == local_name!("thead")
+                    || *tag == local_name!("tbody")
+                    || *tag == local_name!("tfoot")
+                    || *tag == local_name!("tr")
+                    || is_cell =>
+            {
+                let url = value.trim_matches(|c: char| c.is_ascii_whitespace());
+                if !url.is_empty() {
+                    css.push_str("background-image:url(");
+                    let _ = cssparser::serialize_string(url, css);
+                    css.push_str(");");
+                }
+            }
             "hidden" => css.push_str("display:none;"),
             _ => {}
         }
+    }
+
+    if *tag == local_name!("table") {
+        table_border_style(elem, css);
     }
 
     // `body` margins: per axis, the first of these attributes that exists
@@ -369,6 +504,25 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             }
         }
     }
+}
+
+/// The `list-style-type` of an `<ol type>`: `1`, `a`, `A`, `i` or `I`.
+fn ordered_list_type(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "1" => "decimal",
+        "a" => "lower-alpha",
+        "A" => "upper-alpha",
+        "i" => "lower-roman",
+        "I" => "upper-roman",
+        _ => return None,
+    })
+}
+
+/// The `list-style-type` of a `<ul type>`, in any case.
+fn unordered_list_type(value: &str) -> Option<&'static str> {
+    ["disc", "circle", "square", "none"]
+        .into_iter()
+        .find(|style| value.eq_ignore_ascii_case(style))
 }
 
 fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css: &mut String) {
@@ -440,6 +594,84 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             _ => "",
         });
     }
+}
+
+/// A table's own border style, as Blink sets it. The sides `frame` names are
+/// solid and the others hidden, 1px wide unless `border` gives a width.
+/// Without `frame`, a nonzero `border` is outset, or solid with
+/// `bordercolor`, and `rules` alone hides the border, which then wins over
+/// the cells' borders along the table's edge. `rules` also collapses borders.
+fn table_border_style(table: &ElementData, css: &mut String) {
+    let border = table_border_width(table);
+    if let Some(sides) = frame_sides(table) {
+        if border.is_none() {
+            css.push_str("border-width:1px;");
+        }
+        let [top, right, bottom, left] = sides.map(|side| if side { "solid" } else { "hidden" });
+        let _ = write!(css, "border-style:{top} {right} {bottom} {left};");
+    } else if border.is_some_and(|width| width > 0) {
+        css.push_str(if has_border_color(table) {
+            "border-style:solid;"
+        } else {
+            "border-style:outset;"
+        });
+    } else if table_rules(table).is_some() {
+        css.push_str("border-style:hidden;");
+    }
+    if table_rules(table).is_some() {
+        css.push_str("border-collapse:collapse;");
+    }
+}
+
+/// The sides of a table that its `frame` attribute borders, as top, right,
+/// bottom and left, or `None` without a known value.
+fn frame_sides(table: &ElementData) -> Option<[bool; 4]> {
+    let value = attr(table, "frame")?;
+    let sides = [
+        ("void", [false, false, false, false]),
+        ("above", [true, false, false, false]),
+        ("below", [false, false, true, false]),
+        ("hsides", [true, false, true, false]),
+        ("vsides", [false, true, false, true]),
+        ("lhs", [false, false, false, true]),
+        ("rhs", [false, true, false, false]),
+        ("box", [true, true, true, true]),
+        ("border", [true, true, true, true]),
+    ];
+    sides
+        .into_iter()
+        .find(|(name, _)| value.eq_ignore_ascii_case(name))
+        .map(|(_, sides)| sides)
+}
+
+/// Which borders between cells a table's `rules` attribute draws.
+#[derive(Clone, Copy)]
+enum Rules {
+    None,
+    Groups,
+    Rows,
+    Cols,
+    All,
+}
+
+fn table_rules(table: &ElementData) -> Option<Rules> {
+    let value = attr(table, "rules")?;
+    [
+        ("none", Rules::None),
+        ("groups", Rules::Groups),
+        ("rows", Rules::Rows),
+        ("cols", Rules::Cols),
+        ("all", Rules::All),
+    ]
+    .into_iter()
+    .find(|(name, _)| value.eq_ignore_ascii_case(name))
+    .map(|(_, rules)| rules)
+}
+
+/// Whether a table has a `bordercolor`, which makes Blink draw its borders
+/// solid even when the colour doesn't parse.
+fn has_border_color(table: &ElementData) -> bool {
+    attr(table, "bordercolor").is_some_and(|value| !value.is_empty())
 }
 
 /// The table `border` attribute: a missing value or a parse error means 1px.

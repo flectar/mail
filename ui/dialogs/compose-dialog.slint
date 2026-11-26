@@ -13,7 +13,7 @@ export component ComposeDialog inherits Rectangle {
     back-requested => { composer.back-requested(); }
 
     visible: ComposerUi.open;
-    background: root.compact ? AppTheme.surface : #00000066;
+    background: root.compact ? AppTheme.surface : AppTheme.scrim;
     z: 9000;
 
     // Keep the workspace visible for context, but make the composer modal so

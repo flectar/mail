@@ -13,7 +13,7 @@ export component BlockSenderDialog inherits Rectangle {
     private property <string> title: @tr("Block {}?", BlockSender.name != "" ? BlockSender.name : BlockSender.address);
 
     visible: BlockSender.stage != "";
-    background: #00000088;
+    background: AppTheme.scrim;
     z: 1000;
     accessible-role: groupbox;
     accessible-label: root.title;

@@ -385,6 +385,8 @@ pub struct BaseDocument {
 
     /// Text selection state (for non-input text)
     pub(crate) text_selection: TextSelection,
+    /// Highlighted text, such as find-in-page matches
+    pub(crate) text_highlights: Vec<crate::TextHighlight>,
 
     // TODO: collapse animating state into a bitflags
     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
@@ -600,11 +602,13 @@ impl BaseDocument {
             scrollbar_activity: HashMap::new(),
             scroll_animation: ScrollAnimationState::None,
             text_selection: TextSelection::default(),
+            text_highlights: Vec::new(),
         };
 
         // Initialise document with root Document node
         doc.root_node_id = doc.create_node(NodeData::Document(Box::default()));
         doc.root_node_mut().flags.insert(NodeFlags::IS_IN_DOCUMENT);
+        doc.share_url_with_hints();
 
         for sheet in config.ua_stylesheets {
             doc.add_user_agent_stylesheet(sheet);
@@ -650,6 +654,15 @@ impl BaseDocument {
     /// Set base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub fn set_base_url(&mut self, url: &str) {
         self.url = DocumentUrl::from(Url::parse(url).unwrap());
+        self.share_url_with_hints();
+    }
+
+    /// Resolve URLs in presentational hints, such as `<td background>`,
+    /// against the document's URL.
+    fn share_url_with_hints(&self) {
+        if let NodeData::Document(data) = &self.root_node().data {
+            data.presentational_hints.set_url(self.url.url_extra_data());
+        }
     }
 
     /// The base url used for resolving linked resources (stylesheets, images, fonts, etc)
@@ -1250,7 +1263,7 @@ impl BaseDocument {
 
     pub fn make_stylesheet(&self, css: impl AsRef<str>, origin: Origin) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
-            css.as_ref(),
+            &crate::util::rewrite_legacy_word_break(css.as_ref()),
             self.url.url_extra_data(),
             origin,
             ServoArc::new(self.guard.wrap(MediaList::empty())),
@@ -1334,7 +1347,9 @@ impl BaseDocument {
                 DocumentEvent::ResourceLoad(res) => {
                     updates.layout |= self.pending_critical_resources.contains(&res.request_id);
                     match &res.result {
-                        Ok(Resource::Image(..) | Resource::Raster(..)) => {
+                        // An image that fails to load lays out with its alt
+                        // text, so it changes layout as a loaded one does.
+                        Ok(Resource::Image(..) | Resource::Raster(..)) | Err(_) => {
                             if let Some(waiting) = res
                                 .resolved_url
                                 .as_ref()
@@ -1352,7 +1367,7 @@ impl BaseDocument {
                                 }
                             }
                         }
-                        Ok(Resource::None) | Err(_) => {}
+                        Ok(Resource::None) => {}
                         _ => updates.layout = true,
                     }
                 }
@@ -1411,6 +1426,7 @@ impl BaseDocument {
             Err(err) => {
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
+                    self.mark_images_unavailable(&waiting_nodes);
                     #[cfg(feature = "tracing")]
                     tracing::warn!(
                         url = url.as_str(),
@@ -1522,6 +1538,62 @@ impl BaseDocument {
 
     /// Cache a loaded image and apply it to all nodes waiting on it
     /// (`<img>` elements, `background-image` layers and `mask-image` layers).
+    /// The URLs of images still waiting for a response.
+    pub fn pending_image_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.pending_images.keys().map(String::as_str)
+    }
+
+    /// Tells the document that the image at `url` won't load, as when the
+    /// embedder blocks it. The `<img>` elements waiting for it then lay out
+    /// with their alt text, as browsers lay out an image they can't show, and
+    /// the next [`Self::drain_pending_updates`] reports the change.
+    pub fn fail_image(&mut self, url: &str) {
+        let Some(waiting) = self.pending_images.remove(url) else {
+            return;
+        };
+        self.mark_images_unavailable(&waiting);
+        self.resource_updates.changed = true;
+        for &(id, kind) in &waiting {
+            if matches!(kind, ImageType::Image)
+                && self
+                    .get_node(id)
+                    .is_some_and(|node| !image_has_fixed_size(self, node))
+            {
+                self.resource_updates.layout = true;
+            }
+            self.resource_updates.paint_nodes.push(id);
+        }
+    }
+
+    pub(crate) fn mark_images_unavailable(&mut self, waiting: &[(NodeId, ImageType)]) {
+        for &(id, kind) in waiting {
+            if !matches!(kind, ImageType::Image) {
+                continue;
+            }
+            let Some(node) = self.get_node_mut(id) else {
+                continue;
+            };
+            let Some(element) = node.element_data_mut() else {
+                continue;
+            };
+            #[cfg(feature = "custom-widget")]
+            if element.custom_widget_data().is_some() {
+                continue;
+            }
+            // An image that never loaded has no image data yet.
+            let unloaded = match &element.special_data {
+                SpecialElementData::None => true,
+                SpecialElementData::Image(image) => matches!(**image, ImageData::None),
+                _ => false,
+            };
+            if unloaded {
+                element.special_data = SpecialElementData::Image(Box::new(ImageData::Unavailable));
+                node.clear_layout_cache();
+                node.insert_damage(ALL_DAMAGE);
+            }
+        }
+    }
+
     fn apply_loaded_image(&mut self, url: &str, image: ImageData) {
         // Get all nodes waiting for this image
         let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
@@ -2710,6 +2782,18 @@ impl BaseDocument {
         self.text_selection.clear();
     }
 
+    /// Highlights parts of the text, replacing the highlights before, as find
+    /// in page highlights its matches. They're painted as Blink paints
+    /// matches: yellow, the active one orange, with black text.
+    pub fn set_text_highlights(&mut self, highlights: Vec<crate::TextHighlight>) {
+        self.text_highlights = highlights;
+    }
+
+    /// The text highlighted by [`Self::set_text_highlights`].
+    pub fn text_highlights(&self) -> &[crate::TextHighlight] {
+        &self.text_highlights
+    }
+
     /// Update the selection focus point (used during mouse drag to extend selection).
     pub fn update_selection_focus(&mut self, focus_node: NodeId, focus_offset: usize) {
         // For anonymous blocks, store parent+sibling_index; otherwise store node directly
@@ -2813,7 +2897,15 @@ impl BaseDocument {
                         continue;
                     }
                     // A run can mix styles, so each cluster is checked.
-                    let id = cluster.style().brush.id;
+                    let brush = cluster.style().brush;
+                    if brush.generated != crate::node::GeneratedText::None {
+                        // An inline element's edge is laid out as a
+                        // placeholder character that isn't the document's.
+                        hidden
+                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
+                        continue;
+                    }
+                    let id = brush.id;
                     let is_hidden = match last {
                         Some((last_id, is_hidden)) if last_id == id => is_hidden,
                         _ => {
@@ -2834,16 +2926,33 @@ impl BaseDocument {
                 }
             }
         }
-        hidden.sort_by_key(|hidden| hidden.start);
+        // A preserved tab is laid out as the spaces up to its tab stop, and
+        // copies as the tab.
+        let mut replaced: Vec<(std::ops::Range<usize>, &str)> =
+            hidden.into_iter().map(|hidden| (hidden, "")).collect();
+        for tab in &inline_layout.tabs {
+            let tab = tab.start.max(range.start)..tab.end.min(range.end);
+            if !tab.is_empty()
+                && !replaced
+                    .iter()
+                    .any(|(hidden, _)| hidden.contains(&tab.start))
+            {
+                replaced.push((tab, "\t"));
+            }
+        }
+        replaced.sort_by_key(|(replaced, _)| replaced.start);
 
         let text = &inline_layout.text;
         let mut visible = String::new();
         let mut cursor = range.start;
-        for hidden in hidden {
-            if hidden.start > cursor {
-                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
+        for (replaced, with) in replaced {
+            if replaced.start > cursor {
+                visible.push_str(text.get(cursor..replaced.start).unwrap_or_default());
             }
-            cursor = cursor.max(hidden.end);
+            if replaced.start >= cursor {
+                visible.push_str(with);
+            }
+            cursor = cursor.max(replaced.end);
         }
         if cursor < range.end {
             visible.push_str(text.get(cursor..range.end).unwrap_or_default());
@@ -2890,15 +2999,25 @@ impl BaseDocument {
     /// Get all selection ranges as Vec<(node_id, start_offset, end_offset)>.
     /// Returns empty vec if no selection.
     pub fn get_text_selection_ranges(&self) -> Vec<(NodeId, usize, usize)> {
+        self.get_text_selection_ranges_and_end().0
+    }
+
+    /// The text selection's ranges, as [`Self::get_text_selection_ranges`]
+    /// gives them, and the inline root where the selection ends in document
+    /// order. A selection that ends at the start of a root has no range
+    /// there, but still selects the line break at the end of the root before.
+    pub fn get_text_selection_ranges_and_end(
+        &self,
+    ) -> (Vec<(NodeId, usize, usize)>, Option<NodeId>) {
         let lookup = |parent_id, idx| self.find_anonymous_block_by_index(parent_id, idx);
 
         let anchor_node = match self.text_selection.anchor.resolve_node_id(lookup) {
             Some(id) => id,
-            None => return Vec::new(),
+            None => return (Vec::new(), None),
         };
         let focus_node = match self.text_selection.focus.resolve_node_id(lookup) {
             Some(id) => id,
-            None => return Vec::new(),
+            None => return (Vec::new(), None),
         };
 
         // Guard against stale selection endpoints: nodes may have been removed from
@@ -2909,7 +3028,7 @@ impl BaseDocument {
                 .is_some_and(|node| node.flags.is_in_document())
         };
         if !node_is_in_doc(anchor_node) || !node_is_in_doc(focus_node) {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Single node selection
@@ -2926,15 +3045,15 @@ impl BaseDocument {
                 .max(self.text_selection.focus.offset);
 
             if start == end {
-                return Vec::new();
+                return (Vec::new(), None);
             }
-            return vec![(anchor_node, start, end)];
+            return (vec![(anchor_node, start, end)], Some(anchor_node));
         }
 
         // Multi-node selection: collect all inline roots between anchor and focus
         let inline_roots = self.collect_inline_roots_in_range(anchor_node, focus_node);
         if inline_roots.is_empty() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Determine document order using the collected inline_roots order
@@ -2994,7 +3113,7 @@ impl BaseDocument {
             }
         }
 
-        ranges
+        (ranges, Some(last_node))
     }
 }
 

@@ -786,6 +786,10 @@ fn culled_text_tiles_match_a_full_surface() {
             "transform:rotate(3deg);transform-origin:top left",
         ),
         ("filtered", "filter:opacity(0.8)"),
+        (
+            "shadowed",
+            "text-shadow:2px 3px 4px rgba(0,0,0,.6),0 0 6px #08f;filter:blur(0.5px)",
+        ),
     ] {
         let text = if name == "cached-lines" {
             "Accents ÅÉgj <b>bold</b> <i>italic</i> café <span style='background:#cfc'>highlight</span> "
@@ -805,7 +809,7 @@ fn culled_text_tiles_match_a_full_surface() {
             let full = render_to_buffer::<VelloCpuImageRenderer, _>(
                 |scene| {
                     paint_scene(
-                        scene,
+                        &mut cpu_scene::CpuScene(scene),
                         &mut email.document,
                         scale as f64,
                         tiled.width,
@@ -989,6 +993,78 @@ fn find_handles_unicode_cycles_and_decoded_fragments() {
     assert!(r.fragment_y("#caf%C3%A9").is_some());
     r.find("", 0);
     assert!(!r.has_selection());
+}
+
+#[test]
+fn blocked_images_keep_room_for_their_alt_text() {
+    // Remote images are blocked by default. One without a size lays out with
+    // its alt text, as browsers lay out an image they can't show, so the
+    // reader's placeholder has room to show that text. An empty alt still
+    // takes no room.
+    let mut r = GpuEmailRenderer::default();
+    let provider =
+        crate::remote::email_image_provider_tracked(Arc::new(|_| {}), false, r.resources.clone())
+            .unwrap();
+    r.set_email(
+        prepare_email_html_with_provider(
+            "<body style='margin:0'><img src='https://example.com/header.png' alt='Weekly header' style='display:block'>\
+             <img src='https://example.com/spacer.gif' alt='' style='display:block'><p>After</p></body>",
+            Some(provider),
+        )
+        .unwrap(),
+    );
+    r.render_cpu_if_needed(400, 300, 1.0).unwrap();
+    let placeholders = r.image_placeholders();
+    assert_eq!(placeholders.len(), 1);
+    assert_eq!(placeholders[0].alt, "Weekly header");
+    assert!(placeholders[0].width > 40.0 && placeholders[0].height >= 10.0);
+}
+
+#[test]
+fn xhtml_mail_parses_as_html() {
+    // Browsers parse mail as HTML whatever its doctype, so a `<br>` or an
+    // `<img>` without a closing slash doesn't swallow the text after it, as
+    // it did when the XHTML doctype made Blitz parse the message as XML.
+    for doctype in [
+        r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">"#,
+        r#"<?xml version="1.0" encoding="utf-8"?>"#,
+        "\u{feff}",
+    ] {
+        let mut r = renderer(&format!(
+            r#"{doctype}<html xmlns="http://www.w3.org/1999/xhtml"><body><p>One<br>Two<img src="cid:x" alt=""><p>Three</p></body></html>"#
+        ));
+        assert_eq!(r.find("Two", 0).1, 1, "{doctype}");
+        assert_eq!(r.find("Three", 0).1, 1, "{doctype}");
+    }
+}
+
+#[test]
+fn find_highlights_every_match_until_find_ends() {
+    let mut r = renderer("<body><p>one two one</p><p>one</p></body>");
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    let highlights = |r: &GpuEmailRenderer| {
+        r.email
+            .as_ref()
+            .unwrap()
+            .document
+            .text_highlights()
+            .iter()
+            .map(|highlight| highlight.active)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(r.find("one", 0).1, 3);
+    assert_eq!(highlights(&r), [true, false, false]);
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    r.find("one", 1);
+    assert_eq!(highlights(&r), [false, true, false]);
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    // When find ends, the matches lose their highlights and the current one
+    // stays selected, as in browsers.
+    r.end_find();
+    assert!(highlights(&r).is_empty());
+    assert_eq!(r.selected_text().as_deref(), Some("one"));
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_some());
+    assert!(r.render_cpu_if_needed(520, 400, 1.0).unwrap().is_none());
 }
 
 #[test]

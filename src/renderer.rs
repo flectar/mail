@@ -102,9 +102,6 @@ const EMAIL_FONT_FALLBACK_STYLE: &str = r#"
   html, body {
     font-family: Arial, "Liberation Sans", "Noto Sans", sans-serif;
   }
-  pre, code, kbd, samp {
-    font-family: "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace;
-  }
 </style>
 "#;
 
@@ -222,7 +219,7 @@ pub struct GpuEmailRenderer {
     last_size: Option<(u32, u32, u32, u32, u32)>,
     dirty: bool,
     paint_dirty: bool,
-    painted_selection: Vec<(NodeId, usize, usize)>,
+    painted_marks: PaintedMarks,
     tile_work_limit: usize,
     pub preparation_viewport: (u32, u32, f32),
     appearance: EmailAppearance,
@@ -285,7 +282,7 @@ impl GpuEmailRenderer {
             last_size: None,
             dirty: false,
             paint_dirty: false,
-            painted_selection: Vec::new(),
+            painted_marks: PaintedMarks::default(),
             tile_work_limit: usize::MAX,
             preparation_viewport: (INITIAL_WIDTH, INITIAL_HEIGHT, 1.0),
             appearance: EmailAppearance::default(),
@@ -453,6 +450,7 @@ impl GpuEmailRenderer {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 drain_email_updates(
                     email,
+                    &self.resources,
                     &mut self.dirty,
                     &mut self.region_dirty,
                     &mut self.tiles,
@@ -511,7 +509,7 @@ impl GpuEmailRenderer {
         self.metadata_revision += 1;
         self.selection_anchor = None;
         self.selection_focus = None;
-        self.painted_selection.clear();
+        self.painted_marks = PaintedMarks::default();
         self.find_matches.clear();
         self.find_query.clear();
         self.backend.borrow_mut().cpu_painter = None;
@@ -609,7 +607,7 @@ impl GpuEmailRenderer {
         self.find_query.clear();
         self.loaded_key = None;
         self.paint_dirty = false;
-        self.painted_selection.clear();
+        self.painted_marks = PaintedMarks::default();
         self.selection_anchor = None;
         self.selection_focus = None;
         self.metadata_revision += 1;
@@ -982,6 +980,7 @@ impl GpuEmailRenderer {
         };
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -1093,6 +1092,7 @@ impl GpuEmailRenderer {
         };
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -1126,7 +1126,7 @@ impl GpuEmailRenderer {
         if self.paint_dirty {
             invalidate_selection_tiles(
                 &email.document,
-                &self.painted_selection,
+                &self.painted_marks,
                 &mut self.tiles,
                 self.tile_height,
             );
@@ -1197,7 +1197,7 @@ impl GpuEmailRenderer {
         self.last_size = Some(size);
         self.dirty = false;
         self.paint_dirty = false;
-        self.painted_selection = email.document.get_text_selection_ranges();
+        self.painted_marks = PaintedMarks::of(&email.document);
         self.region_dirty = wanted.clone().any(|index| !self.tiles.contains_key(&index));
         Ok(Some(RenderedEmail {
             tiles: self.tiles.values().cloned().collect(),
@@ -1291,6 +1291,7 @@ impl GpuEmailRenderer {
 
         drain_email_updates(
             email,
+            &self.resources,
             &mut self.dirty,
             &mut self.region_dirty,
             &mut self.tiles,
@@ -1308,7 +1309,7 @@ impl GpuEmailRenderer {
         if self.paint_dirty {
             invalidate_selection_tiles(
                 &email.document,
-                &self.painted_selection,
+                &self.painted_marks,
                 &mut self.tiles,
                 self.tile_height,
             );
@@ -1434,7 +1435,7 @@ impl GpuEmailRenderer {
         self.last_size = Some(size);
         self.dirty = false;
         self.paint_dirty = false;
-        self.painted_selection = email.document.get_text_selection_ranges();
+        self.painted_marks = PaintedMarks::of(&email.document);
         self.region_dirty = false;
 
         Ok(Some(RenderedEmail {
@@ -1623,18 +1624,70 @@ fn render_cpu_tile_cached(
     })
 }
 
+/// What the tiles show of the selection and of highlighted text, so that a
+/// change repaints only the tiles it reaches.
+#[derive(Default)]
+struct PaintedMarks {
+    selection: Vec<(NodeId, usize, usize)>,
+    /// The inline root the selection ends in, which is the one without a
+    /// selected line break at its end.
+    selection_end: Option<NodeId>,
+    highlights: Vec<blitz_dom::TextHighlight>,
+}
+
+impl PaintedMarks {
+    fn of(document: &HtmlDocument) -> Self {
+        let (selection, selection_end) = document.get_text_selection_ranges_and_end();
+        Self {
+            selection,
+            selection_end,
+            highlights: document.text_highlights().to_vec(),
+        }
+    }
+}
+
 fn invalidate_selection_tiles(
     document: &HtmlDocument,
-    previous: &[(NodeId, usize, usize)],
+    previous: &PaintedMarks,
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
     tile_height: f32,
 ) {
-    let current = document.get_text_selection_ranges();
+    let current = PaintedMarks::of(document);
+    let ends = if current.selection_end == previous.selection_end {
+        Vec::new()
+    } else {
+        [current.selection_end, previous.selection_end]
+            .into_iter()
+            .flatten()
+            .collect()
+    };
     let changed = previous
+        .selection
         .iter()
-        .filter(|r| !current.contains(r))
-        .chain(current.iter().filter(|r| !previous.contains(r)));
-    for &(id, _, _) in changed {
+        .filter(|r| !current.selection.contains(r))
+        .chain(
+            current
+                .selection
+                .iter()
+                .filter(|r| !previous.selection.contains(r)),
+        )
+        .map(|&(id, _, _)| id)
+        .chain(ends)
+        .chain(
+            previous
+                .highlights
+                .iter()
+                .filter(|h| !current.highlights.contains(h))
+                .chain(
+                    current
+                        .highlights
+                        .iter()
+                        .filter(|h| !previous.highlights.contains(h)),
+                )
+                .map(|highlight| highlight.node),
+        )
+        .collect::<Vec<_>>();
+    for id in changed {
         let Some(node) = document.get_node(id) else {
             tiles.clear();
             return;
@@ -1648,14 +1701,43 @@ fn invalidate_selection_tiles(
     }
 }
 
+/// Images the reader won't load, such as blocked remote images and ones past
+/// its limits or failing to load, are failed in the document, which lays them
+/// out with their alt text, as browsers lay out an image they can't show.
+fn fail_unavailable_images(email: &mut PreparedEmail, ledger: &crate::remote::ResourceLedger) {
+    use crate::remote::ResourceState;
+    let id = email.document.id();
+    let unavailable: Vec<String> = {
+        let states = ledger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        email
+            .document
+            .pending_image_urls()
+            .filter(|url| {
+                matches!(
+                    states.get(&crate::remote::resource_key(id, url)),
+                    Some(ResourceState::Blocked | ResourceState::Limited | ResourceState::Failed)
+                )
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    for url in unavailable {
+        email.document.fail_image(&url);
+    }
+}
+
 fn drain_email_updates(
     email: &mut PreparedEmail,
+    ledger: &crate::remote::ResourceLedger,
     dirty: &mut bool,
     region_dirty: &mut bool,
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
     metadata_revision: &mut u64,
     tile_height: f32,
 ) -> bool {
+    fail_unavailable_images(email, ledger);
     let updates = email.document.drain_pending_updates();
     *dirty |= updates.layout;
     if updates.changed {
@@ -2053,6 +2135,25 @@ fn create_email_font_ctx_with_han_fallback(system_fonts: bool) -> EmailFontCtx {
         .collection
         .set_generic_families(GenericFamily::SansSerif, sans_families.into_iter());
 
+    // `pre`, `code`, `kbd` and `samp` are plain `monospace`, as in browsers,
+    // which then size them at 13px where text is 16px; a named family would
+    // keep them at 16px. The generic family prefers these fonts instead.
+    let mut mono_families: Vec<_> = ["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
+        .into_iter()
+        .filter_map(|name| font_ctx.collection.family_id(name))
+        .collect();
+    for family in font_ctx
+        .collection
+        .generic_families(GenericFamily::Monospace)
+    {
+        if !mono_families.contains(&family) {
+            mono_families.push(family);
+        }
+    }
+    font_ctx
+        .collection
+        .set_generic_families(GenericFamily::Monospace, mono_families.into_iter());
+
     // Runs with only an unavailable named family resolve through script
     // fallback. Cover Latin plus Common, which contains digits and punctuation.
     for script in [*b"Latn", *b"Zyyy"] {
@@ -2152,7 +2253,7 @@ fn prepare_email_html_at_with_font_ctx(
 ) -> Result<PreparedEmail, String> {
     let started = render_timings_enabled().then(Instant::now);
     let (html, notice) = crate::email_document::bounded_html(html);
-    let html = with_email_font_fallback(&html);
+    let html = html_parser_input(&with_email_font_fallback(&html));
     struct PreparationAbort(Option<blitz_traits::net::AbortController>);
     impl Drop for PreparationAbort {
         fn drop(&mut self) {
@@ -2231,13 +2332,36 @@ pub fn has_remote_images(html: &str) -> bool {
     crate::email_document::has_remote_images(html)
 }
 
+/// Put the reader's fallback fonts first in the document's head: the email's
+/// own `font-family` rules come after them and win, as they would over a
+/// browser's defaults.
+/// Mail is `text/html`, which browsers parse as HTML whatever its doctype.
+/// Blitz parses a document as XML when it starts with an XHTML doctype, an XML
+/// declaration or an XHTML `<html>`, and there a `<br>` or `<img>` without a
+/// closing slash swallows the content after it. An HTML doctype on a line of
+/// its own in front keeps it HTML (the check reads the first line), and the
+/// HTML parser ignores the message's own doctype after it.
+fn html_parser_input(html: &str) -> String {
+    let html = html.strip_prefix('\u{feff}').unwrap_or(html);
+    format!("<!DOCTYPE html>\n{html}")
+}
+
 fn with_email_font_fallback(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
-    if let Some(head_end) = lower.find("</head>") {
+    // The end of the `<head>` start tag, not of a `<header>`.
+    let head_start_end = lower.match_indices("<head").find_map(|(start, tag)| {
+        let after = start + tag.len();
+        let rest = &lower[after..];
+        if !rest.starts_with(|c: char| c == '>' || c == '/' || c.is_ascii_whitespace()) {
+            return None;
+        }
+        rest.find('>').map(|end| after + end + 1)
+    });
+    if let Some(head_start_end) = head_start_end {
         let mut output = String::with_capacity(html.len() + EMAIL_FONT_FALLBACK_STYLE.len());
-        output.push_str(&html[..head_end]);
+        output.push_str(&html[..head_start_end]);
         output.push_str(EMAIL_FONT_FALLBACK_STYLE);
-        output.push_str(&html[head_end..]);
+        output.push_str(&html[head_start_end..]);
         output
     } else if let Some(open_end) = lower.find("<body") {
         let mut output = String::with_capacity(html.len() + EMAIL_FONT_FALLBACK_STYLE.len());
@@ -2455,6 +2579,23 @@ mod tests {
     use crate::mail::fixtures;
 
     #[test]
+    fn email_font_rules_come_after_the_fallback_fonts() {
+        // The reader's fallback fonts are a default: the email's own rules for
+        // the same elements come later in the cascade and win.
+        for html in [
+            "<html><head><style>body{font-family:Georgia}</style></head><body>x</body></html>",
+            "<html><HEAD lang='en'><style>body{font-family:Georgia}</style></HEAD></html>",
+        ] {
+            let html = super::with_email_font_fallback(html);
+            let fallback = html.find("data-flectar-mail=\"font-fallback\"").unwrap();
+            assert!(fallback < html.find("Georgia").unwrap(), "{html}");
+        }
+        // A <header> isn't the head.
+        let html = super::with_email_font_fallback("<body><header>x</header></body>");
+        assert!(html.starts_with("<head>"), "{html}");
+    }
+
+    #[test]
     fn email_font_ctx_prefers_helvetica_neue_for_sans_serif_when_installed() {
         use parley::fontique::GenericFamily;
 
@@ -2468,6 +2609,45 @@ mod tests {
             .generic_families(GenericFamily::SansSerif)
             .next();
         assert_eq!(first, Some(helvetica_neue));
+    }
+
+    #[test]
+    fn code_is_sized_like_browsers_size_monospace() {
+        use parley::fontique::GenericFamily;
+
+        // Browsers size plain `monospace` text at 13px where other text is
+        // 16px, unless the family list names more than that one generic.
+        let mut prepared = prepare_email_html(
+            r#"<pre id="pre">x</pre><p><code id="code">y</code></p><p><code id="named" style="font-family: monospace, monospace">z</code></p>"#,
+        )
+        .unwrap();
+        prepared.document.resolve(0.0);
+        let font_size = |id: &str| {
+            let node_id = prepared
+                .document
+                .query_selector(&format!("#{id}"))
+                .unwrap()
+                .unwrap();
+            let node = prepared.document.get_node(node_id).unwrap();
+            node.primary_styles()
+                .unwrap()
+                .get_font()
+                .font_size
+                .computed_size()
+                .px()
+        };
+        assert_eq!(font_size("pre"), 13.0);
+        assert_eq!(font_size("code"), 13.0);
+        assert_eq!(font_size("named"), 16.0);
+
+        let mut font_ctx = super::build_email_font_ctx();
+        if let Some(dejavu) = font_ctx.collection.family_id("DejaVu Sans Mono") {
+            let first = font_ctx
+                .collection
+                .generic_families(GenericFamily::Monospace)
+                .next();
+            assert_eq!(first, Some(dejavu));
+        }
     }
 
     #[test]

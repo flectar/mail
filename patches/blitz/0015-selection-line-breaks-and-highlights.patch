@@ -1,0 +1,575 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index 2f3d854..565393a 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -385,6 +385,8 @@ pub struct BaseDocument {
+ 
+     /// Text selection state (for non-input text)
+     pub(crate) text_selection: TextSelection,
++    /// Highlighted text, such as find-in-page matches
++    pub(crate) text_highlights: Vec<crate::TextHighlight>,
+ 
+     // TODO: collapse animating state into a bitflags
+     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
+@@ -600,6 +602,7 @@ impl BaseDocument {
+             scrollbar_activity: HashMap::new(),
+             scroll_animation: ScrollAnimationState::None,
+             text_selection: TextSelection::default(),
++            text_highlights: Vec::new(),
+         };
+ 
+         // Initialise document with root Document node
+@@ -2710,6 +2713,18 @@ impl BaseDocument {
+         self.text_selection.clear();
+     }
+ 
++    /// Highlights parts of the text, replacing the highlights before, as find
++    /// in page highlights its matches. They're painted as Blink paints
++    /// matches: yellow, the active one orange, with black text.
++    pub fn set_text_highlights(&mut self, highlights: Vec<crate::TextHighlight>) {
++        self.text_highlights = highlights;
++    }
++
++    /// The text highlighted by [`Self::set_text_highlights`].
++    pub fn text_highlights(&self) -> &[crate::TextHighlight] {
++        &self.text_highlights
++    }
++
+     /// Update the selection focus point (used during mouse drag to extend selection).
+     pub fn update_selection_focus(&mut self, focus_node: NodeId, focus_offset: usize) {
+         // For anonymous blocks, store parent+sibling_index; otherwise store node directly
+@@ -2898,15 +2913,25 @@ impl BaseDocument {
+     /// Get all selection ranges as Vec<(node_id, start_offset, end_offset)>.
+     /// Returns empty vec if no selection.
+     pub fn get_text_selection_ranges(&self) -> Vec<(NodeId, usize, usize)> {
++        self.get_text_selection_ranges_and_end().0
++    }
++
++    /// The text selection's ranges, as [`Self::get_text_selection_ranges`]
++    /// gives them, and the inline root where the selection ends in document
++    /// order. A selection that ends at the start of a root has no range
++    /// there, but still selects the line break at the end of the root before.
++    pub fn get_text_selection_ranges_and_end(
++        &self,
++    ) -> (Vec<(NodeId, usize, usize)>, Option<NodeId>) {
+         let lookup = |parent_id, idx| self.find_anonymous_block_by_index(parent_id, idx);
+ 
+         let anchor_node = match self.text_selection.anchor.resolve_node_id(lookup) {
+             Some(id) => id,
+-            None => return Vec::new(),
++            None => return (Vec::new(), None),
+         };
+         let focus_node = match self.text_selection.focus.resolve_node_id(lookup) {
+             Some(id) => id,
+-            None => return Vec::new(),
++            None => return (Vec::new(), None),
+         };
+ 
+         // Guard against stale selection endpoints: nodes may have been removed from
+@@ -2917,7 +2942,7 @@ impl BaseDocument {
+                 .is_some_and(|node| node.flags.is_in_document())
+         };
+         if !node_is_in_doc(anchor_node) || !node_is_in_doc(focus_node) {
+-            return Vec::new();
++            return (Vec::new(), None);
+         }
+ 
+         // Single node selection
+@@ -2934,15 +2959,15 @@ impl BaseDocument {
+                 .max(self.text_selection.focus.offset);
+ 
+             if start == end {
+-                return Vec::new();
++                return (Vec::new(), None);
+             }
+-            return vec![(anchor_node, start, end)];
++            return (vec![(anchor_node, start, end)], Some(anchor_node));
+         }
+ 
+         // Multi-node selection: collect all inline roots between anchor and focus
+         let inline_roots = self.collect_inline_roots_in_range(anchor_node, focus_node);
+         if inline_roots.is_empty() {
+-            return Vec::new();
++            return (Vec::new(), None);
+         }
+ 
+         // Determine document order using the collected inline_roots order
+@@ -3002,7 +3027,7 @@ impl BaseDocument {
+             }
+         }
+ 
+-        ranges
++        (ranges, Some(last_node))
+     }
+ }
+ 
+diff --git a/crates/blitz-dom/src/lib.rs b/crates/blitz-dom/src/lib.rs
+index f86bbfd..cf42478 100644
+--- a/crates/blitz-dom/src/lib.rs
++++ b/crates/blitz-dom/src/lib.rs
+@@ -106,6 +106,7 @@ pub use mutator::DocumentMutator;
+ pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
+ pub use parley::FontContext;
+ pub use scrolling::{ScrollBehavior, ScrollLogicalPosition};
++pub use selection::TextHighlight;
+ pub use tree::NodeTree;
+ 
+ /// Convert a Blitz [`NodeId`] into a [`taffy::NodeId`] (which wraps a `u64`).
+diff --git a/crates/blitz-dom/src/selection.rs b/crates/blitz-dom/src/selection.rs
+index 91fa272..632a6de 100644
+--- a/crates/blitz-dom/src/selection.rs
++++ b/crates/blitz-dom/src/selection.rs
+@@ -72,6 +72,18 @@ impl SelectionEndpoint {
+     }
+ }
+ 
++/// Part of an inline root's text to highlight, as find in page highlights
++/// its matches.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct TextHighlight {
++    /// The inline root whose text is highlighted.
++    pub node: NodeId,
++    /// The highlighted bytes of the root's text.
++    pub range: std::ops::Range<usize>,
++    /// Whether this is the current match, which is painted more strongly.
++    pub active: bool,
++}
++
+ /// Text selection state for non-input elements.
+ ///
+ /// Tracks both the anchor (where selection started) and focus (where it currently ends).
+diff --git a/crates/blitz-paint/src/lib.rs b/crates/blitz-paint/src/lib.rs
+index 45d19ab..0280cde 100644
+--- a/crates/blitz-paint/src/lib.rs
++++ b/crates/blitz-paint/src/lib.rs
+@@ -44,6 +44,10 @@ const FONT_EMBOLDEN_ENABLED: bool = cfg!(any(
+ 
+ /// The default color for text selection highlights
+ const SELECTION_COLOR: Color = Color::from_rgb8(180, 213, 255);
++/// Blink's colours for find-in-page matches, and for the current one
++/// (`LayoutTheme::PlatformTextSearchHighlightColor`). Their text is black.
++const MATCH_COLOR: Color = Color::from_rgb8(255, 255, 0);
++const ACTIVE_MATCH_COLOR: Color = Color::from_rgb8(255, 150, 50);
+ 
+ /// Pre-computed `Scene`s for each CustomWidget, keyed by `(document id, node id)`
+ type CustomWidgetSceneMap = HashMap<(usize, NodeId), Scene>;
+diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
+index cd67038..2d9e633 100644
+--- a/crates/blitz-paint/src/render.rs
++++ b/crates/blitz-paint/src/render.rs
+@@ -18,7 +18,7 @@ use crate::kurbo_css::NonUniformRoundedRectRadii;
+ use crate::layers::LayerManager;
+ use crate::sizing::compute_object_fit;
+ use crate::text::DrawTextContext;
+-use crate::{CustomWidgetSceneMap, SELECTION_COLOR};
++use crate::{ACTIVE_MATCH_COLOR, CustomWidgetSceneMap, MATCH_COLOR, SELECTION_COLOR};
+ use anyrender::{PaintScene, Scene};
+ use blitz_dom::node::{
+     ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, SpecialElementData,
+@@ -71,8 +71,12 @@ pub struct BlitzDomPainter<'dom, 'a> {
+     pub(crate) layer_manager: LayerManager,
+     /// Reusable scratch allocations shared by all text layouts painted for this document.
+     pub(crate) draw_text_context: RefCell<DrawTextContext>,
+-    /// Cached selection ranges for O(1) lookup: node_id -> (start_offset, end_offset)
+-    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize)>,
++    /// Each selected inline root's byte range, and whether the selection goes
++    /// on past the root's end.
++    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize, bool)>,
++    /// Each highlighted inline root's highlighted byte ranges, and whether
++    /// each is the active one.
++    pub(crate) text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>>,
+ 
+     // Pre-computed `Scene`s for each CustomWidget
+     pub(crate) custom_widget_scenes: &'a CustomWidgetSceneMap,
+@@ -89,11 +93,19 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+         initial_y: f64,
+         custom_widget_scenes: &'a CustomWidgetSceneMap,
+     ) -> Self {
+-        let selection_ranges: HashMap<NodeId, (usize, usize)> = dom
+-            .get_text_selection_ranges()
++        let (ranges, selection_end) = dom.get_text_selection_ranges_and_end();
++        let selection_ranges: HashMap<NodeId, (usize, usize, bool)> = ranges
+             .into_iter()
+-            .map(|(node_id, start, end)| (node_id, (start, end)))
++            .map(|(node_id, start, end)| (node_id, (start, end, Some(node_id) != selection_end)))
+             .collect();
++        let mut text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>> = HashMap::new();
++        for highlight in dom.text_highlights() {
++            text_highlights.entry(highlight.node).or_default().push((
++                highlight.range.start,
++                highlight.range.end,
++                highlight.active,
++            ));
++        }
+ 
+         let layer_manager = LayerManager::default();
+         let root_element_id = dom.try_root_element().map(|el| el.id);
+@@ -114,6 +126,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+             layer_manager,
+             draw_text_context: RefCell::new(DrawTextContext::default()),
+             selection_ranges,
++            text_highlights,
+             custom_widget_scenes,
+         }
+     }
+@@ -980,11 +993,48 @@ impl ElementCx<'_, '_> {
+                 .context
+                 .selection_ranges
+                 .get(&self.node.id)
+-                .map(|&(sel_start, sel_end)| {
+-                    crate::text::text_selection_rects(&text_layout.layout, sel_start, sel_end)
++                .map(|&(sel_start, sel_end, continues)| {
++                    // As in Blink, an inline-block's last line break isn't
++                    // painted, as the block may sit in the middle of a line.
++                    let atomic = self.style.get_box().display.outside() == DisplayOutside::Inline;
++                    crate::text::text_selection_rects(
++                        &text_layout.layout,
++                        sel_start,
++                        sel_end,
++                        continues && !atomic,
++                    )
+                 })
+                 .unwrap_or_default();
+ 
++            // Highlighted text (if any), such as find-in-page matches. Unlike
++            // the selection, Blink paints highlights as tall as the text, not
++            // the line.
++            let highlights: Vec<(usize, Rect, bool)> = self
++                .context
++                .text_highlights
++                .get(&self.node.id)
++                .into_iter()
++                .flatten()
++                .flat_map(|&(start, end, active)| {
++                    crate::text::text_range_rects(&text_layout.layout, start, end)
++                        .into_iter()
++                        .map(move |(line, rect)| (line, rect, active))
++                })
++                .map(|(line, rect, active)| {
++                    let rect = text_layout.layout.get(line).map_or(rect, |line| {
++                        let metrics = line.metrics();
++                        Rect::new(
++                            rect.x0,
++                            f64::from(metrics.content_block_min_coord),
++                            rect.x1,
++                            f64::from(metrics.content_block_max_coord),
++                        )
++                    });
++                    (line, rect, active)
++                })
++                .collect();
++            let layout_width = f64::from(text_layout.layout.full_width());
++
+             let rtl = text_layout.layout.is_rtl();
+             // Inline elements with `opacity` are painted as groups.
+             let groups =
+@@ -1020,10 +1070,32 @@ impl ElementCx<'_, '_> {
+                 for (_, rect) in selection.iter().filter(|(line, _)| *line == index) {
+                     scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, rect);
+                 }
++                // Highlights cover the selection, as the current find match
++                // is also the selection.
++                let mut line_highlights = Vec::new();
++                for (_, rect, active) in highlights.iter().filter(|(line, ..)| *line == index) {
++                    let color = if *active {
++                        ACTIVE_MATCH_COLOR
++                    } else {
++                        MATCH_COLOR
++                    };
++                    scene.fill(Fill::NonZero, transform, color, None, rect);
++                    line_highlights.push(*rect);
++                }
++                let line_area = {
++                    let metrics = line.metrics();
++                    let margin = f64::from(metrics.line_height) * 2.0;
++                    Rect::new(
++                        -margin,
++                        f64::from(metrics.block_min_coord) - margin,
++                        layout_width + margin,
++                        f64::from(metrics.block_max_coord) + margin,
++                    )
++                };
+                 let ungrouped = |id: NodeId| groups.group_of(id).is_none();
+-                crate::text::stroke_text(
++                crate::text::stroke_highlighted_text(
+                     scene,
+-                    std::iter::once(line.clone()),
++                    line.clone(),
+                     self.context.dom,
+                     transform,
+                     self.scale,
+@@ -1035,7 +1107,10 @@ impl ElementCx<'_, '_> {
+                             .then_some(&ungrouped as &dyn Fn(NodeId) -> bool),
+                         text: &text_layout.text,
+                         rtl,
++                        text_color: None,
+                     },
++                    &line_highlights,
++                    line_area,
+                 );
+                 // Each group on the line, its decorations and text in a layer
+                 // with its opacity.
+@@ -1058,9 +1133,9 @@ impl ElementCx<'_, '_> {
+                                 }
+                             }
+                             let in_group = |id: NodeId| groups.group_of(id) == Some(group);
+-                            crate::text::stroke_text(
++                            crate::text::stroke_highlighted_text(
+                                 scene,
+-                                std::iter::once(line.clone()),
++                                line.clone(),
+                                 self.context.dom,
+                                 transform,
+                                 self.scale,
+@@ -1071,7 +1146,10 @@ impl ElementCx<'_, '_> {
+                                     run_filter: Some(&in_group),
+                                     text: &text_layout.text,
+                                     rtl,
++                                    text_color: None,
+                                 },
++                                &line_highlights,
++                                line_area,
+                             );
+                         },
+                     );
+@@ -1148,6 +1226,7 @@ impl ElementCx<'_, '_> {
+                     run_filter: None,
+                     text: "",
+                     rtl: layout.is_rtl(),
++                    text_color: None,
+                 },
+             );
+         }
+@@ -1209,6 +1288,7 @@ impl ElementCx<'_, '_> {
+                     run_filter: None,
+                     text: "",
+                     rtl: layout.is_rtl(),
++                    text_color: None,
+                 },
+             );
+         }
+diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
+index c3d773f..dcab8e7 100644
+--- a/crates/blitz-paint/src/text.rs
++++ b/crates/blitz-paint/src/text.rs
+@@ -222,6 +222,7 @@ struct InkedRun {
+ }
+ 
+ /// How to paint the text of an inline formatting context.
++#[derive(Clone, Copy)]
+ pub(crate) struct TextPaint<'t> {
+     /// Glyph runs entirely outside it are not drawn.
+     pub(crate) viewport: Option<Rect>,
+@@ -231,6 +232,8 @@ pub(crate) struct TextPaint<'t> {
+     pub(crate) text: &'t str,
+     /// Whether the paragraph runs right to left.
+     pub(crate) rtl: bool,
++    /// A colour for every glyph instead of its own, such as a highlight's.
++    pub(crate) text_color: Option<Color>,
+ }
+ 
+ // The font-wide outline bounds include accents and overhangs which line-height
+@@ -766,6 +769,7 @@ pub(crate) fn stroke_text<'a>(
+         run_filter,
+         text,
+         rtl,
++        text_color: color_override,
+     } = paint;
+     let DrawTextContext {
+         stack,
+@@ -847,7 +851,9 @@ pub(crate) fn stroke_text<'a>(
+ 
+                 // The glyph colour comes from the run's own node (the stack top): `color`
+                 // inherits, so the innermost inline element already carries the right value.
+-                let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
++                let text_color = color_override
++                    .or_else(|| stack.last().map(|e| e.text_color))
++                    .unwrap_or(Color::BLACK);
+ 
+                 let mut embolden = if FONT_EMBOLDEN_ENABLED {
+                     let fs = font_size as f64 / scale;
+@@ -1075,17 +1081,93 @@ fn synthetic_bold(font_size: f64) -> kurbo::Vec2 {
+ /// The selection highlight rectangles for the given byte range in a layout,
+ /// with the line each is on. Uses Parley's Selection type for accurate
+ /// geometry calculation.
++///
++/// As in Blink, a line whose end the selection goes past ends in a box as
++/// wide as a space in its last run's font, which shows that its line break
++/// is selected: after a `<br>` (where Parley draws a narrower box), after a
++/// word wrapped within itself, and after the text when the selection
++/// `continues` beyond it. A wrap after white space needs none, as the
++/// highlighted space shows it.
+ pub(crate) fn text_selection_rects(
+     layout: &Layout<TextBrush>,
+     selection_start: usize,
+     selection_end: usize,
++    continues: bool,
+ ) -> Vec<(usize, Rect)> {
+-    let anchor = Cursor::from_byte_index(layout, selection_start, Affinity::Downstream);
+-    let focus = Cursor::from_byte_index(layout, selection_end, Affinity::Downstream);
+-    let selection = Selection::new(anchor, focus);
++    let mut rects = text_range_rects(layout, selection_start, selection_end);
++
++    let line_count = layout.len();
++    for (index, line) in layout.lines().enumerate() {
++        let range = line.text_range();
++        if range.end <= selection_start || range.start >= selection_end {
++            continue;
++        }
++        let explicit = line.break_reason() == parley::BreakReason::Explicit;
++        let metrics = line.metrics();
++        let break_selected = if index + 1 == line_count {
++            continues && selection_end >= range.end
++        } else if explicit {
++            selection_end >= range.end
++        } else {
++            selection_end > range.end && metrics.hanging_advance == 0.0
++        };
++        if !break_selected {
++            continue;
++        }
++        // The line's content as laid out, justification included.
++        let (left, right) = line
++            .items()
++            .fold((f64::MAX, f64::MIN), |(left, right), item| {
++                let (start, width) = match item {
++                    PositionedLayoutItem::GlyphRun(run) => (run.offset(), run.advance()),
++                    PositionedLayoutItem::InlineBox(inline_box) => (inline_box.x, inline_box.width),
++                };
++                (
++                    left.min(f64::from(start)),
++                    right.max(f64::from(start + width)),
++                )
++            });
++        let Some(space) = range
++            .end
++            .checked_sub(1)
++            .and_then(|index| parley::Cluster::from_byte_index(layout, index))
++            .and_then(|cluster| space_advance(&cluster.run()))
++        else {
++            continue;
++        };
++        if left > right {
++            continue;
++        }
++        let top = f64::from(metrics.block_min_coord.min(metrics.content_block_min_coord));
++        let bottom = f64::from(metrics.block_max_coord.max(metrics.content_block_max_coord));
++        // Parley's box after a `<br>` gives way to this one.
++        for (_, rect) in rects.iter_mut().filter(|(line, _)| *line == index) {
++            rect.x1 = rect.x1.min(right).max(rect.x0);
++        }
++        rects.push((
++            index,
++            if layout.is_rtl() {
++                Rect::new(left - space, top, left, bottom)
++            } else {
++                Rect::new(right, top, right + space, bottom)
++            },
++        ));
++    }
++    rects.retain(|(_, rect)| rect.width() > 0.0);
++    rects
++}
+ 
++/// The rectangles of a byte range of a layout's text, with the line each is
++/// on, from Parley's selection geometry.
++pub(crate) fn text_range_rects(
++    layout: &Layout<TextBrush>,
++    start: usize,
++    end: usize,
++) -> Vec<(usize, Rect)> {
++    let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
++    let focus = Cursor::from_byte_index(layout, end, Affinity::Downstream);
+     let mut rects = Vec::new();
+-    selection.geometry_with(layout, |rect, line_idx| {
++    Selection::new(anchor, focus).geometry_with(layout, |rect, line_idx| {
+         rects.push((
+             line_idx,
+             kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1),
+@@ -1093,3 +1175,86 @@ pub(crate) fn text_selection_rects(
+     });
+     rects
+ }
++
++/// Strokes a line's text, in black where `highlights` cover it, as Blink
++/// paints the text of find-in-page matches. `area` holds all of the line's
++/// ink.
++#[allow(clippy::too_many_arguments)]
++pub(crate) fn stroke_highlighted_text(
++    scene: &mut impl PaintScene,
++    line: Line<'_, TextBrush>,
++    doc: &BaseDocument,
++    transform: Affine,
++    scale: f64,
++    inline_root_id: NodeId,
++    context: &mut DrawTextContext,
++    paint: TextPaint<'_>,
++    highlights: &[Rect],
++    area: Rect,
++) {
++    if highlights.is_empty() {
++        stroke_text(
++            scene,
++            std::iter::once(line),
++            doc,
++            transform,
++            scale,
++            inline_root_id,
++            context,
++            paint,
++        );
++        return;
++    }
++    let mut outside = BezPath::new();
++    let mut inside = BezPath::new();
++    outside.extend(area.path_elements(0.1));
++    for highlight in highlights {
++        outside.extend(highlight.path_elements(0.1));
++        inside.extend(highlight.path_elements(0.1));
++    }
++    scene.push_clip_layer(Fill::EvenOdd, transform, &outside);
++    stroke_text(
++        scene,
++        std::iter::once(line.clone()),
++        doc,
++        transform,
++        scale,
++        inline_root_id,
++        context,
++        paint,
++    );
++    scene.pop_layer();
++    scene.push_clip_layer(Fill::NonZero, transform, &inside);
++    stroke_text(
++        scene,
++        std::iter::once(line),
++        doc,
++        transform,
++        scale,
++        inline_root_id,
++        context,
++        TextPaint {
++            text_color: Some(Color::BLACK),
++            ..paint
++        },
++    );
++    scene.pop_layer();
++}
++
++/// The advance of a space in a run's font, which is how wide Blink draws a
++/// selected line break.
++fn space_advance(run: &parley::Run<'_, TextBrush>) -> Option<f64> {
++    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
++    use skrifa::{FontRef, MetadataProvider as _};
++    let font = run.font();
++    let font_ref = FontRef::from_index(font.data.as_ref(), font.index).ok()?;
++    let glyph = font_ref.charmap().map(' ')?;
++    let coords: Vec<NormalizedCoord> = bytemuck::cast_slice::<_, i16>(run.normalized_coords())
++        .iter()
++        .map(|coord| NormalizedCoord::from_bits(*coord))
++        .collect();
++    font_ref
++        .glyph_metrics(Size::new(run.font_size()), LocationRef::new(&coords))
++        .advance_width(glyph)
++        .map(f64::from)
++}

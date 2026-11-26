@@ -5,13 +5,10 @@ use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _,
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
 use style::color::AbsoluteColor;
-use style::values::computed::{BorderStyle, OutlineStyle};
+use style::values::computed::{BorderStyle, Display, OutlineStyle};
+use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
-use crate::{
-    color::{ToColorColor as _, contrast_ratio},
-    kurbo_css::Edge,
-    render::ElementCx,
-};
+use crate::{color::ToColorColor as _, kurbo_css::Edge, render::ElementCx};
 
 /// A darker version of a colour (mirrors WebKit/Blink's `Color::Dark`): the
 /// brightest channel is reduced by a fixed amount and the others scaled to match,
@@ -43,38 +40,47 @@ fn lighten(color: Color) -> Color {
 /// The colour of a single edge of an `inset`/`outset` border.
 ///
 /// An `outset` border is raised: the top/left edges use the "lighter" shade and
-/// the bottom/right edges the "darker" shade (`inset` is the reverse). The exact
-/// shading matches Chrome's `CalculateInsetOutsetColor`:
+/// the bottom/right edges the "darker" shade (`inset` is the reverse). The
+/// shading matches Blink's `CalculateInsetOutsetColor`:
 ///
-/// * The darker edge is always darkened.
-/// * The lighter edge keeps the base colour unchanged, *except* for colours dark
-///   enough that the darkened edge wouldn't have enough contrast against the base
-///   colour, which are lightened instead so the bevel stays visible.
+/// * A very dark colour (no brighter than `rgb(32, 32, 32)`) is lightened on
+///   its darker edge and lightened twice on its lighter one, so black bevels
+///   between `#545454` and `#a8a8a8`.
+/// * Otherwise the darker edge is darkened, and the lighter edge lightened
+///   unless the colour is very light (brighter than `rgb(235, 235, 235)`).
 fn beveled_edge_color(color: Color, edge: Edge, inset: bool) -> Color {
+    // Relative luminances of rgb(32, 32, 32) and rgb(235, 235, 235).
+    const DARK_LUMINANCE: f32 = 0.014443844;
+    const LIGHT_LUMINANCE: f32 = 0.83077;
+
     let top_or_left = matches!(edge, Edge::Top | Edge::Left);
-    let should_darken = top_or_left == inset;
-
-    let dark_color = darken(color);
-    if should_darken {
-        return dark_color;
+    let darker_edge = top_or_left == inset;
+    let luminance = color.split().0.relative_luminance();
+    if luminance <= DARK_LUMINANCE {
+        let lighter = lighten(color);
+        return if darker_edge {
+            lighter
+        } else {
+            lighten(lighter)
+        };
     }
-
-    // Lighter edge. Chrome uses the base colour as-is unless the colour is dark
-    // enough that the darkened edge lacks contrast against it. The red/green
-    // shortcut mirrors Chrome: for those colours the contrast is always
-    // sufficient, so the base colour is used without a contrast check.
-    let [r, g, _, _] = color.components;
-    if r >= 150.0 / 255.0 || g >= 92.0 / 255.0 {
-        return color;
-    }
-
-    // Lighten only when the darkened edge would be too low-contrast to read.
-    const MIN_CONTRAST_RATIO: f32 = 1.75;
-    if contrast_ratio(color, dark_color) < MIN_CONTRAST_RATIO {
-        lighten(color)
-    } else {
+    if darker_edge {
+        darken(color)
+    } else if luminance > LIGHT_LUMINANCE {
         color
+    } else {
+        lighten(color)
     }
+}
+
+/// Whether a box is a table, a table part or a caption (Blink's
+/// `IsDisplayTableType`).
+fn is_table_type(display: Display) -> bool {
+    display.inside() == DisplayInside::Table
+        || matches!(
+            display.outside(),
+            DisplayOutside::InternalTable | DisplayOutside::TableCaption
+        )
 }
 
 /// The (outer half, inner half) colours of a single edge of a `groove`/`ridge`
@@ -250,6 +256,17 @@ impl ElementCx<'_, '_> {
         // and inner halves of a `groove`/`ridge`).
         let mut borders: SmallVec<[(Color, BezPath); 8]> = SmallVec::new();
 
+        // Like Blink (`ComputedStyleUtils::BorderSideColor`), an `inset`,
+        // `outset`, `groove` or `ridge` edge resolves `currentcolor` against
+        // rgb(238, 238, 238) instead of the text colour, unless the box is a
+        // table or a table part. This is what makes a default `<hr>`, whose
+        // text colour is gray, pale.
+        let bevel_current_color = if is_table_type(style.clone_display()) {
+            current_color
+        } else {
+            AbsoluteColor::srgb_legacy(238, 238, 238, 1.0)
+        };
+
         for &edge in &[Edge::Top, Edge::Right, Edge::Bottom, Edge::Left] {
             let (color, edge_style) = match edge {
                 Edge::Top => (&border.border_top_color, border.border_top_style),
@@ -257,7 +274,14 @@ impl ElementCx<'_, '_> {
                 Edge::Bottom => (&border.border_bottom_color, border.border_bottom_style),
                 Edge::Left => (&border.border_left_color, border.border_left_style),
             };
-            let color = color.resolve_to_absolute(&current_color).as_srgb_color();
+            let current_color = match edge_style {
+                BorderStyle::Inset
+                | BorderStyle::Outset
+                | BorderStyle::Groove
+                | BorderStyle::Ridge => &bevel_current_color,
+                _ => &current_color,
+            };
+            let color = color.resolve_to_absolute(current_color).as_srgb_color();
 
             if color.components[3] <= 0.0 {
                 continue;

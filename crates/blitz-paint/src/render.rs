@@ -3,6 +3,7 @@ mod border;
 mod box_shadow;
 mod clip_path;
 mod form_controls;
+mod inline_box;
 mod mask;
 
 use std::cell::RefCell;
@@ -17,11 +18,11 @@ use crate::kurbo_css::NonUniformRoundedRectRadii;
 use crate::layers::LayerManager;
 use crate::sizing::compute_object_fit;
 use crate::text::DrawTextContext;
-use crate::{CustomWidgetSceneMap, SELECTION_COLOR};
+use crate::{ACTIVE_MATCH_COLOR, CustomWidgetSceneMap, MATCH_COLOR, SELECTION_COLOR};
 use anyrender::{PaintScene, Scene};
 use blitz_dom::node::{
-    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, TextInputData,
-    TextNodeData,
+    ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, SpecialElementData,
+    TextInputData, TextNodeData,
 };
 use blitz_dom::{BaseDocument, ElementData, Node, NodeId, local_name};
 use blitz_traits::devtools::DevtoolSettings;
@@ -46,7 +47,6 @@ use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
 /// their boxes leave out.
 const CULL_MARGIN: f64 = 64.0;
 use peniko::{self, Fill, ImageData, ImageSampler};
-use style::values::generics::color::GenericColor;
 use taffy::Layout;
 
 /// A short-lived struct which holds a bunch of parameters for rendering a scene so
@@ -62,6 +62,9 @@ pub struct BlitzDomPainter<'dom, 'a> {
     pub(crate) initial_y: f64,
     /// The id of the document's root element (cached to avoid re-resolving it for every element)
     pub(crate) root_element_id: Option<NodeId>,
+    /// The element whose background is painted as the canvas background
+    /// rather than in its own box: the root element, or its `body`
+    pub(crate) canvas_background_id: Option<NodeId>,
     /// Scrollbar hover/drag state, resolved once per scene like the root element
     #[cfg(feature = "scrollbars")]
     pub(crate) hovered_scrollbar: Option<blitz_dom::node::ScrollbarRef>,
@@ -70,8 +73,12 @@ pub struct BlitzDomPainter<'dom, 'a> {
     pub(crate) layer_manager: LayerManager,
     /// Reusable scratch allocations shared by all text layouts painted for this document.
     pub(crate) draw_text_context: RefCell<DrawTextContext>,
-    /// Cached selection ranges for O(1) lookup: node_id -> (start_offset, end_offset)
-    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize)>,
+    /// Each selected inline root's byte range, and whether the selection goes
+    /// on past the root's end.
+    pub(crate) selection_ranges: HashMap<NodeId, (usize, usize, bool)>,
+    /// Each highlighted inline root's highlighted byte ranges, and whether
+    /// each is the active one.
+    pub(crate) text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>>,
 
     // Pre-computed `Scene`s for each CustomWidget
     pub(crate) custom_widget_scenes: &'a CustomWidgetSceneMap,
@@ -88,14 +95,25 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         initial_y: f64,
         custom_widget_scenes: &'a CustomWidgetSceneMap,
     ) -> Self {
-        let selection_ranges: HashMap<NodeId, (usize, usize)> = dom
-            .get_text_selection_ranges()
+        let (ranges, selection_end) = dom.get_text_selection_ranges_and_end();
+        let selection_ranges: HashMap<NodeId, (usize, usize, bool)> = ranges
             .into_iter()
-            .map(|(node_id, start, end)| (node_id, (start, end)))
+            .map(|(node_id, start, end)| (node_id, (start, end, Some(node_id) != selection_end)))
             .collect();
+        let mut text_highlights: HashMap<NodeId, Vec<(usize, usize, bool)>> = HashMap::new();
+        for highlight in dom.text_highlights() {
+            text_highlights.entry(highlight.node).or_default().push((
+                highlight.range.start,
+                highlight.range.end,
+                highlight.active,
+            ));
+        }
 
         let layer_manager = LayerManager::default();
         let root_element_id = dom.try_root_element().map(|el| el.id);
+        let canvas_background_id = dom
+            .try_root_element()
+            .map(|root| background::canvas_background_source(dom, root));
 
         Self {
             paint_cache: None,
@@ -106,6 +124,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             initial_x,
             initial_y,
             root_element_id,
+            canvas_background_id,
             #[cfg(feature = "scrollbars")]
             hovered_scrollbar: dom.hovered_scrollbar(),
             #[cfg(feature = "scrollbars")]
@@ -113,6 +132,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             layer_manager,
             draw_text_context: RefCell::new(DrawTextContext::default()),
             selection_ranges,
+            text_highlights,
             custom_widget_scenes,
         }
     }
@@ -140,41 +160,44 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         let bg_width = (self.width as f32).max(root_element.final_layout().size.width);
         let bg_height = (self.height as f32).max(root_element.final_layout().size.height);
 
-        let background_color = {
-            let html_color = root_element
-                .primary_styles()
-                .map(|s| s.clone_background_color())
-                .unwrap_or(GenericColor::TRANSPARENT_BLACK);
-            if html_color == GenericColor::TRANSPARENT_BLACK {
-                root_element
-                    .children
-                    .iter()
-                    .find_map(|id| {
-                        self.dom
-                            .as_ref()
-                            .get_node(*id)
-                            .filter(|node| node.data.is_element_with_tag_name(&local_name!("body")))
-                    })
-                    .and_then(|body| body.primary_styles())
-                    .map(|style| {
-                        let current_color = style.clone_color();
-                        style
-                            .clone_background_color()
-                            .resolve_to_absolute(&current_color)
-                    })
-            } else {
-                let current_color = root_element.primary_styles().unwrap().clone_color();
-                Some(html_color.resolve_to_absolute(&current_color))
+        // The root element's background, or the body's propagated to it, is
+        // the canvas background: it covers the whole canvas, and its images
+        // are positioned against the root element's box (CSS Backgrounds 3
+        // section 2.11).
+        let canvas_rect = Rect::from_origin_size(
+            (self.initial_x, self.initial_y),
+            (bg_width as f64, bg_height as f64),
+        );
+        let canvas_source = self
+            .canvas_background_id
+            .and_then(|id| self.dom.as_ref().get_node(id));
+        if let Some(style) = canvas_source.and_then(|node| node.primary_styles()) {
+            let bg_color = style
+                .clone_background_color()
+                .resolve_to_absolute(&style.clone_color())
+                .as_srgb_color();
+            if bg_color != Color::TRANSPARENT {
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    bg_color,
+                    None,
+                    &canvas_rect,
+                );
             }
-        };
-
-        if let Some(bg_color) = background_color {
-            let bg_color = bg_color.as_srgb_color();
-            let rect = Rect::from_origin_size(
-                (self.initial_x, self.initial_y),
-                (bg_width as f64, bg_height as f64),
+        }
+        if let Some(source) = canvas_source {
+            let location = root_element.final_layout().location;
+            let transform = Affine::translate(Vec2 {
+                x: self.initial_x - viewport_scroll.x * self.scale + location.x as f64 * self.scale,
+                y: self.initial_y - viewport_scroll.y * self.scale + location.y as f64 * self.scale,
+            });
+            let cx = self.element_cx(root_element, *root_element.final_layout(), transform, None);
+            cx.draw_canvas_background(
+                scene,
+                source,
+                transform.inverse().transform_rect_bbox(canvas_rect),
             );
-            scene.fill(Fill::NonZero, Affine::IDENTITY, bg_color, None, &rect);
         }
 
         // The root clip rectangle is the viewport (in screen coordinates, with the
@@ -274,7 +297,9 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         }
 
         let effects = styles.get_effects();
-        let opacity = effects.opacity;
+        // A non-atomic inline element has no box of its own to group its
+        // content in: its opacity applies to the boxes inside it here.
+        let opacity = effects.opacity * inline_box::inline_ancestor_opacity(self.dom, node);
         if opacity == 0.0 {
             return;
         }
@@ -413,6 +438,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         // Apply CSS transform property (where transforms are 2d)
 
         let mut cx = self.element_cx(node, *node.final_layout(), transform, custom_widget_scene);
+        // A table's box surrounds its grid, not its captions.
+        let table_box = table_box_extent(self.dom, node).map(|(top, height)| {
+            let mut layout = *node.final_layout();
+            layout.size.height = height;
+            self.element_cx(
+                node,
+                layout,
+                transform * Affine::translate((0.0, f64::from(top) * self.scale)),
+                custom_widget_scene,
+            )
+        });
 
         // If this element clips its overflow it establishes a scrollport: narrow the clip
         // rectangle passed to descendants to the visible (clipped) region so that content
@@ -452,8 +488,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             None,
         );
 
-        cx.draw_outline(scene);
-        cx.draw_outset_box_shadow(scene);
+        table_box.as_ref().unwrap_or(&cx).draw_outline(scene);
+        table_box
+            .as_ref()
+            .unwrap_or(&cx)
+            .draw_outset_box_shadow(scene);
 
         // clip-path clip ayer
         self.layer_manager.maybe_with_layer(
@@ -505,10 +544,14 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                     filter,
                     backdrop_filter,
                     |scene| {
-                        cx.draw_background(scene);
-                        cx.draw_inset_box_shadow(scene);
+                        let box_cx = table_box.as_ref().unwrap_or(&cx);
+                        // The canvas background is painted on the canvas instead.
+                        if self.canvas_background_id != Some(node_id) {
+                            box_cx.draw_background(scene);
+                        }
+                        box_cx.draw_inset_box_shadow(scene);
                         cx.draw_table_row_backgrounds(scene);
-                        cx.draw_border(scene);
+                        table_box.as_ref().unwrap_or(&cx).draw_border(scene);
                         cx.stroke_devtools(scene);
 
                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
@@ -907,6 +950,32 @@ impl ElementCx<'_, '_> {
                 .as_ref()
                 .and_then(|cache| cache.get(&self.node.id))
                 .filter(|bounds| bounds.len() == text_layout.layout.len());
+
+            // Inline elements' backgrounds, borders and shadows, by line.
+            let fragments = inline_box::inline_fragments(
+                self.context.dom,
+                &text_layout.layout,
+                self.node.id,
+                self.scale,
+            );
+            // Their ink, which can reach past the line's glyphs.
+            let mut fragment_ink: HashMap<usize, Rect> = HashMap::new();
+            for fragment in &fragments {
+                let Some(style) = self
+                    .context
+                    .dom
+                    .get_node(fragment.node_id)
+                    .and_then(|node| node.primary_styles())
+                else {
+                    continue;
+                };
+                let ink = fragment.ink_rect(&style, self.scale);
+                fragment_ink
+                    .entry(fragment.line)
+                    .and_modify(|rect| *rect = rect.union(ink))
+                    .or_insert(ink);
+            }
+
             let lines = text_layout
                 .layout
                 .lines()
@@ -916,6 +985,9 @@ impl ElementCx<'_, '_> {
                         .zip(bounds)
                         .and_then(|(viewport, bounds)| {
                             bounds.get(index).copied().flatten().map(|bounds| {
+                                let bounds = fragment_ink
+                                    .get(&index)
+                                    .map_or(bounds, |ink| bounds.union(*ink));
                                 let bounds = transform.transform_rect_bbox(bounds);
                                 bounds.is_finite()
                                     && (bounds.x1 < viewport.x0
@@ -925,37 +997,176 @@ impl ElementCx<'_, '_> {
                             })
                         })
                         .unwrap_or(false);
-                    (!outside).then_some(line)
+                    (!outside).then_some((index, line))
                 });
-            crate::text::draw_inline_backgrounds(
-                scene,
-                lines.clone(),
-                self.context.dom,
-                transform,
-                self.node.id,
-            );
-            // Render text selection highlight (if any) using cached selection ranges
-            if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
-                crate::text::draw_text_selection(
-                    scene,
-                    &text_layout.layout,
-                    transform,
-                    sel_start,
-                    sel_end,
-                );
-            }
 
+            // The text selection highlight (if any), using cached selection ranges
+            let selection = self
+                .context
+                .selection_ranges
+                .get(&self.node.id)
+                .map(|&(sel_start, sel_end, continues)| {
+                    // As in Blink, an inline-block's last line break isn't
+                    // painted, as the block may sit in the middle of a line.
+                    let atomic = self.style.get_box().display.outside() == DisplayOutside::Inline;
+                    crate::text::text_selection_rects(
+                        &text_layout.layout,
+                        sel_start,
+                        sel_end,
+                        continues && !atomic,
+                    )
+                })
+                .unwrap_or_default();
+
+            // Highlighted text (if any), such as find-in-page matches. Unlike
+            // the selection, Blink paints highlights as tall as the text, not
+            // the line.
+            let highlights: Vec<(usize, Rect, bool)> = self
+                .context
+                .text_highlights
+                .get(&self.node.id)
+                .into_iter()
+                .flatten()
+                .flat_map(|&(start, end, active)| {
+                    crate::text::text_range_rects(&text_layout.layout, start, end)
+                        .into_iter()
+                        .map(move |(line, rect)| (line, rect, active))
+                })
+                .map(|(line, rect, active)| {
+                    let rect = text_layout.layout.get(line).map_or(rect, |line| {
+                        let metrics = line.metrics();
+                        Rect::new(
+                            rect.x0,
+                            f64::from(metrics.content_block_min_coord),
+                            rect.x1,
+                            f64::from(metrics.content_block_max_coord),
+                        )
+                    });
+                    (line, rect, active)
+                })
+                .collect();
+            let layout_width = f64::from(text_layout.layout.full_width());
+
+            let rtl = text_layout.layout.is_rtl();
+            // Inline elements with `opacity` are painted as groups.
+            let groups =
+                inline_box::OpacityGroups::new(self.context.dom, &text_layout.layout, self.node.id);
+
+            // Each line is painted in turn, its inline boxes' decorations, then
+            // its selection, then its text (CSS 2.1 Appendix E, 7.2.1): where
+            // a line's boxes reach into the line above, they cover its text.
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
-            crate::text::stroke_text(
-                scene,
-                lines,
-                self.context.dom,
-                transform,
-                self.scale,
-                self.node.id,
-                &mut draw_text_context,
-                viewport,
-            );
+            let mut next_fragment = 0;
+            for (index, line) in lines {
+                while fragments
+                    .get(next_fragment)
+                    .is_some_and(|fragment| fragment.line < index)
+                {
+                    next_fragment += 1;
+                }
+                let line_fragments = {
+                    let start = next_fragment;
+                    while fragments
+                        .get(next_fragment)
+                        .is_some_and(|fragment| fragment.line == index)
+                    {
+                        next_fragment += 1;
+                    }
+                    &fragments[start..next_fragment]
+                };
+                for fragment in line_fragments {
+                    if groups.group_of(fragment.node_id).is_none() {
+                        self.draw_inline_fragment(scene, fragment, transform);
+                    }
+                }
+                for (_, rect) in selection.iter().filter(|(line, _)| *line == index) {
+                    scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, rect);
+                }
+                // Highlights cover the selection, as the current find match
+                // is also the selection.
+                let mut line_highlights = Vec::new();
+                for (_, rect, active) in highlights.iter().filter(|(line, ..)| *line == index) {
+                    let color = if *active {
+                        ACTIVE_MATCH_COLOR
+                    } else {
+                        MATCH_COLOR
+                    };
+                    scene.fill(Fill::NonZero, transform, color, None, rect);
+                    line_highlights.push(*rect);
+                }
+                let line_area = {
+                    let metrics = line.metrics();
+                    let margin = f64::from(metrics.line_height) * 2.0;
+                    Rect::new(
+                        -margin,
+                        f64::from(metrics.block_min_coord) - margin,
+                        layout_width + margin,
+                        f64::from(metrics.block_max_coord) + margin,
+                    )
+                };
+                let ungrouped = |id: NodeId| groups.group_of(id).is_none();
+                crate::text::stroke_highlighted_text(
+                    scene,
+                    line.clone(),
+                    self.context.dom,
+                    transform,
+                    self.scale,
+                    self.node.id,
+                    &mut draw_text_context,
+                    crate::text::TextPaint {
+                        viewport,
+                        run_filter: (!groups.is_empty())
+                            .then_some(&ungrouped as &dyn Fn(NodeId) -> bool),
+                        text: &text_layout.text,
+                        rtl,
+                        text_color: None,
+                    },
+                    &line_highlights,
+                    line_area,
+                );
+                // Each group on the line, its decorations and text in a layer
+                // with its opacity.
+                for (group, opacity, bounds) in groups.on_line(&line, line_fragments, self.scale) {
+                    if opacity <= 0.0 {
+                        continue;
+                    }
+                    self.layer_manager.maybe_with_layer(
+                        scene,
+                        true,
+                        opacity,
+                        transform,
+                        &bounds,
+                        None,
+                        None,
+                        |scene| {
+                            for fragment in line_fragments {
+                                if groups.group_of(fragment.node_id) == Some(group) {
+                                    self.draw_inline_fragment(scene, fragment, transform);
+                                }
+                            }
+                            let in_group = |id: NodeId| groups.group_of(id) == Some(group);
+                            crate::text::stroke_highlighted_text(
+                                scene,
+                                line.clone(),
+                                self.context.dom,
+                                transform,
+                                self.scale,
+                                self.node.id,
+                                &mut draw_text_context,
+                                crate::text::TextPaint {
+                                    viewport,
+                                    run_filter: Some(&in_group),
+                                    text: &text_layout.text,
+                                    rtl,
+                                    text_color: None,
+                                },
+                                &line_highlights,
+                                line_area,
+                            );
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -1013,15 +1224,22 @@ impl ElementCx<'_, '_> {
 
             // Render text
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
+            let layout = input_data.editor.try_layout().unwrap();
             crate::text::stroke_text(
                 scene,
-                input_data.editor.try_layout().unwrap().lines(),
+                layout.lines(),
                 self.context.dom,
                 transform,
                 self.scale,
                 self.node.id,
                 &mut draw_text_context,
-                None,
+                crate::text::TextPaint {
+                    viewport: None,
+                    run_filter: None,
+                    text: "",
+                    rtl: layout.is_rtl(),
+                    text_color: None,
+                },
             );
         }
     }
@@ -1077,7 +1295,13 @@ impl ElementCx<'_, '_> {
                 self.scale,
                 self.node.id,
                 &mut draw_text_context,
-                None,
+                crate::text::TextPaint {
+                    viewport: None,
+                    run_filter: None,
+                    text: "",
+                    rtl: layout.is_rtl(),
+                    text_color: None,
+                },
             );
         }
     }
@@ -1349,6 +1573,34 @@ impl<'dom, 'a> std::ops::Deref for ElementCx<'dom, 'a> {
     fn deref(&self) -> &Self::Target {
         self.context
     }
+}
+
+/// The top and height of a table's box, which surrounds its grid but not its
+/// captions (CSS 2.1 §17.4), when it has captions.
+fn table_box_extent(dom: &BaseDocument, node: &Node) -> Option<(f32, f32)> {
+    use style::values::computed::table::CaptionSide;
+    let SpecialElementData::TableRoot(table) = &node.element_data()?.special_data else {
+        return None;
+    };
+    if table.captions.is_empty() {
+        return None;
+    }
+    let (mut top, mut bottom) = (0.0f32, node.final_layout().size.height);
+    for &caption in &table.captions {
+        let Some(caption) = dom.get_node(caption) else {
+            continue;
+        };
+        let layout = caption.final_layout();
+        let below = caption
+            .primary_styles()
+            .is_some_and(|style| style.clone_caption_side() == CaptionSide::Bottom);
+        if below {
+            bottom = bottom.min(layout.location.y - layout.margin.top);
+        } else {
+            top = top.max(layout.location.y + layout.size.height + layout.margin.bottom);
+        }
+    }
+    (bottom > top).then_some((top, bottom - top))
 }
 
 fn insets_from_taffy_rect(input: taffy::Rect<f64>) -> Insets {

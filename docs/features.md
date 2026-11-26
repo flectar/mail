@@ -193,12 +193,14 @@ server announces new mail, where it can, and otherwise every 5 minutes, or as
 often as **Check for new mail** in Settings → General says. To check now, press
 F5 for the accounts the mail view shows, or Shift+F5 or the refresh button
 beside the search field for every account. On a phone, pull the mail list down
-from its top to check the accounts it shows. An account's menu in the sidebar
-(right-click, or hold a finger on it on a phone) checks just that account.
+from its top to check the accounts it shows, or choose **Check for new mail** at
+the end of the search field's menu to check every account. An account's menu in
+the sidebar (right-click, or hold a finger on it on a phone) checks just that
+account.
 
 While a check runs for more than a moment, a small spinner turns beside the
-account's name in the sidebar; it holds still while motion is reduced. When the
-server doesn't accept an account's sign-in, or its checks keep failing for a
+account's name in the sidebar; while motion is reduced, it pulses in place. When
+the server doesn't accept an account's sign-in, or its checks keep failing for a
 minute, a red marker takes its place. Click or tap the marker to see why, with
 **Try again** to check right away, or **Sign in again** when the sign-in needs
 renewing. After a check you asked for, the marker shows at once. Flectar Mail
@@ -1094,12 +1096,17 @@ new device. Your mail, contacts and calendars keep syncing with your mail
 provider as before.
 
 Turn it on in Settings → Sync. To add a device, choose **Add a device** on one
-that already syncs and type the code it shows into **Enter code** on the new
-one, either on the welcome screen or in Settings → Sync. A device can also join
-with your recovery code. Each device keeps its own mail checking, how much mail
-history it downloads and what it downloads ahead of time, which folders of an
-IMAP account it syncs, its proxy and server timeout, and settings that belong
-to the device itself, such as reduced motion and text size.
+that already syncs. It shows a QR code for a phone to scan with **Scan QR
+code**, on the welcome screen or in Settings → Sync, and **Use a code** shows a
+code to type into **Enter code** instead. The other way around, a computer shows
+its own QR code with **Show QR code**, and a phone that syncs scans it from
+**Add a device**. Android phones scan with Google Play services and HarmonyOS
+phones with the system's scanner, neither of which needs the app to have camera
+access. An iPhone asks for camera access the first time it scans. A device can
+also join with your recovery code. Each device keeps its own mail checking, how
+much mail history it downloads and what it downloads ahead of time, which
+folders of an IMAP account it syncs, its proxy and server timeout, and settings
+that belong to the device itself, such as reduced motion and text size.
 
 Accounts arrive with their passwords, so they work on a new device at once.
 Google and Microsoft sign-ins go only to devices of the same kind. A

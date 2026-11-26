@@ -471,7 +471,7 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Fullscreen => false,
             NonTSPseudoClass::Hover => self.element_state().contains(ElementState::HOVER),
             NonTSPseudoClass::Indeterminate => false,
-            NonTSPseudoClass::Lang(_) => false,
+            NonTSPseudoClass::Lang(ref lang) => self.match_element_lang(None, lang),
             NonTSPseudoClass::CustomState(_) => false,
             NonTSPseudoClass::Link => self.element_state().contains(ElementState::UNVISITED),
             NonTSPseudoClass::PlaceholderShown => false,
@@ -831,15 +831,39 @@ impl<'a> TElement for BlitzNode<'a> {
     }
 
     fn lang_attr(&self) -> Option<style::selector_parser::AttrValue> {
-        None
+        let attrs = self.attrs()?;
+        let lang = |ns: &Namespace| {
+            attrs
+                .iter()
+                .find(|attr| attr.name.local == local_name!("lang") && attr.name.ns == *ns)
+        };
+        lang(&markup5ever::ns!(xml))
+            .or_else(|| lang(&markup5ever::ns!()))
+            .map(|attr| style::selector_parser::AttrValue::from(attr.value.as_str()))
     }
 
     fn match_element_lang(
         &self,
-        _override_lang: Option<Option<style::selector_parser::AttrValue>>,
-        _value: &style::selector_parser::Lang,
+        override_lang: Option<Option<style::selector_parser::AttrValue>>,
+        value: &style::selector_parser::Lang,
     ) -> bool {
-        false
+        // An element's language is its own `lang` or its nearest ancestor's
+        // (HTML "The lang and xml:lang attributes"), which `:lang()` matches
+        // by RFC 4647 extended filtering, as Servo does. Like Blink and Gecko,
+        // an unknown or empty language matches nothing.
+        let lang = override_lang.unwrap_or_else(|| {
+            let mut element = Some(*self);
+            while let Some(current) = element {
+                if let Some(lang) = current.lang_attr() {
+                    return Some(lang);
+                }
+                element = selectors::Element::parent_element(&current);
+            }
+            None
+        });
+        lang.is_some_and(|lang| {
+            !lang.is_empty() && style::selector_parser::extended_filtering(&lang, value)
+        })
     }
 
     fn is_html_document_body_element(&self) -> bool {

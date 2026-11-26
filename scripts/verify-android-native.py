@@ -29,6 +29,7 @@ NATIVE_METHODS = {
     "GoogleAuthorization": ("nativeResult",),
     "MailCheckJob": ("nativeCheck", "nativeStop"),
     "NotificationActionReceiver": ("nativeRespond",),
+    "QrScanner": ("nativeResult",),
 }
 
 REQUIRED_EXPORTS = {

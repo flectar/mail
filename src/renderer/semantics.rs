@@ -188,7 +188,8 @@ impl GpuEmailRenderer {
             let name = if semantic {
                 subtree_text(&email.document, id)
             } else {
-                inline_root.unwrap().text.clone()
+                // Inline elements' edges are laid out as invisible characters.
+                blitz_dom::node::without_inline_edges(&inline_root.unwrap().text).into_owned()
             };
             if name.is_empty() {
                 return;
@@ -419,7 +420,9 @@ impl GpuEmailRenderer {
                 if a > cursor
                     && let Some(text) = inline.text.get(cursor..a)
                 {
-                    html.push_str(&crate::email_document::escape(text));
+                    html.push_str(&crate::email_document::escape(
+                        &blitz_dom::node::without_inline_edges(text),
+                    ));
                 }
                 let a = a.max(cursor);
                 if a >= b {
@@ -453,7 +456,9 @@ impl GpuEmailRenderer {
                     if italic {
                         html.push_str("<em>");
                     }
-                    html.push_str(&crate::email_document::escape(text));
+                    html.push_str(&crate::email_document::escape(
+                        &blitz_dom::node::without_inline_edges(text),
+                    ));
                     if italic {
                         html.push_str("</em>");
                     }
@@ -467,7 +472,9 @@ impl GpuEmailRenderer {
                 cursor = b;
             }
             if let Some(text) = inline.text.get(cursor..end) {
-                html.push_str(&crate::email_document::escape(text));
+                html.push_str(&crate::email_document::escape(
+                    &blitz_dom::node::without_inline_edges(text),
+                ));
             }
             html.push_str("</p>");
         }

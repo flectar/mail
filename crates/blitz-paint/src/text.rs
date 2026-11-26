@@ -1,98 +1,23 @@
 use anyrender::PaintScene;
-use blitz_dom::{BaseDocument, NodeId, node::TextBrush, util::ToColorColor};
-use kurbo::{Affine, BezPath, Cap, Circle, Rect, Stroke};
-use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
-use peniko::Fill;
+use anyrender::filters::{Filter, FilterEffect};
+use blitz_dom::{
+    BaseDocument, NodeId,
+    node::{GeneratedText, TextBrush},
+    util::ToColorColor,
+};
+use kurbo::{Affine, BezPath, Cap, Circle, Rect, Shape as _, Stroke};
+use parley::{Affinity, Cursor, GlyphRun, Layout, Line, PositionedLayoutItem, Selection};
+use peniko::{Fill, Mix};
 use std::collections::HashMap;
+use std::sync::Arc;
 use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
-use style::properties::generated::longhands::visibility::computed_value::T as StyloVisibility;
 use style::values::computed::{
     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
 };
 use style::values::generics::text::{GenericTextDecorationInset, GenericTextDecorationLength};
 
-use crate::color::{Color, ToColorColor as _};
-use crate::{FONT_EMBOLDEN_ENABLED, SELECTION_COLOR};
-
-/// Draw the backgrounds of inline elements (e.g. `<span style="background: ...">`).
-///
-/// Each glyph run carries the node id of the innermost inline element it belongs to
-/// (via its brush). Every enclosing inline box paints its own background behind the
-/// run, outermost first, so a transparent inner `<span>` does not hide the background
-/// of the `<a>` around it (email call-to-action labels rely on this).
-///
-/// The walk stops at the inline root, whose background is painted as a normal block
-/// box, and at the first box that is not `display: inline`. When the inline root is an
-/// anonymous block, its wrapped children keep their DOM parent, so without that check
-/// the walk would repaint the enclosing block's background behind the text.
-/// `display: contents` boxes paint nothing.
-pub(crate) fn draw_inline_backgrounds<'a>(
-    scene: &mut impl PaintScene,
-    lines: impl Iterator<Item = Line<'a, TextBrush>>,
-    doc: &BaseDocument,
-    transform: Affine,
-    inline_root_id: NodeId,
-) {
-    let mut backgrounds = Vec::new();
-    for line in lines {
-        for item in line.items() {
-            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
-                continue;
-            };
-
-            let node_id = glyph_run.style().brush.id;
-            if node_id == inline_root_id {
-                continue;
-            }
-
-            backgrounds.clear();
-            let mut candidate_id = Some(node_id);
-            while let Some(id) = candidate_id {
-                if id == inline_root_id {
-                    break;
-                }
-                let Some(node) = doc.get_node(id) else {
-                    break;
-                };
-                if let Some(styles) = node.primary_styles() {
-                    let display = styles.clone_display();
-                    if !display.is_contents() {
-                        if !display.is_inline_flow() {
-                            break;
-                        }
-                        if styles.get_inherited_box().visibility == StyloVisibility::Visible {
-                            let current_color = styles.clone_color();
-                            let color = styles
-                                .get_background()
-                                .background_color
-                                .resolve_to_absolute(&current_color)
-                                .as_srgb_color();
-                            if color != Color::TRANSPARENT {
-                                backgrounds.push(color);
-                            }
-                        }
-                    }
-                }
-                candidate_id = node.parent;
-            }
-            if backgrounds.is_empty() {
-                continue;
-            }
-
-            let metrics = glyph_run.run().font_metrics();
-            let x = glyph_run.offset() as f64;
-            let w = glyph_run.advance() as f64;
-            let baseline = glyph_run.baseline() as f64;
-            let y0 = baseline - metrics.ascent as f64;
-            let y1 = baseline + metrics.descent as f64;
-            let rect = Rect::new(x, y0, x + w, y1);
-
-            for color in backgrounds.iter().rev() {
-                scene.fill(Fill::NonZero, transform, *color, None, &rect);
-            }
-        }
-    }
-}
+use crate::FONT_EMBOLDEN_ENABLED;
+use crate::color::Color;
 
 /// Per-font-face cache of the OS/2 `usWinAscent / unitsPerEm` ratio, keyed by the font
 /// blob's unique id and face index. `None` is cached for fonts without a usable OS/2 or
@@ -177,21 +102,69 @@ struct DecorationStackEntry {
     text_color: Color,
     /// The decoration this node introduces as a decorating box, if any.
     decoration: Option<ResolvedDecoration>,
+    /// This node's (inherited) `text-shadow` list, `None` for `none`. Equal
+    /// lists share one allocation, so the runs of a shadowed paragraph are
+    /// shadowed together.
+    text_shadows: Option<Arc<[TextShadow]>>,
 }
 
+/// One `text-shadow`, in device pixels.
+#[derive(Clone, Copy, PartialEq)]
+struct TextShadow {
+    offset: kurbo::Vec2,
+    /// The blur's standard deviation, which is half the blur radius.
+    std_dev: f64,
+    color: Color,
+}
+
+/// The most blur a text shadow gets, in device pixels. Blurrier shadows are
+/// too faint to tell apart, and the cap bounds the layer a blur needs.
+const MAX_SHADOW_STD_DEV: f64 = 100.0;
+
 /// Resolve the cached style values for a single node into a [`DecorationStackEntry`].
-fn resolve_decoration_entry(doc: &BaseDocument, node_id: NodeId) -> DecorationStackEntry {
+fn resolve_decoration_entry(
+    doc: &BaseDocument,
+    node_id: NodeId,
+    scale: f64,
+    parent: Option<&DecorationStackEntry>,
+) -> DecorationStackEntry {
     let Some(styles) = doc.get_node(node_id).and_then(|node| node.primary_styles()) else {
         return DecorationStackEntry {
             node_id,
             text_color: Color::BLACK,
             decoration: None,
+            text_shadows: None,
         };
     };
 
     let itext = styles.get_inherited_text();
     let text = styles.get_text();
     let text_color = itext.color.as_color_color();
+
+    // `text-shadow` lengths are CSS pixels and the layout is in device pixels.
+    // A shadow without a colour takes the text's.
+    let text_shadows = (!itext.text_shadow.0.is_empty()).then(|| {
+        itext
+            .text_shadow
+            .0
+            .iter()
+            .map(|shadow| TextShadow {
+                offset: kurbo::Vec2::new(
+                    f64::from(shadow.horizontal.px()) * scale,
+                    f64::from(shadow.vertical.px()) * scale,
+                ),
+                std_dev: (f64::from(shadow.blur.px()) * scale / 2.0).min(MAX_SHADOW_STD_DEV),
+                color: shadow
+                    .color
+                    .resolve_to_absolute(&itext.color)
+                    .as_color_color(),
+            })
+            .collect::<Arc<[_]>>()
+    });
+    let text_shadows = match (text_shadows, parent.and_then(|p| p.text_shadows.as_ref())) {
+        (Some(own), Some(inherited)) if *own == **inherited => Some(inherited.clone()),
+        (own, _) => own,
+    };
 
     let drawn_lines = TextDecorationLine::UNDERLINE
         | TextDecorationLine::OVERLINE
@@ -229,6 +202,7 @@ fn resolve_decoration_entry(doc: &BaseDocument, node_id: NodeId) -> DecorationSt
         node_id,
         text_color,
         decoration,
+        text_shadows,
     }
 }
 
@@ -277,6 +251,58 @@ pub(crate) struct DrawTextContext {
     deco_boxes: Vec<LineDecoration>,
     win_ascent_ratios: WinAscentCache,
     outline_bounds: HashMap<(u64, u32), Option<Rect>>,
+    ink_skip: crate::ink_skip::InkSkip,
+    /// The glyphs of a line's runs under an underline or overline, whose ink
+    /// those skip.
+    inked_runs: Vec<InkedRun>,
+    inked_glyphs: Vec<(u32, f32, f32)>,
+    inked_coords: Vec<i16>,
+    /// The decorating boxes (indices into `deco_boxes`) over each inked run.
+    inked_boxes: Vec<usize>,
+    /// The glyph runs of the line being painted.
+    line_runs: Vec<LineRun>,
+}
+
+/// A glyph run of the line being painted, resolved before any of the line is
+/// drawn so that its text shadows can go beneath all of its text.
+struct LineRun {
+    /// The run's index among the line's items.
+    item: usize,
+    color: Color,
+    embolden: kurbo::Vec2,
+    /// Whether none of the run's glyphs can reach the viewport.
+    culled: bool,
+    /// The run's ink before the transform, where the font's bounds are known.
+    ink: Option<Rect>,
+    /// The run's advance across the line's height.
+    extent: Rect,
+    shadows: Option<Arc<[TextShadow]>>,
+}
+
+/// A glyph run under an underline or overline on the current line.
+struct InkedRun {
+    font: parley::FontData,
+    font_size: f32,
+    /// A synthetic italic's slant, as x per y.
+    skew: f32,
+    glyphs: std::ops::Range<usize>,
+    coords: std::ops::Range<usize>,
+    boxes: std::ops::Range<usize>,
+}
+
+/// How to paint the text of an inline formatting context.
+#[derive(Clone, Copy)]
+pub(crate) struct TextPaint<'t> {
+    /// Glyph runs entirely outside it are not drawn.
+    pub(crate) viewport: Option<Rect>,
+    /// Only the runs whose node it accepts are drawn and decorated.
+    pub(crate) run_filter: Option<&'t dyn Fn(NodeId) -> bool>,
+    /// The layout's text.
+    pub(crate) text: &'t str,
+    /// Whether the paragraph runs right to left.
+    pub(crate) rtl: bool,
+    /// A colour for every glyph instead of its own, such as a highlight's.
+    pub(crate) text_color: Option<Color>,
 }
 
 // The font-wide outline bounds include accents and overhangs which line-height
@@ -306,7 +332,8 @@ fn font_outline_bounds(font: &parley::FontData) -> Option<Rect> {
 }
 
 /// Local paint bounds for each line, computed once per layout. Unknown font
-/// bounds and authored decorations conservatively retain the original path.
+/// bounds, authored decorations and text shadows conservatively retain the
+/// original path.
 pub(crate) fn line_paint_bounds(
     layout: &Layout<TextBrush>,
     doc: &BaseDocument,
@@ -324,9 +351,22 @@ pub(crate) fn line_paint_bounds(
                 };
                 let id = glyph_run.style().brush.id;
                 let has_decoration = *decorated.entry(id).or_insert_with(|| {
+                    // `text-shadow` inherits, so the run's own node has it.
+                    let shadowed = doc
+                        .get_node(id)
+                        .and_then(|node| node.primary_styles())
+                        .is_some_and(|styles| {
+                            !styles.get_inherited_text().text_shadow.0.is_empty()
+                        });
+                    if shadowed {
+                        return true;
+                    }
                     let mut ancestor = Some(id);
                     while let Some(id) = ancestor {
-                        if resolve_decoration_entry(doc, id).decoration.is_some() {
+                        if resolve_decoration_entry(doc, id, 1.0, None)
+                            .decoration
+                            .is_some()
+                        {
                             return true;
                         }
                         if id == root {
@@ -375,86 +415,147 @@ pub(crate) fn line_paint_bounds(
         .collect()
 }
 
-/// Resolve the CSS `text-decoration-thickness` to a device-pixel size.
-///
-/// - Percentages are resolved against the font size,
-/// - `from-font` uses the metrics from Parley,
-/// - `auto` uses a thickness of `font-size / 10` (minimum: 1px).
-///
-/// The result is floored to a whole number of device pixels (minimum 1), matching
-/// browsers, which snap decoration thickness to whole pixels.
-fn decoration_size(
+/// Resolve the CSS `text-decoration-thickness` to device pixels, as Blink's
+/// `TextDecorationThickness::Resolve` does: `auto` is a tenth of the font
+/// size, lengths and percentages (of the font size) are rounded, `from-font`
+/// is the font's own thickness. It is at least one pixel.
+fn decoration_thickness(
     thickness: &TextDecorationLength,
     metric_size: f32,
     css_font_size: f64,
     scale: f64,
-) -> f32 {
+) -> f64 {
     (match thickness {
         GenericTextDecorationLength::LengthPercentage(lp) => {
-            lp.resolve(Length::new(css_font_size as f32)).px() as f64 * scale
+            (lp.resolve(Length::new(css_font_size as f32)).px() as f64 * scale).round()
         }
         GenericTextDecorationLength::FromFont => metric_size as f64,
-        GenericTextDecorationLength::Auto => (css_font_size / 10.0).max(1.0) * scale,
+        GenericTextDecorationLength::Auto => css_font_size * scale / 10.0,
     })
-    .floor()
-    .max(1.0) as f32
+    .max(1.0)
 }
 
-/// Draws a single decoration line of the given `text-decoration-style` spanning
-/// `[x0, x0 + width]`. `baseline` is the line's baseline and `offset` positions the line
-/// relative to it (`y = baseline - offset + size / 2`, growing downward). Geometry is built
-/// explicitly (rather than relying on backend dash support) so it renders consistently
-/// across renderers.
-///
-/// `double_dir` points away from the text (`+1` = down, `-1` = up) and is used to place the
-/// second line of a `double` decoration.
-#[allow(clippy::too_many_arguments)]
-fn draw_decoration_line(
-    scene: &mut impl PaintScene,
-    transform: Affine,
-    scale: f64,
+/// The thickness a line of `style` is painted with: whole pixels, rounded
+/// down for solid, double and wavy lines and to the nearest for dotted and
+/// dashed ones (Blink's `DecorationLinePainter`).
+fn painted_thickness(thickness: f64, style: TextDecorationStyle) -> f64 {
+    match style {
+        TextDecorationStyle::Dotted | TextDecorationStyle::Dashed => thickness.round(),
+        _ => thickness.floor(),
+    }
+    .max(1.0)
+}
+
+/// Rounds `y`, in the coordinates `transform` maps to device pixels, to the
+/// nearest device pixel row, so that a line is crisp. Lines under rotated
+/// or scaled text are left alone.
+fn snap_y(transform: Affine, y: f64) -> f64 {
+    let [a, b, c, d, _, ty] = transform.as_coeffs();
+    if b != 0.0 || c != 0.0 || (a - 1.0).abs() > 1e-6 || (d - 1.0).abs() > 1e-6 {
+        return y;
+    }
+    (y + ty + 0.5).floor() - ty
+}
+
+/// One decoration line to draw: its extent, the top of its (first) line and
+/// what it looks like.
+struct DecorationLine<'b> {
     x0: f64,
-    width: f64,
-    baseline: f32,
-    offset: f32,
-    size: f32,
-    brush: &anyrender::Paint,
-    double_dir: f64,
-    deco_style: TextDecorationStyle,
-    inset_start: f64,
-    inset_end: f64,
-) {
-    // Inset the line from the box's start/end edges (assumes LTR: start is the left edge).
-    // Negative insets extend the line past the text.
-    let x = x0 + inset_start;
-    let w = width - inset_start - inset_end;
+    x1: f64,
+    top: f64,
+    thickness: f64,
+    brush: &'b anyrender::Paint,
+    style: TextDecorationStyle,
+    /// Where the second line of a `double` decoration is, from the first.
+    double_offset: f64,
+    /// Spans where the line skips glyphs' ink, sorted and disjoint.
+    gaps: &'b [(f64, f64)],
+}
+
+/// Draws a decoration line. Geometry is built explicitly (rather than relying
+/// on backend dash support) so it renders consistently across renderers.
+fn draw_decoration_line(scene: &mut impl PaintScene, transform: Affine, line: &DecorationLine<'_>) {
+    let (x, w) = (line.x0, line.x1 - line.x0);
     if w <= 0.0 {
         return;
     }
-    let y = (baseline - offset + size / 2.0) as f64;
-    let size = size as f64;
-    let butt_stroke = Stroke::new(size).with_caps(Cap::Butt);
-
-    match deco_style {
+    let size = painted_thickness(line.thickness, line.style);
+    let brush = line.brush;
+    match line.style {
         TextDecorationStyle::MozNone => {
             // no line. Equivalent to `text-decoration-line: none`
         }
-        // `solid`
-        TextDecorationStyle::Solid => {
-            let line = kurbo::Line::new((x, y), (x + w, y));
-            scene.stroke(&butt_stroke, transform, brush, None, &line);
-        }
-        // Two lines, each `size` thick, separated by a 1px (CSS) gap. This
-        // matches Chrome, where the second line is offset by `thickness + 1px`
-        // and sits further from the text (below for underline, above for
-        // overline).
-        TextDecorationStyle::Double => {
-            let one_css_px = scale;
-            for cy in [y, y + double_dir * (size + one_css_px)] {
-                let line = kurbo::Line::new((x, cy), (x + w, cy));
-                scene.stroke(&butt_stroke, transform, brush, None, &line);
+        // Solid and double lines are rectangles on whole device pixel rows,
+        // drawn in pieces between the glyphs whose ink they skip.
+        TextDecorationStyle::Solid | TextDecorationStyle::Double => {
+            let mut tops = vec![snap_y(transform, line.top)];
+            if line.style == TextDecorationStyle::Double {
+                tops.push(snap_y(transform, line.top + line.double_offset));
+            }
+            let mut start = x;
+            let mut pieces = Vec::new();
+            for &(gap_start, gap_end) in line.gaps {
+                if gap_end <= start || gap_start >= x + w {
+                    continue;
+                }
+                if gap_start > start {
+                    pieces.push((start, gap_start));
+                }
+                start = start.max(gap_end);
+            }
+            if start < x + w {
+                pieces.push((start, x + w));
+            }
+            for top in tops {
+                for &(piece_start, piece_end) in &pieces {
+                    let rect = Rect::new(piece_start, top, piece_end, top + size);
+                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
+                }
             }
         }
+        style => {
+            // A dotted or dashed line is centred on a pixel row (or between two,
+            // when it is an even number of pixels thick).
+            let center = line.top + size / 2.0;
+            let y = if size as i64 % 2 == 1 {
+                snap_y(transform, center - 0.5) + 0.5
+            } else {
+                snap_y(transform, center)
+            };
+            // Ink skipping cuts these through a clip.
+            let clipped = !line.gaps.is_empty();
+            if clipped {
+                let reach = 3.0 * size + 2.0;
+                let mut clip = BezPath::new();
+                let bounds = Rect::new(x - reach, y - reach, x + w + reach, y + reach);
+                clip.extend(bounds.path_elements(0.1));
+                for &(gap_start, gap_end) in line.gaps {
+                    let hole = Rect::new(gap_start, y - reach, gap_end, y + reach);
+                    clip.extend(hole.path_elements(0.1));
+                }
+                scene.push_clip_layer(Fill::EvenOdd, transform, &clip);
+            }
+            draw_patterned_line(scene, transform, brush, style, x, w, y, size);
+            if clipped {
+                scene.pop_layer();
+            }
+        }
+    }
+}
+
+/// Draws a dotted, dashed or wavy line centred on `y`.
+#[allow(clippy::too_many_arguments)]
+fn draw_patterned_line(
+    scene: &mut impl PaintScene,
+    transform: Affine,
+    brush: &anyrender::Paint,
+    style: TextDecorationStyle,
+    x: f64,
+    w: f64,
+    y: f64,
+    size: f64,
+) {
+    match style {
         // Round dots (diameter = line thickness) spaced one dot apart.
         TextDecorationStyle::Dotted => {
             let radius = size / 2.0;
@@ -511,10 +612,64 @@ fn draw_decoration_line(
             let stroke = Stroke::new(size).with_caps(Cap::Round);
             scene.stroke(&stroke, transform, brush, None, &path);
         }
+        _ => {}
     }
 }
 
-/// Paint the decorations accumulated for one line, one line per decorating box.
+/// The spans an underline or overline of decorating box `index` skips on a
+/// line, between its `top` and `bottom` edges: around every glyph under the
+/// box whose outline crosses the line, less half a pixel above and below, from
+/// `dilation` before the outline's leftmost crossing to `dilation` after its
+/// rightmost one. Sorted and merged.
+fn ink_gaps(
+    inked: &InkedLine<'_>,
+    ink_skip: &mut crate::ink_skip::InkSkip,
+    index: usize,
+    top: f64,
+    bottom: f64,
+    dilation: f64,
+) -> Vec<(f64, f64)> {
+    let mut gaps = Vec::new();
+    let (band_top, band_bottom) = (top + 0.5, (bottom - 0.5).max(top + 0.5));
+    for run in inked.runs {
+        if !inked.boxes[run.boxes.clone()].contains(&index) {
+            continue;
+        }
+        let coords = &inked.coords[run.coords.clone()];
+        for &(glyph, x, y) in &inked.glyphs[run.glyphs.clone()] {
+            let baseline = f64::from(y);
+            if let Some((left, right)) = ink_skip.intercept(
+                &run.font,
+                run.font_size,
+                coords,
+                run.skew,
+                glyph,
+                (band_top - baseline) as f32,
+                (band_bottom - baseline) as f32,
+            ) {
+                let x = f64::from(x);
+                gaps.push((
+                    x + f64::from(left) - dilation,
+                    x + f64::from(right) + dilation,
+                ));
+            }
+        }
+    }
+    gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::with_capacity(gaps.len());
+    for gap in gaps {
+        match merged.last_mut() {
+            Some(last) if gap.0 <= last.1 => last.1 = last.1.max(gap.1),
+            _ => merged.push(gap),
+        }
+    }
+    merged
+}
+
+/// Paint the decorations accumulated for one line, one line per decorating
+/// box, positioned and sized as Blink does (`TextDecorationOffset`,
+/// `TextDecorationInfo`, `DecorationLinePainter`).
+#[allow(clippy::too_many_arguments)]
 fn flush_line_decorations(
     scene: &mut impl PaintScene,
     transform: Affine,
@@ -523,10 +678,18 @@ fn flush_line_decorations(
     win_ascent_ratios: &mut WinAscentCache,
     inline_root_id: NodeId,
     line_baseline: f32,
+    inked: &InkedLine<'_>,
+    ink_skip: &mut crate::ink_skip::InkSkip,
+    shadow: Option<(Color, kurbo::Vec2)>,
 ) {
+    // A text shadow draws the decorations again, offset and in its colour.
+    let transform = match shadow {
+        Some((_, offset)) => transform * Affine::translate(offset),
+        None => transform,
+    };
     // Draw innermost boxes first so ancestors' decorations paint on top, matching the
     // per-run drawing order this replaced (`stack.iter().rev()`).
-    for acc in deco_boxes.iter().rev() {
+    for (index, acc) in deco_boxes.iter().enumerate().rev() {
         let deco = &acc.deco;
         // Prefer the decorating box's own font; fall back to the first run it covers.
         let geom = match (&acc.own, &acc.first) {
@@ -548,11 +711,13 @@ fn flush_line_decorations(
         if width <= 0.0 {
             continue;
         }
-        let brush = anyrender::Paint::from(deco.color);
+        let brush = anyrender::Paint::from(shadow.map_or(deco.color, |(color, _)| color));
+        let baseline = f64::from(geom.baseline);
 
         // `text-decoration-inset` shortens (or, when negative, extends) the line from the
         // inline-start/end edges. Percentages resolve against the decoration line length
         // (the box's total advance on this line); `auto` is no inset.
+        // Assumes LTR: start is the left edge.
         let (inset_start, inset_end) = match &deco.inset {
             GenericTextDecorationInset::LengthPercentage { start, end } => {
                 // The extent is in device pixels; convert to CSS pixels so the resolved
@@ -565,128 +730,119 @@ fn flush_line_decorations(
             }
             GenericTextDecorationInset::Auto => (0.0, 0.0),
         };
+        let (x0, x1) = (acc.min_x + inset_start, acc.max_x - inset_end);
 
-        if deco.line.contains(TextDecorationLine::UNDERLINE) {
-            let size = decoration_size(
-                &deco.thickness,
-                geom.underline_size,
-                geom.css_font_size,
-                scale,
-            );
-
-            // `text-underline-offset` moves the underline away from the text. `auto` keeps
-            // the font's suggested position; otherwise it resolves against the font size
-            // (percentages relative to 1em).
-            let extra_underline_offset = deco
-                .underline_offset
-                .as_ref()
-                .map(|lp| lp.resolve(Length::new(geom.css_font_size as f32)).px() as f64 * scale)
-                .unwrap_or(0.0);
-
-            // `text-underline-position: under` places the underline below the glyph box
-            // (below descenders) rather than at the font's suggested position near the
-            // alphabetic baseline. We anchor the top of the line at the descent so it clears
-            // descending glyphs like "gqy".
-            // An explicit offset under `auto` is taken from the alphabetic
-            // baseline, as CSS and Chrome have it, not from the auto gap.
-            let base_offset = if deco.underline_under {
-                -geom.descent
-            } else if deco.underline_offset.is_some() && !deco.underline_from_font {
-                0.0
+        let thickness = decoration_thickness(
+            &deco.thickness,
+            geom.underline_size,
+            geom.css_font_size,
+            scale,
+        );
+        let painted = painted_thickness(thickness, deco.style);
+        // Ink is skipped from a gap as wide as the line is thick, up to 13px.
+        let dilation = thickness.min(13.0);
+        let mut draw = |top: f64, double_offset: f64, skips_ink: bool| {
+            let bottom = if deco.style == TextDecorationStyle::Double {
+                (top + painted).max(top + double_offset + painted)
             } else {
-                geom.underline_offset
+                top + painted
             };
-            let offset = base_offset - extra_underline_offset as f32;
-
-            // A `double` underline extends downward, away from the text.
+            let first_top = top.min(top + double_offset.min(0.0));
+            let gaps = if skips_ink {
+                ink_gaps(inked, ink_skip, index, first_top, bottom, dilation)
+            } else {
+                Vec::new()
+            };
             draw_decoration_line(
                 scene,
                 transform,
-                scale,
-                acc.min_x,
-                width,
-                geom.baseline,
-                offset,
-                size,
-                &brush,
-                1.0,
-                deco.style,
-                inset_start,
-                inset_end,
+                &DecorationLine {
+                    x0,
+                    x1,
+                    top,
+                    thickness,
+                    brush: &brush,
+                    style: deco.style,
+                    double_offset,
+                    gaps: &gaps,
+                },
             );
+        };
+
+        if deco.line.contains(TextDecorationLine::UNDERLINE) {
+            // `text-underline-offset` moves the underline away from the text, resolved
+            // against the font size (percentages relative to 1em), rounded.
+            let extra_offset = deco
+                .underline_offset
+                .as_ref()
+                .map(|lp| {
+                    (lp.resolve(Length::new(geom.css_font_size as f32)).px() as f64 * scale).round()
+                })
+                .unwrap_or(0.0);
+            let top = if deco.underline_under {
+                // Below the descenders.
+                baseline + f64::from(geom.descent) + extra_offset
+            } else if deco.underline_from_font {
+                // At the font's suggested position.
+                baseline - f64::from(geom.underline_offset) + extra_offset
+            } else if deco.underline_offset.is_some() {
+                // An explicit offset is taken from the alphabetic baseline.
+                baseline + extra_offset
+            } else {
+                // Just below the baseline, with a gap of half the thickness.
+                baseline + (thickness / 2.0).ceil().max(1.0)
+            };
+            // A `double` underline extends downward, away from the text.
+            draw(top, thickness + 1.0, true);
         }
         if deco.line.contains(TextDecorationLine::OVERLINE) {
-            // Fonts don't provide a dedicated overline metric, so reuse the underline
-            // thickness. The line sits at the top of the "em box": its lower edge rests on
-            // the ascent so it clears the glyphs, and it extends upward from there.
+            // The line sits on the top of the text: its lower edge rests on the ascent so
+            // it clears the glyphs, and it extends upward from there.
             //
             // Browsers use the OS/2 `usWinAscent` for this edge, which is taller than the
             // hhea-based ascent Parley reports; using the smaller value would draw the
             // overline too low. Fall back to Parley's ascent for fonts without a usable
             // OS/2 table.
-            let size = decoration_size(
-                &deco.thickness,
-                geom.underline_size,
-                geom.css_font_size,
-                scale,
-            );
             let ascent =
                 win_ascent(win_ascent_ratios, &geom.font, geom.font_size).unwrap_or(geom.ascent);
-            let offset = ascent + size;
-
+            let top = baseline - f64::from(ascent) - painted;
             // A `double` overline extends upward, away from the text.
-            draw_decoration_line(
-                scene,
-                transform,
-                scale,
-                acc.min_x,
-                width,
-                geom.baseline,
-                offset,
-                size,
-                &brush,
-                -1.0,
-                deco.style,
-                inset_start,
-                inset_end,
-            );
+            draw(top, -(thickness + 1.0), true);
         }
         if deco.line.contains(TextDecorationLine::LINE_THROUGH) {
-            let size = decoration_size(
+            let thickness = decoration_thickness(
                 &deco.thickness,
                 geom.strikethrough_size,
                 geom.css_font_size,
                 scale,
             );
-
             // Centre the line-through a third of the ascent above the baseline, matching
             // Chrome (which places it `2/3 * ascent` below the text-top). Parley's
             // `strikethrough_offset` (the font's `yStrikeoutPosition`) sits lower and would
             // draw the line too close to the baseline.
             let ascent =
                 win_ascent(win_ascent_ratios, &geom.font, geom.font_size).unwrap_or(geom.ascent);
-            let offset = ascent / 3.0 + size / 2.0;
-
+            let top = baseline - f64::from(ascent) / 3.0 - thickness / 2.0;
             draw_decoration_line(
                 scene,
                 transform,
-                scale,
-                acc.min_x,
-                width,
-                geom.baseline,
-                offset,
-                size,
-                &brush,
-                1.0,
-                deco.style,
-                inset_start,
-                inset_end,
+                &DecorationLine {
+                    x0,
+                    x1,
+                    top,
+                    thickness,
+                    brush: &brush,
+                    style: deco.style,
+                    double_offset: (thickness + 1.0).floor(),
+                    gaps: &[],
+                },
             );
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Draw the glyphs and text decorations of `lines`.
 pub(crate) fn stroke_text<'a>(
     scene: &mut impl PaintScene,
     lines: impl Iterator<Item = Line<'a, TextBrush>>,
@@ -695,14 +851,27 @@ pub(crate) fn stroke_text<'a>(
     scale: f64,
     inline_root_id: NodeId,
     context: &mut DrawTextContext,
-    viewport: Option<Rect>,
+    paint: TextPaint<'_>,
 ) {
+    let TextPaint {
+        viewport,
+        run_filter,
+        text,
+        rtl,
+        text_color: color_override,
+    } = paint;
     let DrawTextContext {
         stack,
         path_scratch,
         deco_boxes,
         win_ascent_ratios,
         outline_bounds,
+        ink_skip,
+        inked_runs,
+        inked_glyphs,
+        inked_coords,
+        inked_boxes,
+        line_runs,
     } = context;
     stack.clear();
     path_scratch.clear();
@@ -721,14 +890,26 @@ pub(crate) fn stroke_text<'a>(
         // draws one decoration per box rather than one stepped segment per differently-sized
         // run. Clearing preserves the allocation for the next line and inline context.
         deco_boxes.clear();
+        inked_runs.clear();
+        inked_glyphs.clear();
+        inked_coords.clear();
+        inked_boxes.clear();
+        line_runs.clear();
+        let line_metrics = line.metrics();
 
-        for item in line.items() {
+        for (item_index, item) in line.items().enumerate() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                let style = glyph_run.style();
+                // An inline element's edge has no text to draw or decorate.
+                if style.brush.generated != GeneratedText::None
+                    || run_filter.is_some_and(|accept| !accept(style.brush.id))
+                {
+                    continue;
+                }
                 let run = glyph_run.run();
                 let font = run.font();
                 let font_size = run.font_size();
                 let metrics = run.font_metrics();
-                let style = glyph_run.style();
                 let synthesis = run.synthesis();
                 let glyph_xform = synthesis
                     .skew()
@@ -757,79 +938,98 @@ pub(crate) fn stroke_text<'a>(
                     .count();
                 stack.truncate(shared);
                 for &node_id in &path_scratch[shared..] {
-                    stack.push(resolve_decoration_entry(doc, node_id));
+                    let entry = resolve_decoration_entry(doc, node_id, scale, stack.last());
+                    stack.push(entry);
                 }
 
                 // The glyph colour comes from the run's own node (the stack top): `color`
                 // inherits, so the innermost inline element already carries the right value.
-                let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
+                let text_color = color_override
+                    .or_else(|| stack.last().map(|e| e.text_color))
+                    .unwrap_or(Color::BLACK);
 
-                let embolden = if FONT_EMBOLDEN_ENABLED {
+                let mut embolden = if FONT_EMBOLDEN_ENABLED {
                     let fs = font_size as f64 / scale;
                     kurbo::Vec2::new((0.015125 * fs).min(0.3), (0.0121 * fs).min(0.3))
                 } else {
                     kurbo::Vec2::default()
                 };
-
-                let outside = viewport.is_some_and(|viewport| {
-                    let bounds = *outline_bounds
-                        .entry((font.data.id(), font.index))
-                        .or_insert_with(|| font_outline_bounds(font));
-                    let Some(bounds) = bounds else {
-                        return false;
-                    };
-                    // Include hinting and synthetic emboldening before applying
-                    // italic synthesis and the complete CSS transform.
-                    let bounds = Affine::scale(font_size as f64)
-                        .transform_rect_bbox(bounds)
-                        .inflate(2.0, 2.0);
-                    let bounds = glyph_xform
-                        .unwrap_or(Affine::IDENTITY)
-                        .transform_rect_bbox(bounds);
-                    let mut glyphs = glyph_run.positioned_glyphs();
-                    let Some(first) = glyphs.next() else {
-                        return true;
-                    };
-                    let mut positions = Rect::new(
-                        first.x as f64,
-                        first.y as f64,
-                        first.x as f64,
-                        first.y as f64,
-                    );
-                    for glyph in glyphs {
-                        positions = positions.union_pt((glyph.x as f64, glyph.y as f64));
-                    }
-                    let painted = transform.transform_rect_bbox(Rect::new(
-                        positions.x0 + bounds.x0,
-                        positions.y0 + bounds.y0,
-                        positions.x1 + bounds.x1,
-                        positions.y1 + bounds.y1,
-                    ));
-                    painted.is_finite()
-                        && (painted.x1 < viewport.x0
-                            || painted.x0 > viewport.x1
-                            || painted.y1 < viewport.y0
-                            || painted.y0 > viewport.y1)
-                });
-                if !outside {
-                    scene.draw_glyphs(
-                        font,
-                        font_size,
-                        !FONT_EMBOLDEN_ENABLED, // hint
-                        bytemuck::cast_slice(run.normalized_coords()),
-                        embolden,
-                        Fill::NonZero,
-                        &anyrender::Paint::from(text_color),
-                        1.0, // alpha
-                        transform,
-                        glyph_xform,
-                        glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
-                            id: glyph.id as _,
-                            x: glyph.x,
-                            y: glyph.y,
-                        }),
-                    );
+                // A face lighter than the weight asked for, with no bolder face
+                // to use, is emboldened as Skia fakes bold.
+                if synthesis.embolden() {
+                    embolden += synthetic_bold(f64::from(font_size));
                 }
+
+                // Highlights repaint text without its shadows.
+                let shadows = if color_override.is_some() {
+                    None
+                } else {
+                    stack.last().and_then(|entry| entry.text_shadows.clone())
+                };
+
+                // The run's ink, to skip runs that can't reach the viewport and
+                // to place shadows. A font without usable bounds is never skipped.
+                let mut culled = false;
+                let mut ink = None;
+                if viewport.is_some() || shadows.is_some() {
+                    let mut glyphs = glyph_run.positioned_glyphs();
+                    match glyphs.next() {
+                        None => culled = true,
+                        Some(first) => {
+                            let mut positions = Rect::new(
+                                first.x as f64,
+                                first.y as f64,
+                                first.x as f64,
+                                first.y as f64,
+                            );
+                            for glyph in glyphs {
+                                positions = positions.union_pt((glyph.x as f64, glyph.y as f64));
+                            }
+                            let bounds = *outline_bounds
+                                .entry((font.data.id(), font.index))
+                                .or_insert_with(|| font_outline_bounds(font));
+                            if let Some(bounds) = bounds {
+                                // Include hinting and synthetic emboldening before
+                                // applying italic synthesis.
+                                let bounds = Affine::scale(font_size as f64)
+                                    .transform_rect_bbox(bounds)
+                                    .inflate(2.0, 2.0);
+                                let bounds = glyph_xform
+                                    .unwrap_or(Affine::IDENTITY)
+                                    .transform_rect_bbox(bounds);
+                                let run_ink = Rect::new(
+                                    positions.x0 + bounds.x0,
+                                    positions.y0 + bounds.y0,
+                                    positions.x1 + bounds.x1,
+                                    positions.y1 + bounds.y1,
+                                );
+                                culled = viewport.is_some_and(|viewport| {
+                                    outside_viewport(
+                                        transform.transform_rect_bbox(run_ink),
+                                        viewport,
+                                    )
+                                });
+                                ink = Some(run_ink);
+                            }
+                        }
+                    }
+                }
+                let run_x0 = glyph_run.offset() as f64;
+                let run_x1 = run_x0 + glyph_run.advance() as f64;
+                line_runs.push(LineRun {
+                    item: item_index,
+                    color: text_color,
+                    embolden,
+                    culled,
+                    ink,
+                    extent: Rect::new(
+                        run_x0,
+                        f64::from(line_metrics.block_min_coord),
+                        run_x1,
+                        f64::from(line_metrics.block_max_coord),
+                    ),
+                    shadows,
+                });
 
                 // Accumulate this run's contribution to each decorating box on its ancestor
                 // path. The decoration is drawn once per box after the whole line has been
@@ -847,9 +1047,8 @@ pub(crate) fn stroke_text<'a>(
                     css_font_size,
                 };
                 let run_node_id = style.brush.id;
-                let run_x0 = glyph_run.offset() as f64;
-                let run_x1 = run_x0 + glyph_run.advance() as f64;
 
+                let boxes_start = inked_boxes.len();
                 for entry in stack.iter() {
                     if entry.decoration.is_none() {
                         continue;
@@ -879,10 +1078,207 @@ pub(crate) fn stroke_text<'a>(
                     if entry.node_id == run_node_id {
                         acc.own = Some(geometry.clone());
                     }
+                    if acc
+                        .deco
+                        .line
+                        .intersects(TextDecorationLine::UNDERLINE | TextDecorationLine::OVERLINE)
+                    {
+                        inked_boxes.push(idx);
+                    }
+                }
+
+                // Keep the glyphs an underline or overline over this run skips.
+                // CJK text keeps the line whole, as in Blink.
+                let skips_ink = inked_boxes.len() > boxes_start
+                    && !text.get(run.text_range()).is_some_and(|run_text| {
+                        run_text.chars().any(crate::ink_skip::never_skips_ink)
+                    });
+                if skips_ink {
+                    let excluded = ink_skip.excluded_glyphs(font);
+                    let glyphs_start = inked_glyphs.len();
+                    inked_glyphs.extend(
+                        glyph_run
+                            .positioned_glyphs()
+                            .filter(|glyph| !excluded.contains(&Some(glyph.id)))
+                            .map(|glyph| (glyph.id, glyph.x, glyph.y)),
+                    );
+                    let coords_start = inked_coords.len();
+                    inked_coords
+                        .extend_from_slice(bytemuck::cast_slice::<_, i16>(run.normalized_coords()));
+                    inked_runs.push(InkedRun {
+                        font: font.clone(),
+                        font_size,
+                        skew: synthesis
+                            .skew()
+                            .map_or(0.0, |angle| angle.to_radians().tan()),
+                        glyphs: glyphs_start..inked_glyphs.len(),
+                        coords: coords_start..inked_coords.len(),
+                        boxes: boxes_start..inked_boxes.len(),
+                    });
+                } else {
+                    inked_boxes.truncate(boxes_start);
                 }
             }
         }
 
+        // Decorations stop before the white space that hangs past the line's
+        // end, which browsers don't paint.
+        let metrics = line.metrics();
+        let start = f64::from(metrics.offset + metrics.inline_min_coord);
+        let (content_x0, content_x1) = if rtl {
+            (
+                start + f64::from(metrics.hanging_advance),
+                start + f64::from(metrics.advance),
+            )
+        } else {
+            (
+                start,
+                start + f64::from(metrics.advance - metrics.hanging_advance),
+            )
+        };
+        for acc in deco_boxes.iter_mut() {
+            acc.min_x = acc.min_x.max(content_x0.min(acc.max_x));
+            acc.max_x = acc.max_x.min(content_x1.max(acc.min_x));
+        }
+
+        let inked = InkedLine {
+            runs: inked_runs,
+            glyphs: inked_glyphs,
+            coords: inked_coords,
+            boxes: inked_boxes,
+        };
+        let line_height = f64::from(line_metrics.block_max_coord - line_metrics.block_min_coord);
+
+        // Shadows go beneath all of the line's text, the first of a list on
+        // top, and shadow the decorations of the text they belong to, as in
+        // Blink and Gecko.
+        let mut start = 0;
+        while start < line_runs.len() {
+            let Some(list) = line_runs[start].shadows.clone() else {
+                start += 1;
+                continue;
+            };
+            // This run and the following ones with the same list share one
+            // layer per blurred shadow.
+            let end = start
+                + line_runs[start..]
+                    .iter()
+                    .take_while(|run| {
+                        run.shadows
+                            .as_ref()
+                            .is_some_and(|other| Arc::ptr_eq(other, &list))
+                    })
+                    .count();
+            let batch = &line_runs[start..end];
+            start = end;
+
+            let advance = batch
+                .iter()
+                .map(|run| run.extent)
+                .reduce(|a, b| a.union(b))
+                .unwrap_or(Rect::ZERO);
+            // The decorations over these runs are shadowed with them, cut at
+            // the runs' ends.
+            let decoration_area = advance.inflate(0.0, line_height);
+            let decorated = deco_boxes
+                .iter()
+                .any(|deco| deco.max_x > advance.x0 && deco.min_x < advance.x1);
+            let decorations_overhang = deco_boxes
+                .iter()
+                .any(|deco| deco.min_x < advance.x0 || deco.max_x > advance.x1);
+            let painted = batch
+                .iter()
+                .map(|run| {
+                    run.ink
+                        .unwrap_or_else(|| run.extent.inflate(line_height, line_height))
+                })
+                .fold(decoration_area, |a, b| a.union(b));
+
+            for shadow in list.iter().rev() {
+                if shadow.color.components[3] <= 0.0 {
+                    continue;
+                }
+                let spread = 3.0 * shadow.std_dev;
+                let reaches_viewport = |area: Rect| {
+                    !viewport.is_some_and(|viewport| {
+                        outside_viewport(
+                            transform.transform_rect_bbox(
+                                (area + shadow.offset).inflate(spread, spread),
+                            ),
+                            viewport,
+                        )
+                    })
+                };
+                let visible = |run: &LineRun| match run.ink {
+                    Some(ink) => reaches_viewport(ink),
+                    None => !run.culled,
+                };
+                let shadows_decorations = decorated && reaches_viewport(decoration_area);
+                if !shadows_decorations && !batch.iter().any(visible) {
+                    continue;
+                }
+
+                let blurred = shadow.std_dev > 0.0;
+                if blurred {
+                    let filter = Filter::single(FilterEffect::blur(shadow.std_dev as f32));
+                    scene.push_layer(
+                        Fill::NonZero,
+                        Mix::Normal,
+                        1.0,
+                        transform,
+                        &(painted + shadow.offset).inflate(spread, spread),
+                        Some(Arc::new(filter)),
+                        None,
+                    );
+                }
+                let shadow_transform = transform * Affine::translate(shadow.offset);
+                for (glyph_run, run) in recorded_runs(&line, batch) {
+                    if visible(run) {
+                        draw_run_glyphs(
+                            scene,
+                            &glyph_run,
+                            shadow.color,
+                            run.embolden,
+                            shadow_transform,
+                        );
+                    }
+                }
+                if shadows_decorations {
+                    if decorations_overhang {
+                        scene.push_clip_layer(
+                            Fill::NonZero,
+                            transform,
+                            &(decoration_area + shadow.offset),
+                        );
+                    }
+                    flush_line_decorations(
+                        scene,
+                        transform,
+                        scale,
+                        deco_boxes,
+                        win_ascent_ratios,
+                        inline_root_id,
+                        line_metrics.baseline,
+                        &inked,
+                        ink_skip,
+                        Some((shadow.color, shadow.offset)),
+                    );
+                    if decorations_overhang {
+                        scene.pop_layer();
+                    }
+                }
+                if blurred {
+                    scene.pop_layer();
+                }
+            }
+        }
+
+        for (glyph_run, run) in recorded_runs(&line, line_runs) {
+            if !run.culled {
+                draw_run_glyphs(scene, &glyph_run, run.color, run.embolden, transform);
+            }
+        }
+        draw_soft_hyphen(scene, &line, line_runs, text, transform);
         flush_line_decorations(
             scene,
             transform,
@@ -890,26 +1286,348 @@ pub(crate) fn stroke_text<'a>(
             deco_boxes,
             win_ascent_ratios,
             inline_root_id,
-            line.metrics().baseline,
+            line_metrics.baseline,
+            &inked,
+            ink_skip,
+            None,
         );
     }
 }
 
-/// Draw selection highlight rectangles for the given byte range in a layout.
-/// Uses Parley's Selection type for accurate geometry calculation.
-pub(crate) fn draw_text_selection(
+/// The line's glyph runs that `runs` records, each with its record.
+fn recorded_runs<'l, 'r>(
+    line: &Line<'l, TextBrush>,
+    runs: &'r [LineRun],
+) -> impl Iterator<Item = (GlyphRun<'l, TextBrush>, &'r LineRun)> + use<'l, 'r> {
+    let mut runs = runs.iter().peekable();
+    line.items().enumerate().filter_map(move |(index, item)| {
+        let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+            return None;
+        };
+        runs.next_if(|run| run.item == index)
+            .map(|run| (glyph_run, run))
+    })
+}
+
+/// Show a hyphen at the end of a line that breaks at a soft hyphen, as CSS
+/// Text 3 has it, drawn after the line's last glyph in that run's font: U+2010
+/// where the font has it, as in Blink, or else a hyphen-minus. Parley shapes
+/// the soft hyphen itself as nothing.
+fn draw_soft_hyphen(
     scene: &mut impl PaintScene,
-    layout: &Layout<TextBrush>,
+    line: &Line<'_, TextBrush>,
+    line_runs: &[LineRun],
+    text: &str,
     transform: Affine,
+) {
+    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
+    use skrifa::{FontRef, MetadataProvider as _};
+
+    let end = line.text_range().end;
+    if !matches!(
+        line.break_reason(),
+        parley::BreakReason::Regular | parley::BreakReason::Emergency
+    ) || !text.get(..end).is_some_and(|text| text.ends_with('\u{AD}'))
+    {
+        return;
+    }
+    // The last run with glyphs before the break.
+    let Some((glyph_run, run)) = recorded_runs(line, line_runs)
+        .filter(|(glyph_run, _)| {
+            glyph_run.run().text_range().start < end && glyph_run.glyphs().next().is_some()
+        })
+        .last()
+    else {
+        return;
+    };
+    if run.culled {
+        return;
+    }
+    let parley_run = glyph_run.run();
+    let font = parley_run.font();
+    let Ok(font_ref) = FontRef::from_index(font.data.as_ref(), font.index) else {
+        return;
+    };
+    let charmap = font_ref.charmap();
+    let Some(glyph) = charmap.map('\u{2010}').or_else(|| charmap.map('-')) else {
+        return;
+    };
+    let coords: Vec<NormalizedCoord> =
+        bytemuck::cast_slice::<_, i16>(parley_run.normalized_coords())
+            .iter()
+            .map(|coord| NormalizedCoord::from_bits(*coord))
+            .collect();
+    let advance = font_ref
+        .glyph_metrics(Size::new(parley_run.font_size()), LocationRef::new(&coords))
+        .advance_width(glyph)
+        .unwrap_or_default();
+    // Right to left, the hyphen ends the line on its left.
+    let x = if parley_run.is_rtl() {
+        glyph_run.offset() - advance
+    } else {
+        glyph_run.offset() + glyph_run.advance()
+    };
+    let glyph_xform = parley_run
+        .synthesis()
+        .skew()
+        .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
+    scene.draw_glyphs(
+        font,
+        parley_run.font_size(),
+        !FONT_EMBOLDEN_ENABLED, // hint
+        bytemuck::cast_slice(parley_run.normalized_coords()),
+        run.embolden,
+        Fill::NonZero,
+        &anyrender::Paint::from(run.color),
+        1.0, // alpha
+        transform,
+        glyph_xform,
+        std::iter::once(anyrender::Glyph {
+            id: glyph.to_u32(),
+            x,
+            y: glyph_run.baseline(),
+        }),
+    );
+}
+
+/// Draw a glyph run in one colour.
+fn draw_run_glyphs(
+    scene: &mut impl PaintScene,
+    glyph_run: &GlyphRun<'_, TextBrush>,
+    color: Color,
+    embolden: kurbo::Vec2,
+    transform: Affine,
+) {
+    let run = glyph_run.run();
+    let glyph_xform = run
+        .synthesis()
+        .skew()
+        .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
+    scene.draw_glyphs(
+        run.font(),
+        run.font_size(),
+        !FONT_EMBOLDEN_ENABLED, // hint
+        bytemuck::cast_slice(run.normalized_coords()),
+        embolden,
+        Fill::NonZero,
+        &anyrender::Paint::from(color),
+        1.0, // alpha
+        transform,
+        glyph_xform,
+        glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
+            id: glyph.id as _,
+            x: glyph.x,
+            y: glyph.y,
+        }),
+    );
+}
+
+/// Whether a painted rect lies wholly outside the viewport. A rect that isn't
+/// finite never does.
+fn outside_viewport(painted: Rect, viewport: Rect) -> bool {
+    painted.is_finite()
+        && (painted.x1 < viewport.x0
+            || painted.x0 > viewport.x1
+            || painted.y1 < viewport.y0
+            || painted.y0 > viewport.y1)
+}
+
+/// The glyphs a line's underlines and overlines skip.
+struct InkedLine<'a> {
+    runs: &'a [InkedRun],
+    glyphs: &'a [(u32, f32, f32)],
+    coords: &'a [i16],
+    boxes: &'a [usize],
+}
+
+/// How much a face is emboldened, per side, where it has no bold of its own:
+/// Skia's fake bold strokes the outline `font_size / 24` wide at 9px,
+/// narrowing to `font_size / 32` at 36px (`kStdFakeBoldInterpKeys`), and
+/// leaves advances as they are.
+fn synthetic_bold(font_size: f64) -> kurbo::Vec2 {
+    let t = ((font_size - 9.0) / (36.0 - 9.0)).clamp(0.0, 1.0);
+    let ratio = 1.0 / 24.0 + t * (1.0 / 32.0 - 1.0 / 24.0);
+    let per_side = font_size * ratio / 2.0;
+    kurbo::Vec2::new(per_side, per_side)
+}
+
+/// The selection highlight rectangles for the given byte range in a layout,
+/// with the line each is on. Uses Parley's Selection type for accurate
+/// geometry calculation.
+///
+/// As in Blink, a line whose end the selection goes past ends in a box as
+/// wide as a space in its last run's font, which shows that its line break
+/// is selected: after a `<br>` (where Parley draws a narrower box), after a
+/// word wrapped within itself, and after the text when the selection
+/// `continues` beyond it. A wrap after white space needs none, as the
+/// highlighted space shows it.
+pub(crate) fn text_selection_rects(
+    layout: &Layout<TextBrush>,
     selection_start: usize,
     selection_end: usize,
-) {
-    let anchor = Cursor::from_byte_index(layout, selection_start, Affinity::Downstream);
-    let focus = Cursor::from_byte_index(layout, selection_end, Affinity::Downstream);
-    let selection = Selection::new(anchor, focus);
+    continues: bool,
+) -> Vec<(usize, Rect)> {
+    let mut rects = text_range_rects(layout, selection_start, selection_end);
 
-    selection.geometry_with(layout, |rect, _line_idx| {
-        let rect = kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1);
-        scene.fill(Fill::NonZero, transform, SELECTION_COLOR, None, &rect);
+    let line_count = layout.len();
+    for (index, line) in layout.lines().enumerate() {
+        let range = line.text_range();
+        if range.end <= selection_start || range.start >= selection_end {
+            continue;
+        }
+        let explicit = line.break_reason() == parley::BreakReason::Explicit;
+        let metrics = line.metrics();
+        let break_selected = if index + 1 == line_count {
+            continues && selection_end >= range.end
+        } else if explicit {
+            selection_end >= range.end
+        } else {
+            selection_end > range.end && metrics.hanging_advance == 0.0
+        };
+        if !break_selected {
+            continue;
+        }
+        // The line's content as laid out, justification included.
+        let (left, right) = line
+            .items()
+            .fold((f64::MAX, f64::MIN), |(left, right), item| {
+                let (start, width) = match item {
+                    PositionedLayoutItem::GlyphRun(run) => (run.offset(), run.advance()),
+                    PositionedLayoutItem::InlineBox(inline_box) => (inline_box.x, inline_box.width),
+                };
+                (
+                    left.min(f64::from(start)),
+                    right.max(f64::from(start + width)),
+                )
+            });
+        let Some(space) = range
+            .end
+            .checked_sub(1)
+            .and_then(|index| parley::Cluster::from_byte_index(layout, index))
+            .and_then(|cluster| space_advance(&cluster.run()))
+        else {
+            continue;
+        };
+        if left > right {
+            continue;
+        }
+        let top = f64::from(metrics.block_min_coord.min(metrics.content_block_min_coord));
+        let bottom = f64::from(metrics.block_max_coord.max(metrics.content_block_max_coord));
+        // Parley's box after a `<br>` gives way to this one.
+        for (_, rect) in rects.iter_mut().filter(|(line, _)| *line == index) {
+            rect.x1 = rect.x1.min(right).max(rect.x0);
+        }
+        rects.push((
+            index,
+            if layout.is_rtl() {
+                Rect::new(left - space, top, left, bottom)
+            } else {
+                Rect::new(right, top, right + space, bottom)
+            },
+        ));
+    }
+    rects.retain(|(_, rect)| rect.width() > 0.0);
+    rects
+}
+
+/// The rectangles of a byte range of a layout's text, with the line each is
+/// on, from Parley's selection geometry.
+pub(crate) fn text_range_rects(
+    layout: &Layout<TextBrush>,
+    start: usize,
+    end: usize,
+) -> Vec<(usize, Rect)> {
+    let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+    let focus = Cursor::from_byte_index(layout, end, Affinity::Downstream);
+    let mut rects = Vec::new();
+    Selection::new(anchor, focus).geometry_with(layout, |rect, line_idx| {
+        rects.push((
+            line_idx,
+            kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1),
+        ));
     });
+    rects
+}
+
+/// Strokes a line's text, in black where `highlights` cover it, as Blink
+/// paints the text of find-in-page matches. `area` holds all of the line's
+/// ink.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stroke_highlighted_text(
+    scene: &mut impl PaintScene,
+    line: Line<'_, TextBrush>,
+    doc: &BaseDocument,
+    transform: Affine,
+    scale: f64,
+    inline_root_id: NodeId,
+    context: &mut DrawTextContext,
+    paint: TextPaint<'_>,
+    highlights: &[Rect],
+    area: Rect,
+) {
+    if highlights.is_empty() {
+        stroke_text(
+            scene,
+            std::iter::once(line),
+            doc,
+            transform,
+            scale,
+            inline_root_id,
+            context,
+            paint,
+        );
+        return;
+    }
+    let mut outside = BezPath::new();
+    let mut inside = BezPath::new();
+    outside.extend(area.path_elements(0.1));
+    for highlight in highlights {
+        outside.extend(highlight.path_elements(0.1));
+        inside.extend(highlight.path_elements(0.1));
+    }
+    scene.push_clip_layer(Fill::EvenOdd, transform, &outside);
+    stroke_text(
+        scene,
+        std::iter::once(line.clone()),
+        doc,
+        transform,
+        scale,
+        inline_root_id,
+        context,
+        paint,
+    );
+    scene.pop_layer();
+    scene.push_clip_layer(Fill::NonZero, transform, &inside);
+    stroke_text(
+        scene,
+        std::iter::once(line),
+        doc,
+        transform,
+        scale,
+        inline_root_id,
+        context,
+        TextPaint {
+            text_color: Some(Color::BLACK),
+            ..paint
+        },
+    );
+    scene.pop_layer();
+}
+
+/// The advance of a space in a run's font, which is how wide Blink draws a
+/// selected line break.
+fn space_advance(run: &parley::Run<'_, TextBrush>) -> Option<f64> {
+    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
+    use skrifa::{FontRef, MetadataProvider as _};
+    let font = run.font();
+    let font_ref = FontRef::from_index(font.data.as_ref(), font.index).ok()?;
+    let glyph = font_ref.charmap().map(' ')?;
+    let coords: Vec<NormalizedCoord> = bytemuck::cast_slice::<_, i16>(run.normalized_coords())
+        .iter()
+        .map(|coord| NormalizedCoord::from_bits(*coord))
+        .collect();
+    font_ref
+        .glyph_metrics(Size::new(run.font_size()), LocationRef::new(&coords))
+        .advance_width(glyph)
+        .map(f64::from)
 }

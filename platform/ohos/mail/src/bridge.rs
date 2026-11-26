@@ -27,6 +27,7 @@ static OPEN_URL: AtomicUsize = AtomicUsize::new(0);
 static PICK_OPEN: AtomicUsize = AtomicUsize::new(0);
 static PICK_OPEN_MANY: AtomicUsize = AtomicUsize::new(0);
 static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
+static SCAN_QR: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static IME_UPDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
@@ -119,6 +120,7 @@ pub(super) unsafe extern "C" fn set_bridge(
             call_pick_open_many,
         );
         install_property(env, argv[0], b"pickSave\0", &PICK_SAVE, call_pick_save);
+        install_property(env, argv[0], b"scanQr\0", &SCAN_QR, call_scan_qr);
         install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_bool_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
         install_property(
@@ -357,6 +359,17 @@ pub(super) async fn pick_open_many(limit: usize) -> Result<Vec<PickedFile>, Stri
         });
     }
     Ok(files)
+}
+
+/// Scan a QR code with Scan Kit's scanner, which needs no camera permission.
+/// `Ok(None)` = the person closed it.
+pub(super) async fn scan_qr() -> Result<Option<String>, String> {
+    let (id, receiver) = register_picker()?;
+    let guard = PendingGuard(id);
+    call_closure(&SCAN_QR, "scanQr", id)?;
+    let (text, _name) = await_result(receiver, PICKER_TIMEOUT).await?;
+    drop(guard);
+    Ok((!text.is_empty()).then_some(text))
 }
 
 /// Ask the system file picker for a destination and copy `source_path` there.
@@ -862,6 +875,24 @@ unsafe extern "C" fn call_pick_open(
             return;
         };
         call_with_args(env, js_callback, &[argument], "pickOpen");
+    }
+}
+
+/// JS-thread half of [`scan_qr`] (request id).
+unsafe extern "C" fn call_scan_qr(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `i64` boxed in `scan_qr`; this callback owns it.
+    let id = unsafe { Box::from_raw(data.cast::<i64>()) };
+    // SAFETY: NAPI calls are made on the JS thread with live handles.
+    unsafe {
+        let Some(argument) = int_value(env, *id) else {
+            return;
+        };
+        call_with_args(env, js_callback, &[argument], "scanQr");
     }
 }
 

@@ -327,6 +327,26 @@ impl GpuEmailRenderer {
             self.selection_focus = None;
             self.paint_dirty = true;
         }
+        // Every match is highlighted, as browsers do, and the current one
+        // most strongly. It's also selected, so it stays selected when find
+        // ends.
+        let highlights: Vec<_> = self
+            .find_matches
+            .iter()
+            .enumerate()
+            .filter_map(|(index, found)| match *found {
+                FindMatch::Shown(id, start, end) => Some(blitz_dom::TextHighlight {
+                    node: id,
+                    range: start..end,
+                    active: index == self.find_index,
+                }),
+                FindMatch::Hidden(_) => None,
+            })
+            .collect();
+        if email.document.text_highlights() != highlights.as_slice() {
+            email.document.set_text_highlights(highlights);
+            self.paint_dirty = true;
+        }
         let count = self.find_matches.len();
         let y = if let Some(&FindMatch::Shown(id, start, end)) =
             self.find_matches.get(self.find_index)
@@ -348,6 +368,17 @@ impl GpuEmailRenderer {
             None
         };
         (if count == 0 { 0 } else { self.find_index + 1 }, count, y)
+    }
+
+    /// Ends find: the matches are no longer highlighted, and the current one
+    /// stays selected, as in browsers.
+    pub fn end_find(&mut self) {
+        if let Some(email) = self.email.as_mut()
+            && !email.document.text_highlights().is_empty()
+        {
+            email.document.set_text_highlights(Vec::new());
+            self.paint_dirty = true;
+        }
     }
 
     /// Find the current query in the message as it is laid out now, keeping
@@ -377,9 +408,14 @@ impl GpuEmailRenderer {
                         continue;
                     };
                     // Map folded characters back to original UTF-8 offsets.
+                    // Inline elements' edges, laid out as invisible characters,
+                    // are skipped, so text on both sides of one still matches.
                     let mut folded = String::new();
                     let mut offsets = Vec::new();
                     for (i, c) in inline.text.char_indices() {
+                        if blitz_dom::node::is_inline_edge_char(c) {
+                            continue;
+                        }
                         for lower in c.to_lowercase() {
                             for _ in 0..lower.len_utf8() {
                                 offsets.push(i);

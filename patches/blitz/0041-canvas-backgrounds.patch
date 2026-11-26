@@ -1,0 +1,366 @@
+diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
+index 2d9e633..3a776b5 100644
+--- a/crates/blitz-paint/src/render.rs
++++ b/crates/blitz-paint/src/render.rs
+@@ -47,7 +47,6 @@ use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
+ /// their boxes leave out.
+ const CULL_MARGIN: f64 = 64.0;
+ use peniko::{self, Fill, ImageData, ImageSampler};
+-use style::values::generics::color::GenericColor;
+ use taffy::Layout;
+ 
+ /// A short-lived struct which holds a bunch of parameters for rendering a scene so
+@@ -63,6 +62,9 @@ pub struct BlitzDomPainter<'dom, 'a> {
+     pub(crate) initial_y: f64,
+     /// The id of the document's root element (cached to avoid re-resolving it for every element)
+     pub(crate) root_element_id: Option<NodeId>,
++    /// The element whose background is painted as the canvas background
++    /// rather than in its own box: the root element, or its `body`
++    pub(crate) canvas_background_id: Option<NodeId>,
+     /// Scrollbar hover/drag state, resolved once per scene like the root element
+     #[cfg(feature = "scrollbars")]
+     pub(crate) hovered_scrollbar: Option<blitz_dom::node::ScrollbarRef>,
+@@ -109,6 +111,9 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+ 
+         let layer_manager = LayerManager::default();
+         let root_element_id = dom.try_root_element().map(|el| el.id);
++        let canvas_background_id = dom
++            .try_root_element()
++            .map(|root| background::canvas_background_source(dom, root));
+ 
+         Self {
+             paint_cache: None,
+@@ -119,6 +124,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+             initial_x,
+             initial_y,
+             root_element_id,
++            canvas_background_id,
+             #[cfg(feature = "scrollbars")]
+             hovered_scrollbar: dom.hovered_scrollbar(),
+             #[cfg(feature = "scrollbars")]
+@@ -154,41 +160,44 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+         let bg_width = (self.width as f32).max(root_element.final_layout().size.width);
+         let bg_height = (self.height as f32).max(root_element.final_layout().size.height);
+ 
+-        let background_color = {
+-            let html_color = root_element
+-                .primary_styles()
+-                .map(|s| s.clone_background_color())
+-                .unwrap_or(GenericColor::TRANSPARENT_BLACK);
+-            if html_color == GenericColor::TRANSPARENT_BLACK {
+-                root_element
+-                    .children
+-                    .iter()
+-                    .find_map(|id| {
+-                        self.dom
+-                            .as_ref()
+-                            .get_node(*id)
+-                            .filter(|node| node.data.is_element_with_tag_name(&local_name!("body")))
+-                    })
+-                    .and_then(|body| body.primary_styles())
+-                    .map(|style| {
+-                        let current_color = style.clone_color();
+-                        style
+-                            .clone_background_color()
+-                            .resolve_to_absolute(&current_color)
+-                    })
+-            } else {
+-                let current_color = root_element.primary_styles().unwrap().clone_color();
+-                Some(html_color.resolve_to_absolute(&current_color))
++        // The root element's background, or the body's propagated to it, is
++        // the canvas background: it covers the whole canvas, and its images
++        // are positioned against the root element's box (CSS Backgrounds 3
++        // section 2.11).
++        let canvas_rect = Rect::from_origin_size(
++            (self.initial_x, self.initial_y),
++            (bg_width as f64, bg_height as f64),
++        );
++        let canvas_source = self
++            .canvas_background_id
++            .and_then(|id| self.dom.as_ref().get_node(id));
++        if let Some(style) = canvas_source.and_then(|node| node.primary_styles()) {
++            let bg_color = style
++                .clone_background_color()
++                .resolve_to_absolute(&style.clone_color())
++                .as_srgb_color();
++            if bg_color != Color::TRANSPARENT {
++                scene.fill(
++                    Fill::NonZero,
++                    Affine::IDENTITY,
++                    bg_color,
++                    None,
++                    &canvas_rect,
++                );
+             }
+-        };
+-
+-        if let Some(bg_color) = background_color {
+-            let bg_color = bg_color.as_srgb_color();
+-            let rect = Rect::from_origin_size(
+-                (self.initial_x, self.initial_y),
+-                (bg_width as f64, bg_height as f64),
++        }
++        if let Some(source) = canvas_source {
++            let location = root_element.final_layout().location;
++            let transform = Affine::translate(Vec2 {
++                x: self.initial_x - viewport_scroll.x * self.scale + location.x as f64 * self.scale,
++                y: self.initial_y - viewport_scroll.y * self.scale + location.y as f64 * self.scale,
++            });
++            let cx = self.element_cx(root_element, *root_element.final_layout(), transform, None);
++            cx.draw_canvas_background(
++                scene,
++                source,
++                transform.inverse().transform_rect_bbox(canvas_rect),
+             );
+-            scene.fill(Fill::NonZero, Affine::IDENTITY, bg_color, None, &rect);
+         }
+ 
+         // The root clip rectangle is the viewport (in screen coordinates, with the
+@@ -536,7 +545,10 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+                     backdrop_filter,
+                     |scene| {
+                         let box_cx = table_box.as_ref().unwrap_or(&cx);
+-                        box_cx.draw_background(scene);
++                        // The canvas background is painted on the canvas instead.
++                        if self.canvas_background_id != Some(node_id) {
++                            box_cx.draw_background(scene);
++                        }
+                         box_cx.draw_inset_box_shadow(scene);
+                         cx.draw_table_row_backgrounds(scene);
+                         table_box.as_ref().unwrap_or(&cx).draw_border(scene);
+diff --git a/crates/blitz-paint/src/render/background.rs b/crates/blitz-paint/src/render/background.rs
+index 80acec2..ed40839 100644
+--- a/crates/blitz-paint/src/render/background.rs
++++ b/crates/blitz-paint/src/render/background.rs
+@@ -2,8 +2,8 @@ use super::{ElementCx, to_image_quality, to_peniko_image};
+ use crate::color::{Color, ToColorColor};
+ use crate::gradient::to_peniko_gradient;
+ use anyrender::PaintScene;
+-use blitz_dom::NodeId;
+ use blitz_dom::node::{ImageData, ImageResourceData, SpecialElementData};
++use blitz_dom::{BaseDocument, Node, NodeId, local_name};
+ use kurbo::{self, Affine, BezPath, Point, Rect, Shape, Size, Vec2};
+ use peniko::{self, Fill};
+ use style::{
+@@ -22,7 +22,7 @@ use style::{
+             BackgroundRepeat, Gradient as StyloGradient, Image as ComputedImage, LengthPercentage,
+             background::BackgroundSize,
+         },
+-        generics::image::GenericImage,
++        generics::{color::GenericColor, image::GenericImage},
+         specified::background::BackgroundRepeatKeyword,
+     },
+ };
+@@ -91,6 +91,9 @@ pub(super) struct ImageLayerStyles<'a> {
+     pub clip: BoxModelBox,
+     pub origin: BoxModelBox,
+     pub attachment: StyloBackgroundAttachment,
++    /// The area the layer covers, in the element's coordinates, where that
++    /// isn't its clip box: the canvas, for the canvas background
++    pub painting_area: Option<Rect>,
+ }
+ 
+ impl<'a> ImageLayerStyles<'a> {
+@@ -109,6 +112,7 @@ impl<'a> ImageLayerStyles<'a> {
+             clip: (*get_cyclic(&bg_styles.background_clip.0, idx)).into(),
+             origin: (*get_cyclic(&bg_styles.background_origin.0, idx)).into(),
+             attachment: *get_cyclic(&bg_styles.background_attachment.0, idx),
++            painting_area: None,
+         }
+     }
+ 
+@@ -128,10 +132,40 @@ impl<'a> ImageLayerStyles<'a> {
+             origin: (*get_cyclic(&svg_styles.mask_origin.0, idx)).into(),
+             // There is no `mask-attachment` property
+             attachment: StyloBackgroundAttachment::Scroll,
++            painting_area: None,
+         }
+     }
+ }
+ 
++/// The element whose background is the canvas background (CSS Backgrounds 3
++/// section 2.11): the root element, unless its background is transparent and
++/// has no image, when the root's first `body` child gives it instead.
++pub(super) fn canvas_background_source(dom: &BaseDocument, root: &Node) -> NodeId {
++    let has_background = |node: &Node| {
++        node.primary_styles().is_some_and(|style| {
++            let background = style.get_background();
++            background.background_color != GenericColor::TRANSPARENT_BLACK
++                || background
++                    .background_image
++                    .0
++                    .iter()
++                    .any(|image| !matches!(image, GenericImage::None))
++        })
++    };
++    if has_background(root) {
++        return root.id;
++    }
++    root.children
++        .iter()
++        .filter_map(|id| dom.get_node(*id))
++        .find(|node| node.data.is_element_with_tag_name(&local_name!("body")))
++        .filter(|body| {
++            body.primary_styles()
++                .is_some_and(|style| !style.get_box().display.is_none())
++        })
++        .map_or(root.id, |body| body.id)
++}
++
+ impl ElementCx<'_, '_> {
+     pub(super) fn draw_background(&self, scene: &mut impl PaintScene) {
+         let bg_styles = &self.style.get_background();
+@@ -168,6 +202,30 @@ impl ElementCx<'_, '_> {
+         }
+     }
+ 
++    /// Paint the canvas background, the background of `source` (this root
++    /// element or its `body`), over `area`, the part of the canvas painted,
++    /// positioned against this element's box as if it were its own.
++    pub(super) fn draw_canvas_background(
++        &self,
++        scene: &mut impl PaintScene,
++        source: &Node,
++        area: Rect,
++    ) {
++        let (Some(style), Some(element)) = (source.primary_styles(), source.element_data()) else {
++            return;
++        };
++        let bg_styles = style.get_background();
++        for idx in (0..bg_styles.background_image.0.len()).rev() {
++            let mut layer =
++                ImageLayerStyles::from_background(bg_styles, &element.background_images, idx);
++            if layer_paints_nothing(&layer) {
++                continue;
++            }
++            layer.painting_area = Some(area);
++            self.draw_image_layer(scene, &layer);
++        }
++    }
++
+     /// The path of the given CSS box model box for this element
+     pub(super) fn box_path(&self, css_box: BoxModelBox) -> BezPath {
+         match css_box {
+@@ -487,11 +545,16 @@ impl ElementCx<'_, '_> {
+         let y_ratio = bg_size.height / image_height;
+ 
+         let BackgroundRepeat(repeat_x, repeat_y) = layer.repeat;
++        let clip_rect = layer
++            .painting_area
++            .unwrap_or_else(|| self.box_rect(layer.clip));
+ 
+         let x = raster_axis_tiling(
+             *repeat_x,
+             origin_rect.x0,
+             origin_rect.width(),
++            clip_rect.x0,
++            clip_rect.width(),
+             bg_pos.x,
+             bg_size.width,
+             image_width,
+@@ -501,6 +564,8 @@ impl ElementCx<'_, '_> {
+             *repeat_y,
+             origin_rect.y0,
+             origin_rect.height(),
++            clip_rect.y0,
++            clip_rect.height(),
+             bg_pos.y,
+             bg_size.height,
+             image_height,
+@@ -559,7 +624,9 @@ impl ElementCx<'_, '_> {
+             (
+                 self.box_rect(layer.origin),
+                 self.transform,
+-                self.box_rect(layer.clip),
++                layer
++                    .painting_area
++                    .unwrap_or_else(|| self.box_rect(layer.clip)),
+             )
+         };
+ 
+@@ -840,13 +907,6 @@ struct AxisTiling {
+     stride: f64,
+ }
+ 
+-/// Per-axis placement and tiling for a raster image layer. `Repeat`/`Round`
+-/// produce a single fill covering the whole positioning area (relying on the
+-/// image brush repeating), while `Space` produces `count` explicit tiles
+-/// spaced `stride` apart.
+-///
+-/// The fill rect is in image pixel coordinates (the drawing transform is
+-/// pre-scaled by `ratio`), while translations are in device pixels.
+ /// How a background image brush extends along an axis with this repeat.
+ fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
+     use BackgroundRepeatKeyword::*;
+@@ -857,10 +917,20 @@ fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
+     }
+ }
+ 
++/// Per-axis placement and tiling for a raster image layer. `Repeat`/`Round`
++/// produce a single fill covering the painting area (the clip box, or the
++/// canvas), relying on the image brush repeating, while `Space` produces
++/// `count` explicit tiles spaced `stride` apart.
++///
++/// The fill rect is in image pixel coordinates (the drawing transform is
++/// pre-scaled by `ratio`), while translations are in device pixels.
++#[allow(clippy::too_many_arguments)]
+ fn raster_axis_tiling(
+     repeat: BackgroundRepeatKeyword,
+     origin_start: f64,
+     origin_len: f64,
++    area_start: f64,
++    area_len: f64,
+     bg_pos: f64,
+     tile_len: f64,
+     image_len: f64,
+@@ -870,10 +940,11 @@ fn raster_axis_tiling(
+ 
+     match repeat {
+         Repeat | Round => {
+-            let extend_len = extend(bg_pos, tile_len);
++            // Start from the tile boundary at or before the area's start
++            let extend_len = extend((origin_start - area_start) + bg_pos, tile_len);
+             AxisTiling {
+-                translate: origin_start - extend_len,
+-                rect_len: (origin_len + extend_len) / ratio,
++                translate: area_start - extend_len,
++                rect_len: (area_len + extend_len) / ratio,
+                 count: 1,
+                 stride: 0.0,
+             }
+@@ -898,14 +969,14 @@ fn raster_axis_tiling(
+ 
+ /// Per-axis placement and tiling for a gradient layer. Unlike raster images,
+ /// gradients cannot rely on brush repetition, so `Repeat`/`Round` also produce
+-/// explicit tiles. When the clip box extends beyond the origin box, tiling
+-/// starts from the clip box edge so the pattern covers the whole clipped area.
++/// explicit tiles, which cover the painting area (the clip box, or the
++/// canvas).
+ fn gradient_axis_tiling(
+     repeat: BackgroundRepeatKeyword,
+     origin_start: f64,
+     origin_len: f64,
+-    clip_start: f64,
+-    clip_len: f64,
++    area_start: f64,
++    area_len: f64,
+     bg_pos: f64,
+     tile_len: f64,
+ ) -> AxisTiling {
+@@ -913,15 +984,7 @@ fn gradient_axis_tiling(
+ 
+     match repeat {
+         Repeat | Round => {
+-            // The clip and origin boxes are nested, so the clip box extends
+-            // beyond the origin box iff it does so at either end
+-            let clip_is_outer =
+-                clip_start < origin_start || clip_start + clip_len > origin_start + origin_len;
+-            let (area_start, area_len) = if clip_is_outer {
+-                (clip_start, clip_len)
+-            } else {
+-                (origin_start, origin_len)
+-            };
++            // Start from the tile boundary at or before the area's start
+             let extend_len = extend((origin_start - area_start) + bg_pos, tile_len);
+             let count = ((area_len + extend_len) / tile_len).ceil() as u32;
+             AxisTiling {

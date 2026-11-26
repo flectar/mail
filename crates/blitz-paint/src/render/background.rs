@@ -2,8 +2,8 @@ use super::{ElementCx, to_image_quality, to_peniko_image};
 use crate::color::{Color, ToColorColor};
 use crate::gradient::to_peniko_gradient;
 use anyrender::PaintScene;
-use blitz_dom::NodeId;
 use blitz_dom::node::{ImageData, ImageResourceData, SpecialElementData};
+use blitz_dom::{BaseDocument, Node, NodeId, local_name};
 use kurbo::{self, Affine, BezPath, Point, Rect, Shape, Size, Vec2};
 use peniko::{self, Fill};
 use style::{
@@ -22,7 +22,7 @@ use style::{
             BackgroundRepeat, Gradient as StyloGradient, Image as ComputedImage, LengthPercentage,
             background::BackgroundSize,
         },
-        generics::image::GenericImage,
+        generics::{color::GenericColor, image::GenericImage},
         specified::background::BackgroundRepeatKeyword,
     },
 };
@@ -91,6 +91,9 @@ pub(super) struct ImageLayerStyles<'a> {
     pub clip: BoxModelBox,
     pub origin: BoxModelBox,
     pub attachment: StyloBackgroundAttachment,
+    /// The area the layer covers, in the element's coordinates, where that
+    /// isn't its clip box: the canvas, for the canvas background
+    pub painting_area: Option<Rect>,
 }
 
 impl<'a> ImageLayerStyles<'a> {
@@ -109,6 +112,7 @@ impl<'a> ImageLayerStyles<'a> {
             clip: (*get_cyclic(&bg_styles.background_clip.0, idx)).into(),
             origin: (*get_cyclic(&bg_styles.background_origin.0, idx)).into(),
             attachment: *get_cyclic(&bg_styles.background_attachment.0, idx),
+            painting_area: None,
         }
     }
 
@@ -128,8 +132,38 @@ impl<'a> ImageLayerStyles<'a> {
             origin: (*get_cyclic(&svg_styles.mask_origin.0, idx)).into(),
             // There is no `mask-attachment` property
             attachment: StyloBackgroundAttachment::Scroll,
+            painting_area: None,
         }
     }
+}
+
+/// The element whose background is the canvas background (CSS Backgrounds 3
+/// section 2.11): the root element, unless its background is transparent and
+/// has no image, when the root's first `body` child gives it instead.
+pub(super) fn canvas_background_source(dom: &BaseDocument, root: &Node) -> NodeId {
+    let has_background = |node: &Node| {
+        node.primary_styles().is_some_and(|style| {
+            let background = style.get_background();
+            background.background_color != GenericColor::TRANSPARENT_BLACK
+                || background
+                    .background_image
+                    .0
+                    .iter()
+                    .any(|image| !matches!(image, GenericImage::None))
+        })
+    };
+    if has_background(root) {
+        return root.id;
+    }
+    root.children
+        .iter()
+        .filter_map(|id| dom.get_node(*id))
+        .find(|node| node.data.is_element_with_tag_name(&local_name!("body")))
+        .filter(|body| {
+            body.primary_styles()
+                .is_some_and(|style| !style.get_box().display.is_none())
+        })
+        .map_or(root.id, |body| body.id)
 }
 
 impl ElementCx<'_, '_> {
@@ -165,6 +199,30 @@ impl ElementCx<'_, '_> {
                     self.draw_image_layer(scene, &layer);
                 },
             );
+        }
+    }
+
+    /// Paint the canvas background, the background of `source` (this root
+    /// element or its `body`), over `area`, the part of the canvas painted,
+    /// positioned against this element's box as if it were its own.
+    pub(super) fn draw_canvas_background(
+        &self,
+        scene: &mut impl PaintScene,
+        source: &Node,
+        area: Rect,
+    ) {
+        let (Some(style), Some(element)) = (source.primary_styles(), source.element_data()) else {
+            return;
+        };
+        let bg_styles = style.get_background();
+        for idx in (0..bg_styles.background_image.0.len()).rev() {
+            let mut layer =
+                ImageLayerStyles::from_background(bg_styles, &element.background_images, idx);
+            if layer_paints_nothing(&layer) {
+                continue;
+            }
+            layer.painting_area = Some(area);
+            self.draw_image_layer(scene, &layer);
         }
     }
 
@@ -487,11 +545,16 @@ impl ElementCx<'_, '_> {
         let y_ratio = bg_size.height / image_height;
 
         let BackgroundRepeat(repeat_x, repeat_y) = layer.repeat;
+        let clip_rect = layer
+            .painting_area
+            .unwrap_or_else(|| self.box_rect(layer.clip));
 
         let x = raster_axis_tiling(
             *repeat_x,
             origin_rect.x0,
             origin_rect.width(),
+            clip_rect.x0,
+            clip_rect.width(),
             bg_pos.x,
             bg_size.width,
             image_width,
@@ -501,6 +564,8 @@ impl ElementCx<'_, '_> {
             *repeat_y,
             origin_rect.y0,
             origin_rect.height(),
+            clip_rect.y0,
+            clip_rect.height(),
             bg_pos.y,
             bg_size.height,
             image_height,
@@ -559,7 +624,9 @@ impl ElementCx<'_, '_> {
             (
                 self.box_rect(layer.origin),
                 self.transform,
-                self.box_rect(layer.clip),
+                layer
+                    .painting_area
+                    .unwrap_or_else(|| self.box_rect(layer.clip)),
             )
         };
 
@@ -840,13 +907,6 @@ struct AxisTiling {
     stride: f64,
 }
 
-/// Per-axis placement and tiling for a raster image layer. `Repeat`/`Round`
-/// produce a single fill covering the whole positioning area (relying on the
-/// image brush repeating), while `Space` produces `count` explicit tiles
-/// spaced `stride` apart.
-///
-/// The fill rect is in image pixel coordinates (the drawing transform is
-/// pre-scaled by `ratio`), while translations are in device pixels.
 /// How a background image brush extends along an axis with this repeat.
 fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
     use BackgroundRepeatKeyword::*;
@@ -857,10 +917,20 @@ fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
     }
 }
 
+/// Per-axis placement and tiling for a raster image layer. `Repeat`/`Round`
+/// produce a single fill covering the painting area (the clip box, or the
+/// canvas), relying on the image brush repeating, while `Space` produces
+/// `count` explicit tiles spaced `stride` apart.
+///
+/// The fill rect is in image pixel coordinates (the drawing transform is
+/// pre-scaled by `ratio`), while translations are in device pixels.
+#[allow(clippy::too_many_arguments)]
 fn raster_axis_tiling(
     repeat: BackgroundRepeatKeyword,
     origin_start: f64,
     origin_len: f64,
+    area_start: f64,
+    area_len: f64,
     bg_pos: f64,
     tile_len: f64,
     image_len: f64,
@@ -870,10 +940,11 @@ fn raster_axis_tiling(
 
     match repeat {
         Repeat | Round => {
-            let extend_len = extend(bg_pos, tile_len);
+            // Start from the tile boundary at or before the area's start
+            let extend_len = extend((origin_start - area_start) + bg_pos, tile_len);
             AxisTiling {
-                translate: origin_start - extend_len,
-                rect_len: (origin_len + extend_len) / ratio,
+                translate: area_start - extend_len,
+                rect_len: (area_len + extend_len) / ratio,
                 count: 1,
                 stride: 0.0,
             }
@@ -898,14 +969,14 @@ fn raster_axis_tiling(
 
 /// Per-axis placement and tiling for a gradient layer. Unlike raster images,
 /// gradients cannot rely on brush repetition, so `Repeat`/`Round` also produce
-/// explicit tiles. When the clip box extends beyond the origin box, tiling
-/// starts from the clip box edge so the pattern covers the whole clipped area.
+/// explicit tiles, which cover the painting area (the clip box, or the
+/// canvas).
 fn gradient_axis_tiling(
     repeat: BackgroundRepeatKeyword,
     origin_start: f64,
     origin_len: f64,
-    clip_start: f64,
-    clip_len: f64,
+    area_start: f64,
+    area_len: f64,
     bg_pos: f64,
     tile_len: f64,
 ) -> AxisTiling {
@@ -913,15 +984,7 @@ fn gradient_axis_tiling(
 
     match repeat {
         Repeat | Round => {
-            // The clip and origin boxes are nested, so the clip box extends
-            // beyond the origin box iff it does so at either end
-            let clip_is_outer =
-                clip_start < origin_start || clip_start + clip_len > origin_start + origin_len;
-            let (area_start, area_len) = if clip_is_outer {
-                (clip_start, clip_len)
-            } else {
-                (origin_start, origin_len)
-            };
+            // Start from the tile boundary at or before the area's start
             let extend_len = extend((origin_start - area_start) + bg_pos, tile_len);
             let count = ((area_len + extend_len) / tile_len).ceil() as u32;
             AxisTiling {

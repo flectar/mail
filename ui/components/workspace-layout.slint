@@ -337,6 +337,9 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <bool> filter-active: false;
     in property <string> filter-tooltip;
     in property <string> filter-accessible-id;
+    // Phones refresh mail by pulling the list down. There the button gives way
+    // to an item at the end of the menu, which still checks with one tap.
+    in property <bool> show-refresh: true;
     in property <bool> refresh-enabled: true;
     in property <string> refresh-tooltip;
     in property <string> refresh-accessible-id;
@@ -467,13 +470,19 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                         title: @tr("Search tips");
                         activated => { root.search-tips(); }
                     }
+                    if !root.show-refresh : MenuSeparator {}
+                    if !root.show-refresh : MenuItem {
+                        title: root.refresh-tooltip;
+                        enabled: root.refresh-enabled;
+                        activated => { root.refresh(); }
+                    }
                 }
             }
         }
 
         @children
 
-        ToolbarIconButton {
+        if root.show-refresh : ToolbarIconButton {
             interactive: root.refresh-enabled;
             icon: @image-url("../icons/lucide/outline/sync.svg");
             icon-color: AppTheme.secondary;

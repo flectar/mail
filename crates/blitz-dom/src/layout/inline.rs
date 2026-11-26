@@ -1,5 +1,5 @@
 use blitz_traits::node_id::NodeId;
-use parley::{AlignmentOptions, BreakReason, IndentOptions};
+use parley::{AlignmentOptions, BreakReason, IndentOptions, InlineBoxKind};
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 use style::values::{
     computed::{BaselineSource, CSSPixelLength, Contain},
@@ -328,22 +328,6 @@ impl LayoutPassState<'_> {
         let suppresses_baseline = style.contain().suppresses_baseline();
         drop(style);
 
-        // Short circuit if inline context contains no text or inline boxes
-        if !has_styles_preventing_being_collapsed_through
-            && inline_layout.text.is_empty()
-            && inline_layout.layout.inline_boxes().len() == 0
-        {
-            // Put layout back
-            self.nodes[node_id]
-                .data
-                .downcast_element_mut()
-                .unwrap()
-                .inline_layout_data = Some(inline_layout);
-            return LayoutOutput::from_outer_size(
-                Size::ZERO.maybe_max(container_pb.sum_axes().map(Some)),
-            );
-        }
-
         // Compute available space
         let available_space = Size {
             width: known_dimensions
@@ -447,16 +431,59 @@ impl LayoutPassState<'_> {
             let box_inputs = inline_box_inputs(style.size().width, margin, child_inputs);
             drop(style);
 
-            if is_out_of_flow || is_floated {
+            // A float, an absolutely positioned box or the empty box after a
+            // `<br>` that clears floats.
+            if is_out_of_flow || is_floated || ibox.kind == InlineBoxKind::CustomOutOfFlow {
                 ibox.width = 0.0;
                 ibox.height = 0.0;
                 ibox.baseline = None;
             } else {
-                let output = self.compute_child_layout(taffy::NodeId::from(ibox.id), box_inputs);
+                let mut output =
+                    self.compute_child_layout(taffy::NodeId::from(ibox.id), box_inputs);
+                // Measured, a box whose styles fix its size returns that size
+                // without laying out its content, so without the baseline its
+                // line sits on, and a table row measured that way came out
+                // taller than it is laid out. As Taffy's flexbox does for
+                // baseline alignment, lay the box out to find its baseline. A
+                // block container finds its last baseline only when laid out,
+                // so one sitting on it is laid out too.
+                let on_baseline = ibox.vertical_align.alignment
+                    == parley::AlignmentBaseline::Baseline
+                    && !matches!(
+                        ibox.vertical_align.shift,
+                        parley::BaselineShift::Top | parley::BaselineShift::Bottom
+                    );
+                if exports_baseline
+                    && box_inputs.run_mode == RunMode::ComputeSize
+                    && box_inputs.axis != RequestedAxis::Horizontal
+                    && output.baselines.last.is_none()
+                    && (output.baselines.first.is_none() || (uses_last_baseline && on_baseline))
+                {
+                    output = self.compute_child_layout(
+                        taffy::NodeId::from(ibox.id),
+                        LayoutInput {
+                            run_mode: RunMode::PerformLayout,
+                            axis: RequestedAxis::Both,
+                            ..box_inputs
+                        },
+                    );
+                }
                 ibox.width = (margin.left + margin.right + output.size.width) * scale;
+                // A block container's last baseline, which only its latest
+                // layout records, for a box sitting on it.
+                let recorded_last = (uses_last_baseline && on_baseline)
+                    .then(|| {
+                        let node = &self.nodes[NodeId::from_u64(ibox.id)];
+                        node.element_data()?.layout_data().last_baseline
+                    })
+                    .flatten();
                 ibox.baseline = if exports_baseline {
                     let baseline = if uses_last_baseline {
-                        output.baselines.last.or(output.baselines.first)
+                        output
+                            .baselines
+                            .last
+                            .or(recorded_last)
+                            .or(output.baselines.first)
                     } else {
                         output.baselines.first.or(output.baselines.last)
                     };
@@ -484,6 +511,13 @@ impl LayoutPassState<'_> {
                 } else {
                     (margin_box_height.max(0.0) * scale).min(f32::MAX)
                 };
+                // An image, inline block or inline table is in-flow content even
+                // without height, so its line keeps its strut (CSS 2.1 section
+                // 9.4.2), as in browsers. Parley counts a box without height as
+                // nothing, so the box reserves a sliver of height.
+                if ibox.kind == InlineBoxKind::InFlow && ibox.height == 0.0 {
+                    ibox.height = f32::EPSILON;
+                }
             }
         }
 
@@ -608,8 +642,7 @@ impl LayoutPassState<'_> {
                     AvailableSpace::Definite(limit) => (limit * scale)
                         .min(max_content_width + float_width)
                         .max(min_content_width),
-                }
-                .ceil();
+                };
 
                 let style_width = node_size.width.map(|w| w * scale);
                 let min_width = node_min_size.width.map(|w| w * scale);
@@ -652,7 +685,7 @@ impl LayoutPassState<'_> {
                 .inline_layout_data = Some(inline_layout);
 
             let measured_size = inputs.known_dimensions.unwrap_or(taffy::Size {
-                width: width.ceil() / scale,
+                width: width / scale,
                 // Height is ignored if RequestedAxis if Horizontal
                 height: 0.0,
             });
@@ -675,9 +708,26 @@ impl LayoutPassState<'_> {
             .layout
             .set_text_indent(resolved_text_indent * scale, indent_options);
 
+        // Content sized to fit exactly (e.g. shrink-to-fit) can end up a few ulps wider than
+        // `width`: the width goes through round trips in CSS px, and the line breaker sums
+        // advances in a different order to `calculate_content_widths`. Give the line breaker a
+        // few ulps of slack in that case so that the content doesn't wrap.
+        let max_advance = {
+            let max_content_width = inline_layout.layout.calculate_content_widths().max;
+            let fit_width = width.max(max_content_width);
+            let rounding_error = (fit_width + pbw).abs() * 8.0 * f32::EPSILON;
+            if (max_content_width - width).abs() <= rounding_error {
+                fit_width + rounding_error
+            } else {
+                width
+            }
+        };
+        #[cfg(feature = "floats")]
+        let slack = max_advance - width;
+
         #[cfg(not(feature = "floats"))]
         {
-            inline_layout.layout.break_all_lines(Some(width));
+            inline_layout.layout.break_all_lines(Some(max_advance));
         }
 
         // Out-of-flow candidates bubbled up from this container and its in-flow subtree.
@@ -687,6 +737,9 @@ impl LayoutPassState<'_> {
         // up from them. They move with the content when `align-content` shifts it.
         #[cfg(feature = "floats")]
         let mut placed_floats = Vec::new();
+        // Whether a `<br>` that clears floats moved a line below them.
+        #[cfg(feature = "floats")]
+        let mut cleared_floats = false;
         #[cfg(feature = "floats")]
         let mut float_oof_candidates = OofCandidates::new();
 
@@ -697,14 +750,15 @@ impl LayoutPassState<'_> {
             let initial_slot = block_ctx.find_content_slot(0.0, Clear::None, None);
             let mut has_active_floats = initial_slot.segment_id.is_some();
             let state = breaker.state_mut();
-            state.set_layout_max_advance(width);
+            state.set_layout_max_advance(max_advance);
             // Lines have no height limit. An infinite one, unlike Parley's `f32::MAX`
             // default, can never be exceeded, even by an infinitely tall box.
             state.set_line_max_height(f32::INFINITY);
             // With huge insets, f32 rounding can make a float slot slightly wider than
             // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
             let layout_max_advance = state.layout_max_advance();
-            state.set_line_max_advance((initial_slot.width * scale).min(layout_max_advance));
+            state
+                .set_line_max_advance((initial_slot.width * scale + slack).min(layout_max_advance));
             state.set_line_x(initial_slot.x * scale);
             state.set_line_y((initial_slot.y * scale) as f64);
 
@@ -730,13 +784,13 @@ impl LayoutPassState<'_> {
                             has_active_floats = next_slot.segment_id.is_some();
 
                             state.set_line_max_advance(
-                                (next_slot.width * scale).min(layout_max_advance),
+                                (next_slot.width * scale + slack).min(layout_max_advance),
                             );
                             state.set_line_x(next_slot.x * scale);
                             state.set_line_y((next_slot.y * scale) as f64);
                         } else {
                             state.set_line_x(0.0);
-                            state.set_line_max_advance(width);
+                            state.set_line_max_advance(max_advance);
                         }
 
                         continue;
@@ -751,6 +805,30 @@ impl LayoutPassState<'_> {
                     YieldData::InlineBoxBreak(box_break_data) => {
                         let state = breaker.state_mut();
                         let node_id = NodeId::from_u64(box_break_data.inline_box_id);
+
+                        // The box after a `<br>` that clears floats: the line
+                        // it starts goes below them.
+                        let br_clear = {
+                            let style = self.child_layout_style(&self.nodes[node_id]);
+                            (!style.float().is_floated()).then(|| style.clear())
+                        };
+                        if let Some(clear) = br_clear {
+                            let min_y = state.line_y() / scale as f64;
+                            let slot = block_ctx.find_content_slot(min_y as f32, clear, None);
+                            cleared_floats |= f64::from(slot.y) > min_y;
+                            has_active_floats = slot.segment_id.is_some();
+                            state.set_line_max_advance(
+                                (slot.width * scale + slack).min(layout_max_advance),
+                            );
+                            state.set_line_x(slot.x * scale);
+                            state.set_line_y((slot.y * scale) as f64);
+                            state.append_inline_box_to_line(
+                                box_break_data.advance,
+                                f32::NEG_INFINITY,
+                                f32::NEG_INFINITY,
+                            );
+                            continue;
+                        }
 
                         let (direction, clear, margin, width) = {
                             let style = self.child_layout_style(&self.nodes[node_id]);
@@ -796,7 +874,7 @@ impl LayoutPassState<'_> {
                         has_active_floats = next_slot.segment_id.is_some();
 
                         state.set_line_max_advance(
-                            (next_slot.width * scale).min(layout_max_advance),
+                            (next_slot.width * scale + slack).min(layout_max_advance),
                         );
                         state.set_line_x(next_slot.x * scale);
                         state.set_line_y((next_slot.y * scale) as f64);
@@ -870,9 +948,10 @@ impl LayoutPassState<'_> {
 
         // Parley lays out empty text as a single strut-height line (text-editor semantics),
         // but a line box containing no text, inline boxes or other in-flow content is a
-        // zero-height line box in CSS (CSS2 §9.4.2).
-        let has_inline_content =
-            !inline_layout.text.is_empty() || inline_layout.layout.inline_boxes().len() > 0;
+        // zero-height line box in CSS (CSS2 §9.4.2), and so is one with only white space
+        // that collapses away, such as the space around an empty `<a name>`.
+        let has_inline_content = inline_layout.layout.inline_boxes().len() > 0
+            || (!inline_layout.text.is_empty() && !inline_layout.only_collapsible_space);
 
         let mut height = if has_inline_content {
             inline_layout.layout.height()
@@ -897,6 +976,36 @@ impl LayoutPassState<'_> {
         {
             height -= last_line.metrics().line_height;
             trailing_empty_line = Some(line_count - 1);
+        }
+
+        // Parley's height sums the lines' heights, which misses the gap a
+        // `<br>` that clears floats leaves above the line after it, so the
+        // content ends at its last line instead. A last line with nothing
+        // but that `<br>`'s empty box adds only the gap.
+        #[cfg(feature = "floats")]
+        if cleared_floats {
+            let counted = trailing_empty_line.unwrap_or(line_count);
+            height = inline_layout
+                .layout
+                .lines()
+                .take(counted)
+                .map(|line| {
+                    let metrics = line.metrics();
+                    let only_boxes = line.text_range().is_empty()
+                        && line.items().all(|item| {
+                            matches!(
+                                item,
+                                parley::layout::PositionedLayoutItem::InlineBox(ibox)
+                                    if ibox.kind == InlineBoxKind::CustomOutOfFlow
+                            )
+                        });
+                    if only_boxes {
+                        metrics.block_min_coord
+                    } else {
+                        metrics.block_max_coord
+                    }
+                })
+                .fold(0.0, f32::max);
         }
 
         #[cfg(feature = "floats")]
@@ -974,6 +1083,17 @@ impl LayoutPassState<'_> {
         for line in inline_layout.layout.lines() {
             for item in line.items() {
                 if let parley::layout::PositionedLayoutItem::InlineBox(ibox) = item {
+                    // The empty box after a `<br>` that clears floats is no box
+                    // of the `<br>`'s.
+                    #[cfg(feature = "floats")]
+                    if ibox.kind == InlineBoxKind::CustomOutOfFlow
+                        && !self
+                            .child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)])
+                            .float()
+                            .is_floated()
+                    {
+                        continue;
+                    }
                     let order = ibox_order;
                     ibox_order += 1;
                     if inputs.run_mode == RunMode::PerformLayout {

@@ -913,7 +913,8 @@ fn copied_text_leaves_out_hidden_text() {
 fn collapsed_bevels_and_dashes_paint_like_browsers() {
     // `<table border=2>` collapses to a 2px `outset` table edge, which paints
     // as a groove (CSS 2.1 §17.6.3): a dark outer half over a light inner
-    // half, as in Chrome. A dashed edge starts and ends with a dash.
+    // half, as in Chrome, where black bevels between #545454 and #a8a8a8. A
+    // dashed edge starts and ends with a dash.
     let mut doc = document(
         "<table border='2' style='border-collapse:collapse'><tr><td style='width:60px;height:20px'></td></tr></table>
          <table style='border-collapse:collapse;margin-top:10px'><tr>
@@ -928,8 +929,8 @@ fn collapsed_bevels_and_dashes_paint_like_browsers() {
         let i = (y * 400 + x) * 4;
         [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
     };
-    assert_eq!(pixel(30, 0), [0, 0, 0, 255]);
-    assert_eq!(pixel(30, 1), [84, 84, 84, 255]);
+    assert_eq!(pixel(30, 0), [84, 84, 84, 255]);
+    assert_eq!(pixel(30, 1), [168, 168, 168, 255]);
 
     let red = [255, 0, 0, 255];
     let (top, _) = rows_with(&pixels, red).unwrap();
@@ -1185,4 +1186,1359 @@ fn tall_images_keep_their_detail_within_the_pixel_budget() {
     );
     let decoded = limits.decode(&png).unwrap();
     assert_eq!((decoded.pixel_width, decoded.pixel_height), (141, 70));
+}
+
+fn paint(doc: &mut HtmlDocument) -> Vec<u8> {
+    render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    )
+}
+
+/// The bounding columns and rows of the pixels that pass `test`.
+fn bounds_where(
+    pixels: &[u8],
+    test: impl Fn(&[u8; 4]) -> bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut bounds: Option<(usize, usize, usize, usize)> = None;
+    for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+        if test(pixel) {
+            let (x, y) = (index % 400, index / 400);
+            bounds = Some(match bounds {
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+                None => (x, y, x, y),
+            });
+        }
+    }
+    bounds
+}
+
+#[test]
+fn a_cell_height_is_the_minimum_of_its_row() {
+    // CSS 2.1 §17.5.3: a row is as tall as its cells' heights and contents, so
+    // a 1px cell grows to hold its content instead of spilling into the next
+    // row.
+    let doc = document(
+        "<table style='border-spacing:0'>
+         <tr><td id='short' style='height:1px'><div style='height:30px'></div></td></tr>
+         <tr><td id='next' style='height:10px'></td></tr></table>",
+    );
+    close(node(&doc, "#short").final_layout().size.height, 30.0);
+    close(node(&doc, "#next").final_layout().location.y, 30.0);
+}
+
+#[test]
+fn block_cells_of_a_row_stack_in_one_anonymous_cell() {
+    // A responsive email makes a row's cells blocks on a narrow screen. CSS 2.1
+    // §17.2.1 wraps consecutive non-cells of a row in one anonymous cell, in
+    // which they stack, comments between them notwithstanding.
+    let doc = document(
+        "<table style='width:200px;border-spacing:0'><tr>
+         <!-- one --><td id='a' style='display:block'>A</td>
+         <!-- two --><td id='b' style='display:block'>B</td></tr></table>",
+    );
+    let (a, b) = (node(&doc, "#a"), node(&doc, "#b"));
+    let (a_pos, b_pos) = (a.absolute_position(0.0, 0.0), b.absolute_position(0.0, 0.0));
+    close(a.final_layout().size.width, 200.0);
+    close(b_pos.x, a_pos.x);
+    close(b_pos.y, a_pos.y + a.final_layout().size.height);
+}
+
+#[test]
+fn auto_columns_share_width_in_proportion_to_their_range() {
+    // Chromium gives each auto column its min-content width plus the same
+    // fraction of the way to its max-content width (CSS Tables 3 §3.9.3):
+    // columns of 25..100px and 50..100px in 150px are 70px and 80px, where
+    // equal shares would make them 62.5px and 87.5px.
+    let boxes = |width: u32, count: usize| {
+        vec![
+            format!("<span style='display:inline-block;width:{width}px;height:5px'></span>");
+            count
+        ]
+        .join(" ")
+    };
+    let doc = document(&format!(
+        "<table style='width:150px;border-spacing:0;font-size:0'><tr>
+         <td id='a'>{}</td><td id='b'>{}</td></tr></table>",
+        boxes(25, 4),
+        boxes(50, 2)
+    ));
+    close(node(&doc, "#a").final_layout().size.width, 70.0);
+    close(node(&doc, "#b").final_layout().size.width, 80.0);
+}
+
+#[test]
+fn inline_padding_and_margins_take_room_and_paint() {
+    // The span's margins and padding take room in its line (CSS 2.1 §10.3.1)
+    // and its background covers its padding box: 5px of margin, then 10px of
+    // padding each side of a 20px box, so the next box starts at 50px.
+    let mut doc = document(
+        "<p style='margin:0;font-size:0'><span style='background:rgb(255,0,0);padding:4px 10px;margin:0 5px'>
+         <span style='display:inline-block;width:20px;height:10px;background:rgb(0,0,255)'></span></span><span
+         style='display:inline-block;width:10px;height:10px;background:rgb(0,255,0)'></span></p>",
+    );
+    let pixels = paint(&mut doc);
+    let red =
+        bounds_where(&pixels, |pixel| *pixel == [255, 0, 0, 255]).expect("background painted");
+    assert_eq!((red.0, red.2), (5, 44), "{red:?}");
+    let blue = bounds_where(&pixels, |pixel| *pixel == [0, 0, 255, 255]).unwrap();
+    assert_eq!((blue.0, blue.2), (15, 34), "{blue:?}");
+    let green = bounds_where(&pixels, |pixel| *pixel == [0, 255, 0, 255]).unwrap();
+    assert_eq!(green.0, 50, "{green:?}");
+}
+
+#[test]
+fn wrapped_inline_boxes_paint_their_edges_once() {
+    // Sliced at its line breaks, a wrapped inline box has its left border on its
+    // first line only and its right border on its last.
+    let mut doc = document(
+        "<div style='width:30px;font:10px/30px sans-serif'><span style='border:solid rgb(255,0,0);border-width:0 4px;color:transparent'>aaaa aaaa aaaa</span></div>",
+    );
+    let pixels = paint(&mut doc);
+    let red_in_row = |y: usize| {
+        (0..400)
+            .filter(|x| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [255, 0, 0, 255])
+            .count()
+    };
+    let lines: Vec<usize> = [15, 45, 75].into_iter().map(red_in_row).collect();
+    // Four border columns on the first and last lines, none on the middle one.
+    assert_eq!(lines, [4, 0, 4], "{lines:?}");
+}
+
+#[test]
+fn inline_opacity_groups_text_and_boxes() {
+    // An inline element's opacity applies to its text and to the boxes in it,
+    // and at zero hides them, as for hidden preheader text.
+    let mut doc = document(
+        "<p style='margin:0;font:20px/24px sans-serif;color:rgb(255,0,0)'><span style='opacity:0'>HIDDEN</span></p>
+         <p style='margin:0'><span style='opacity:0.5'><span style='display:inline-block;width:10px;height:10px;background:rgb(0,0,255)'></span></span></p>",
+    );
+    let pixels = paint(&mut doc);
+    assert!(bounds_where(&pixels, |pixel| pixel[0] > 0 && pixel[3] > 0).is_none());
+    let (x, y, _, _) = bounds_where(&pixels, |pixel| pixel[2] > 0).expect("box painted");
+    let alpha = pixels[(y * 400 + x) * 4 + 3];
+    assert!((120..=135).contains(&alpha), "alpha {alpha}");
+}
+
+#[test]
+fn underlines_skip_descenders_but_not_trailing_spaces() {
+    // `text-decoration-skip-ink: auto` interrupts the underline where a
+    // descender crosses it, and a line's hanging space is not underlined.
+    let mut doc = document(
+        "<div style='width:120px;font:30px/40px sans-serif;color:rgb(0,0,0)'>
+         <u style='text-decoration-color:rgb(255,0,0)'>xxgxx xxxxxxxx</u></div>",
+    );
+    let pixels = paint(&mut doc);
+    let red =
+        |x: usize, y: usize| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [255, 0, 0, 255];
+    // The first line's underline row, and its runs of red.
+    let row = (0..40)
+        .max_by_key(|&y| (0..400).filter(|&x| red(x, y)).count())
+        .unwrap();
+    let mut runs = 0;
+    for x in 0..400 {
+        if red(x, row) && (x == 0 || !red(x - 1, row)) {
+            runs += 1;
+        }
+    }
+    assert!(
+        runs >= 2,
+        "the underline is interrupted under the g ({runs} runs)"
+    );
+    let underline_end = (0..400).rev().find(|&x| red(x, row)).unwrap();
+    let text_end = (0..400)
+        .rev()
+        .find(|&x| {
+            (0..40).any(|y| pixels[(y * 400 + x) * 4..(y * 400 + x) * 4 + 4] == [0, 0, 0, 255])
+        })
+        .unwrap();
+    assert!(
+        underline_end <= text_end + 2,
+        "underline to {underline_end}, text to {text_end}"
+    );
+}
+
+#[test]
+fn a_wbr_breaks_text_that_does_not_wrap() {
+    // As in Chromium, a <wbr> is a line break opportunity even under
+    // `white-space: nowrap`.
+    let doc = document(
+        "<p id='p' style='margin:0;width:1px;white-space:nowrap;font:10px/20px sans-serif'>aaaa<wbr>bbbb</p>",
+    );
+    close(node(&doc, "#p").final_layout().size.height, 40.0);
+}
+
+#[test]
+fn line_breaks_in_middle_aligned_cells_keep_their_line_height() {
+    // A <br> sits on its parent's baseline: it isn't aligned to the cell's
+    // middle a second time, which grew each line by a pixel.
+    let doc = document(
+        "<table style='border-spacing:0'><tr><td id='c' style='vertical-align:middle;font:16px/24px sans-serif'>a<br>b<br>c</td></tr></table>",
+    );
+    close(node(&doc, "#c").final_layout().size.height, 72.0);
+}
+
+#[test]
+fn copied_text_leaves_out_inline_edges() {
+    // An inline element's padding is laid out as an invisible placeholder,
+    // which isn't the document's text.
+    let mut doc =
+        document("<p id='p'>a <span style='padding:0 5px;border:1px solid'>b</span>c<wbr>d</p>");
+    let p = doc.query_selector("#p").unwrap().unwrap();
+    let len = doc
+        .get_node(p)
+        .unwrap()
+        .element_data()
+        .unwrap()
+        .inline_layout_data
+        .as_ref()
+        .unwrap()
+        .text
+        .len();
+    doc.set_text_selection(p, 0, p, len);
+    assert_eq!(doc.get_selected_text().as_deref(), Some("a bcd"));
+}
+
+#[test]
+fn captions_sit_above_the_grid_outside_the_table_border() {
+    // CSS 2.1 §17.4: a caption is as wide as the table, above its grid (below
+    // it with `caption-side: bottom`), and the table's border surrounds the
+    // grid alone.
+    let mut doc = document(
+        "<table style='border:4px solid rgb(255,0,0);border-spacing:0;width:100px'>
+         <caption id='top' style='height:20px'></caption>
+         <caption id='bottom' style='height:10px;caption-side:bottom'></caption>
+         <tr><td id='cell' style='height:30px'></td></tr></table>",
+    );
+    let (top, cell, bottom) = (
+        node(&doc, "#top"),
+        node(&doc, "#cell"),
+        node(&doc, "#bottom"),
+    );
+    close(top.final_layout().size.width, 100.0);
+    close(top.final_layout().location.y, 0.0);
+    close(cell.final_layout().location.y, 24.0);
+    close(bottom.final_layout().location.y, 58.0);
+    let pixels = paint(&mut doc);
+    let red = bounds_where(&pixels, |pixel| *pixel == [255, 0, 0, 255]).expect("border painted");
+    assert_eq!((red.1, red.3), (20, 57), "{red:?}");
+}
+
+#[test]
+fn table_parts_outside_a_table_get_an_anonymous_table() {
+    // CSS 2.1 §17.2.1: the rows of a table made `display: block` stack in an
+    // anonymous table, and cells without a table share an anonymous row.
+    let doc = document(
+        "<table style='display:block'><tr><td id='a'>A</td></tr><tr><td id='b'>B</td></tr></table>
+         <div><div id='c' style='display:table-cell'>C</div>
+         <div id='d' style='display:table-cell'>D</div></div>",
+    );
+    let position = |selector: &str| node(&doc, selector).absolute_position(0.0, 0.0);
+    let (a, b, c, d) = (
+        position("#a"),
+        position("#b"),
+        position("#c"),
+        position("#d"),
+    );
+    close(b.x, a.x);
+    assert!(b.y > a.y, "rows stack: {a:?} {b:?}");
+    close(d.y, c.y);
+    assert!(d.x > c.x, "cells share a row: {c:?} {d:?}");
+}
+
+#[test]
+fn image_minimums_keep_the_other_specified_size() {
+    // A minimum doesn't change a specified size on the other axis (sections
+    // 10.3.2 and 10.6.2 of CSS 2.1), so an email spacer with
+    // `height:1px;min-width:300px` is 300 by 1, as in browsers, not a 300 by
+    // 300 gap.
+    let square = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(10, 10),
+    );
+    for (attributes, size) in [
+        (
+            "style='display:block;height:1px;min-width:300px'",
+            (300.0, 1.0),
+        ),
+        (
+            "style='display:block;width:1px;min-height:50px'",
+            (1.0, 50.0),
+        ),
+        (
+            "width=1 height=1 style='display:block;min-width:300px'",
+            (300.0, 1.0),
+        ),
+        (
+            "style='display:block;width:100%;height:1px;min-width:500px'",
+            (500.0, 1.0),
+        ),
+        (
+            "style='display:block;width:1px;height:1px;min-width:300px;min-height:2px'",
+            (300.0, 2.0),
+        ),
+        (
+            "style='display:block;width:1px;min-width:300px;min-height:2px'",
+            (300.0, 300.0),
+        ),
+        ("style='display:block;width:600px'", (400.0, 400.0)),
+    ] {
+        let html = format!("<img src='https://example.com/a.png' {attributes}>");
+        assert_eq!(
+            image_size_after_load(&html, &square, false),
+            size,
+            "{attributes}"
+        );
+    }
+
+    // A maximum scales both sizes, unlike in CSS 2.1, so that an image the
+    // reader's `max-width: 100%` fits to the window keeps its proportions.
+    let wide = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(20, 10),
+    );
+    assert_eq!(
+        image_size_after_load(
+            "<img src='https://example.com/a.png' width=600 height=300 style='display:block'>",
+            &wide,
+            false
+        ),
+        (400.0, 200.0)
+    );
+}
+
+#[test]
+fn lines_break_where_chromium_breaks_them() {
+    // Between two ASCII characters, Chromium breaks only where its table
+    // allows: not after a slash, so a path stays whole, but after a hyphen
+    // between digits, so a date may wrap. An inline element's padding adds
+    // no opportunity, and text that may break anywhere keeps UAX #14.
+    for (style, text, lines) in [
+        ("", "a/b/c", 1.0),
+        ("", "2026-09-10", 3.0),
+        ("", "a/<span style='padding:0 2px'>b</span>/c", 1.0),
+        ("word-break:break-all", "a/b/c", 3.0),
+    ] {
+        let doc = document(&format!(
+            "<p id='p' style='margin:0;width:1px;font:10px/20px sans-serif;{style}'>{text}</p>"
+        ));
+        close(node(&doc, "#p").final_layout().size.height, 20.0 * lines);
+    }
+}
+
+#[test]
+fn table_border_attributes_draw_borders_as_blink_does() {
+    // `bordercolor` makes the table's border and its cells' borders solid in
+    // that colour, where they were outset and inset bevels.
+    let mut doc = document(
+        "<table border=2 bordercolor='#ff0000' cellspacing=4><tr><td style='width:20px;height:20px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let red = |pixel: &[u8; 4]| *pixel == [255, 0, 0, 255];
+    assert_eq!(bounds_where(&pixels, red), Some((0, 0, 33, 33)));
+    let cell_edge = (15 * 400 + 6) * 4;
+    assert_eq!(&pixels[cell_edge..cell_edge + 4], &[255, 0, 0, 255]);
+
+    // `frame=void` hides the table's own border, and `rules=rows` draws lines
+    // between rows only, in the table's border colour.
+    let mut doc = document(
+        "<table border=3 frame=void rules=rows style='color:rgb(0,0,255)'>
+         <tr><td style='width:20px;height:10px'></td></tr>
+         <tr><td style='width:20px;height:10px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let (x0, y0, x1, y1) = bounds_where(&pixels, |pixel| pixel[2] > 128 && pixel[0] < 128).unwrap();
+    assert_eq!((x0, x1), (0, 19));
+    assert!(
+        y0 == y1 && (9..=11).contains(&y0),
+        "one rule between the rows: {y0}..{y1}"
+    );
+
+    // Cells take the table's border colour, not their own text colour.
+    let mut doc = document(
+        "<table border=1 style='border-color:rgb(0,160,0)'><tr>
+         <td style='width:20px;height:20px;color:rgb(0,0,255)'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    assert!(bounds_where(&pixels, |pixel| pixel[2] > 64 && pixel[2] > pixel[1]).is_none());
+    assert!(
+        bounds_where(&pixels, |pixel| pixel[1] > 64
+            && pixel[0] < 64
+            && pixel[2] < 64)
+        .is_some()
+    );
+}
+
+#[test]
+fn wide_tables_share_spare_width_in_proportion_to_content() {
+    // A 300px table whose auto columns want 100px, 50px and nothing gives
+    // them 200px, 100px and none, as Chromium does (CSS Tables 3 §3.9.3),
+    // where grid tracks would each grow by 50px.
+    let doc = document(
+        "<table width=300 cellspacing=0><tr>
+         <td id=a><div style='width:100px;height:5px'></div></td>
+         <td id=b><div style='width:50px;height:5px'></div></td>
+         <td id=c></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 200.0);
+    close(node(&doc, "#b").final_layout().size.width, 100.0);
+    close(node(&doc, "#c").final_layout().size.width, 0.0);
+}
+
+#[test]
+fn tables_without_columns_have_no_spacing() {
+    // As in Blink, an empty `<table cellspacing=10>` is only its border.
+    let doc = document("<table id=t cellspacing=10 style='border:2px solid'><tr></tr></table>");
+    let size = node(&doc, "#t").final_layout().size;
+    close(size.width, 4.0);
+    close(size.height, 4.0);
+}
+
+#[test]
+fn a_selection_paints_the_line_breaks_it_selects() {
+    // As in Blink, a line whose end the selection goes past ends in a box as
+    // wide as a space, which shows that its line break is selected: a
+    // selection going on into the next paragraph reaches further right than
+    // one that ends with the first.
+    let right_edge = |into_next: bool| {
+        let mut doc = document(
+            "<p id=a style='margin:0;font:20px/30px sans-serif'>ab</p>
+             <p id=b style='margin:0;font:20px/30px sans-serif'>cd</p>",
+        );
+        let a = doc.query_selector("#a").unwrap().unwrap();
+        let b = doc.query_selector("#b").unwrap().unwrap();
+        if into_next {
+            doc.set_text_selection(a, 0, b, 1);
+        } else {
+            doc.set_text_selection(a, 0, a, 2);
+        }
+        let pixels = paint(&mut doc);
+        let first_line = &pixels[..400 * 30 * 4];
+        bounds_where(first_line, |pixel| *pixel == [180, 213, 255, 255])
+            .unwrap()
+            .2
+    };
+    let (ending, going_on) = (right_edge(false), right_edge(true));
+    assert!(going_on >= ending + 3, "{ending} {going_on}");
+}
+
+#[test]
+fn highlighted_text_paints_as_blink_paints_find_matches() {
+    // Matches are yellow and the active one orange, as tall as the text
+    // rather than the line, and their text is black whatever its colour.
+    let mut doc = document(
+        "<p id=p style='margin:0;font:20px/40px sans-serif;color:rgb(255,255,255);background:rgb(0,0,128)'>one two</p>",
+    );
+    let p = doc.query_selector("#p").unwrap().unwrap();
+    doc.set_text_highlights(vec![
+        blitz_dom::TextHighlight {
+            node: p,
+            range: 0..3,
+            active: false,
+        },
+        blitz_dom::TextHighlight {
+            node: p,
+            range: 4..7,
+            active: true,
+        },
+    ]);
+    let pixels = paint(&mut doc);
+    let yellow = bounds_where(&pixels, |pixel| *pixel == [255, 255, 0, 255]).unwrap();
+    let orange = bounds_where(&pixels, |pixel| *pixel == [255, 150, 50, 255]).unwrap();
+    assert!(yellow.2 < orange.0, "{yellow:?} {orange:?}");
+    assert!(yellow.3 - yellow.1 < 30, "{yellow:?}");
+    let any_inside = |test: &dyn Fn(&[u8]) -> bool| {
+        (yellow.1..=yellow.3).any(|y| {
+            (yellow.0..=yellow.2).any(|x| {
+                let i = (y * 400 + x) * 4;
+                test(&pixels[i..i + 4])
+            })
+        })
+    };
+    assert!(any_inside(&|pixel| pixel[..3].iter().all(|&c| c < 60)));
+    assert!(!any_inside(&|pixel| pixel[..3].iter().all(|&c| c > 200)));
+}
+
+#[test]
+fn cell_percentage_padding_resolves_against_the_table() {
+    // As in Blink, a cell's percentage padding is a share of the table's
+    // content width, not of its own column, so MJML's hero spacer cell with
+    // `padding-bottom: 70%` is as tall as 70% of the table.
+    let doc = document(
+        "<table style='width:400px;border-collapse:collapse'><tr>
+         <td id=a style='width:0.01%;padding-bottom:70%'></td><td>Hero</td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 280.0);
+    // An auto-width table resolves it against the width it takes.
+    let doc = document(
+        "<table style='border-spacing:0'><tr>
+         <td id=b style='padding-bottom:50%'><div style='width:200px'></div></td></tr></table>",
+    );
+    close(node(&doc, "#b").final_layout().size.height, 100.0);
+}
+
+#[test]
+fn legacy_word_break_lets_long_words_break_in_narrow_columns() {
+    // Browsers read the `word-break: break-word` that email templates put on
+    // their cells as `overflow-wrap: anywhere`, so a long word doesn't hold
+    // its column open. Stylo drops the keyword outside Gecko.
+    let doc = document(
+        "<table style='width:200px;border-spacing:0'><tr><td style='width:50%'>a</td>
+         <td id=c style='width:50%;word-break:break-word;font:10px monospace'>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</td>
+         </tr></table>",
+    );
+    close(node(&doc, "#c").final_layout().size.width, 100.0);
+}
+
+#[test]
+fn images_that_wont_load_lay_out_with_their_alt_text() {
+    // As browsers lay out an image they can't show, one that the embedder
+    // blocks or that fails to decode takes the room of its alt text, on one
+    // line or wrapped inside a width it is given. An empty alt takes no room.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<style>body{margin:0} img{display:block;font:20px/30px sans-serif}</style>
+         <img id=a src='https://example.com/a.png' alt='Weekly header'>
+         <img id=b src='https://example.com/b.png' alt=''>
+         <img id=c src='https://example.com/c.png' alt='Hero' style='width:100%'>
+         <img id=d src='https://example.com/d.png' alt='Broken'>
+         <img id=e src='https://example.com/e.png' alt='Weekly header' style='width:80px'>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        if url.ends_with("d.png") {
+            handler.bytes(url, blitz_traits::net::Bytes::from_static(b"not an image"));
+        }
+    }
+    for url in ["a", "b", "c", "e"] {
+        doc.fail_image(&format!("https://example.com/{url}.png"));
+    }
+    doc.resolve(0.0);
+    let size = |selector| node(&doc, selector).final_layout().size;
+    assert!(size("#a").width > 60.0, "{:?}", size("#a"));
+    close(size("#a").height, 30.0);
+    assert_eq!((size("#b").width, size("#b").height), (0.0, 0.0));
+    close(size("#c").width, 400.0);
+    close(size("#c").height, 30.0);
+    assert!(size("#d").width > 30.0, "{:?}", size("#d"));
+    close(size("#d").height, 30.0);
+    close(size("#e").width, 80.0);
+    close(size("#e").height, 60.0);
+}
+
+#[test]
+fn rules_and_bevels_paint_as_blink_paints_them() {
+    // Blink shades an `inset`, `outset`, `groove` or `ridge` border whose
+    // colour is `currentcolor` from rgb(238, 238, 238), except on tables and
+    // their parts, so a default `<hr>` is pale. `<hr noshade>` fills with
+    // Blink's dark gray, `color` with the colour, and `size` sets the height.
+    let mut doc = document(
+        "<style>body{margin:0} hr{margin:0 0 10px}</style>
+         <hr id=a>
+         <hr id=b noshade size=4>
+         <hr id=c color=red size=1>
+         <hr id=d size=6>
+         <table id=t style='border:2px outset;border-spacing:0;color:rgb(0,0,255)'>
+         <tr><td style='width:20px;height:10px;padding:0'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let pixel = |x: usize, y: f32| {
+        let i = (y as usize * 400 + x) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    };
+    let top = |selector| node(&doc, selector).final_layout().location.y;
+    let height = |selector| node(&doc, selector).final_layout().size.height;
+
+    assert_eq!(pixel(100, top("#a")), [154, 154, 154, 255]);
+    assert_eq!(pixel(100, top("#a") + 1.0), [238, 238, 238, 255]);
+    close(height("#b"), 4.0);
+    assert_eq!(pixel(100, top("#b") + 2.0), [128, 128, 128, 255]);
+    close(height("#c"), 1.0);
+    assert_eq!(pixel(100, top("#c")), [255, 0, 0, 255]);
+    close(height("#d"), 6.0);
+    // The table's bevel keeps its text colour: blue, darker at the bottom.
+    let bottom = top("#t") + height("#t") - 1.0;
+    let [r, g, b, _] = pixel(10, bottom);
+    assert!(
+        r == 0 && g == 0 && (150..200).contains(&b),
+        "{:?}",
+        [r, g, b]
+    );
+}
+
+#[test]
+fn text_shadows_paint_beneath_their_text() {
+    // As in browsers, a shadow is the text drawn again, offset, beneath the
+    // line's text, the first of a list on top, and it shadows the text's
+    // decorations too.
+    let mut doc = document(
+        "<style>body{margin:0;font:bold 60px/80px sans-serif}</style>
+         <div style='text-shadow:0 0 0 rgb(255,0,0)'>H</div>
+         <div style='text-shadow:5px 5px 0 rgb(255,0,0), 5px 5px 0 rgb(0,0,255)'>H</div>
+         <div style='font-size:20px;line-height:30px;text-decoration:underline;
+                     text-shadow:0 8px 0 rgb(0,160,0)'>&nbsp;&nbsp;&nbsp;</div>",
+    );
+    let pixels = paint(&mut doc);
+    let count = |rows: std::ops::Range<usize>, test: &dyn Fn(&[u8; 4]) -> bool| {
+        pixels[rows.start * 400 * 4..rows.end * 400 * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| test(pixel))
+            .count()
+    };
+    // The canvas is transparent, so colours must be opaque to count.
+    let red = |p: &[u8; 4]| p[3] > 200 && p[0] > 200 && p[1] < 60 && p[2] < 60;
+    let blue = |p: &[u8; 4]| p[3] > 200 && p[2] > 200 && p[0] < 60 && p[1] < 60;
+    let black = |p: &[u8; 4]| p[3] > 200 && p[0] < 30 && p[1] < 30 && p[2] < 30;
+    // A shadow right under its text is covered by it.
+    assert!(count(0..80, &black) > 100);
+    assert_eq!(count(0..80, &red), 0);
+    // The first shadow covers the second.
+    assert!(count(80..160, &red) > 100);
+    assert_eq!(count(80..160, &blue), 0);
+    // The underline's shadow lies 8px under it.
+    let row_of = |color: [u8; 4]| {
+        (160..300).find(|&y| {
+            pixels[y * 400 * 4..(y + 1) * 400 * 4]
+                .as_chunks::<4>()
+                .0
+                .contains(&color)
+        })
+    };
+    let underline = row_of([0, 0, 0, 255]).expect("underline");
+    assert_eq!(row_of([0, 160, 0, 255]), Some(underline + 8));
+}
+
+#[test]
+fn lists_number_and_place_their_markers_as_browsers_do() {
+    use blitz_dom::node::Marker;
+    // `start`, `reversed`, `value` and `type` number and style a list as the
+    // HTML standard and Blink do, in the predefined counter styles, and an
+    // outside marker keeps the space after its `.`, so `1.` ends a space
+    // before the item's content as in browsers.
+    let mut doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif;color:#000}
+         ol,ul{margin:0;padding-left:40px}</style>
+         <ol reversed><li id=a>a</li><li>b</li><li>c</li></ol>
+         <ol start=-1 type=I><li>x</li><li id=b>y</li><li id=c value=4>z</li><li id=d>w</li></ol>
+         <ul type=SQUARE><li id=e>s</li></ul>
+         <ol><li type=a id=f>t</li><li style='list-style-type:hebrew' id=g>u</li></ol>
+         <ol id=h><li>x</li></ol>",
+    );
+    let marker = |selector| {
+        node(&doc, selector)
+            .element_data()
+            .unwrap()
+            .list_item_data
+            .as_ref()
+            .map(|data| data.marker.clone())
+    };
+    let string = |text: &str| Some(Marker::String(text.to_string()));
+    assert_eq!(marker("#a"), string("3. "));
+    // Roman numerals start at 1, so 0 is decimal.
+    assert_eq!(marker("#b"), string("0. "));
+    assert_eq!(marker("#c"), string("IV. "));
+    assert_eq!(marker("#d"), string("V. "));
+    assert_eq!(marker("#e"), Some(Marker::Char('▪')));
+    assert_eq!(marker("#f"), string("a. "));
+    assert_eq!(marker("#g"), string("2. "));
+
+    let pixels = paint(&mut doc);
+    let list = node(&doc, "#h").final_layout();
+    let (y0, y1) = (
+        list.location.y as usize,
+        (list.location.y + list.size.height) as usize,
+    );
+    let marker_end = (0..40)
+        .rev()
+        .find(|&x| (y0..y1).any(|y| pixels[(y * 400 + x) * 4 + 3] > 128))
+        .expect("marker ink");
+    assert!(marker_end < 36, "the marker ends at {marker_end}");
+}
+
+#[test]
+fn a_br_that_clears_floats_starts_the_next_line_below_them() {
+    // As in browsers, `<br clear>` moves the line after it below the floats
+    // it clears, and the block grows to hold it. A trailing one only adds the
+    // clearance, so the block ends with its float.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} .f{float:left;width:40px;height:50px}</style>
+         <div id=a style='width:300px'><div class=f></div>beside<br clear=all>after</div>
+         <div id=b style='width:300px'><div class=f></div>beside<br clear=right>still beside</div>
+         <div id=c style='width:300px'><div class=f></div>trailing<br clear=ALL></div>",
+    );
+    let height = |selector| node(&doc, selector).final_layout().size.height;
+    // The line after the `<br>` starts below the 50px float.
+    close(height("#a"), 70.0);
+    // Nothing floats on the right, so both lines stay beside the float.
+    close(height("#b"), 40.0);
+    close(height("#c"), 50.0);
+}
+
+#[test]
+fn background_attributes_set_background_images() {
+    // A table's, a table part's or the body's `background` attribute is a
+    // background image, resolved against the document's URL like Blink's.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<body background='https://example.com/body.png'><table background='table.png'><tr>
+         <td background=' cell.png '>a</td><td background=''>b</td></tr></table></body>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            base_url: Some("https://example.com/mail/".to_string()),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    let mut requested: Vec<String> = images
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(url, _)| url.clone())
+        .collect();
+    requested.sort();
+    assert_eq!(
+        requested,
+        [
+            "https://example.com/body.png",
+            "https://example.com/mail/cell.png",
+            "https://example.com/mail/table.png",
+        ]
+    );
+}
+
+#[test]
+fn a_line_that_breaks_at_a_soft_hyphen_ends_with_a_hyphen() {
+    // As in browsers, a line broken at a soft hyphen shows a hyphen, while
+    // one broken at a `<wbr>` shows nothing more.
+    let mut doc = document(
+        "<style>body{margin:0;font:20px/30px monospace;color:#000} div{width:70px}</style>
+         <div>aaaa&shy;bbbb</div><div>aaaa<wbr>bbbb</div>",
+    );
+    let pixels = paint(&mut doc);
+    let ink_end = |rows: std::ops::Range<usize>| {
+        (0..400)
+            .rev()
+            .find(|&x| rows.clone().any(|y| pixels[(y * 400 + x) * 4 + 3] > 128))
+            .expect("ink")
+    };
+    let hyphenated = ink_end(0..30);
+    let broken = ink_end(60..90);
+    assert!(hyphenated > broken + 5, "{hyphenated} vs {broken}");
+}
+
+#[test]
+fn images_without_a_usable_source_lay_out_with_their_alt_text() {
+    // An image whose `src` is missing, empty or doesn't resolve (here a
+    // relative URL in a document without a base) is broken, as browsers
+    // treat it, so it takes the room of its alt text. With an empty alt it
+    // takes none.
+    let doc = document(
+        "<style>body{margin:0} img{display:block;font:20px/30px sans-serif}</style>
+         <img id=a alt='Logo'><img id=b src='' alt='Logo'>
+         <img id=c src='images/logo.png' alt='Logo'><img id=d src='' alt=''>",
+    );
+    let size = |selector| node(&doc, selector).final_layout().size;
+    for selector in ["#a", "#b", "#c"] {
+        assert!(
+            size(selector).width > 30.0,
+            "{selector} {:?}",
+            size(selector)
+        );
+        close(size(selector).height, 30.0);
+    }
+    assert_eq!((size("#d").width, size("#d").height), (0.0, 0.0));
+}
+
+#[test]
+fn percentage_columns_share_auto_tables_as_blink_does() {
+    // An auto-width table whose columns all have percentages is as wide as
+    // its widest column needs at its percentage, within its room, as Blink
+    // estimates it, and the columns share it in proportion to their
+    // percentages, spare width included.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} table{border-spacing:0} div div{height:10px}</style>
+         <div style='width:400px'><table><tr><td id=a style='width:87.5%'>a long line of
+         text that is wider than the table can be at its widest</td></tr></table></div>
+         <table id=b><tr><td width='50%'><div style='width:40px'></div></td></tr></table>
+         <table><tr><td id=c1 width='30%'><div style='width:30px'></div></td>
+         <td id=c2 width='30%'><div style='width:30px'></div></td></tr></table>
+         <table><tr><td id=d1 width='25%'><div style='width:50px'></div></td>
+         <td id=d2 width='75%'><div style='width:30px'></div></td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 400.0);
+    close(width("#b"), 80.0);
+    close(width("#c1"), 50.0);
+    close(width("#c2"), 50.0);
+    close(width("#d1"), 50.0);
+    close(width("#d2"), 150.0);
+}
+
+#[test]
+fn cells_fill_their_columns_and_ignore_percentage_max_widths() {
+    // As in Blink, a cell always fills its column: a length `max-width` only
+    // limits what the cell asks of the column, and a percentage one is
+    // ignored.
+    let doc = document(
+        "<style>body{margin:0;font:16px/20px sans-serif} table{border-spacing:0}</style>
+         <table style='width:400px'><tr><td id=a style='width:200px;max-width:33.333%'>a</td>
+         <td>b</td></tr></table>
+         <table><tr><td id=b style='max-width:100px'>a length max-width keeps this
+         cell within a hundred pixels</td><td>b</td></tr></table>
+         <table style='width:400px'><tr><td id=c style='max-width:100px'>short</td>
+         <td style='width:50px'>b</td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 200.0);
+    close(width("#b"), 100.0);
+    close(width("#c"), 350.0);
+}
+
+#[test]
+fn an_inline_that_holds_a_block_splits_around_it() {
+    // As in browsers (CSS 2.1 section 9.2.1.1), the block sits between the
+    // inline content before and after it, and the inline's parts share lines
+    // with that content: text before a link and the link's text before the
+    // block share a line, as do its text after the block and a `<br>` after
+    // the link. The link's padding and border stay on its own lines, and a
+    // `<br>` right after a link that holds only a block makes an empty line,
+    // where the link keeps the box of the block.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} .c{width:300px} .b{height:50px}</style>
+         <div class=c id=c1><a href='#'><div class=b id=b1></div>tail</a><br>text</div>
+         <div class=c id=c2>before <a href='#'>link <div class=b id=b2></div>tail</a> after</div>
+         <div class=c id=c3><a href='#' style='padding:0 10px;border:2px solid blue'><div class=b id=b3></div></a>text</div>
+         <div class=c id=c4><span>a <a href='#'>b <div class=b id=b4></div> c</a> d</span> e</div>
+         <div class=c id=c5><a href='#' id=a5><div class=b id=b5></div></a><br>text</div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    close(layout("#b1").location.y, 0.0);
+    close(layout("#c1").size.height, 110.0);
+    for (block, container) in [("#b2", "#c2"), ("#b3", "#c3"), ("#b4", "#c4")] {
+        close(layout(block).location.y, 30.0);
+        close(layout(container).size.height, 110.0);
+    }
+    close(layout("#b3").location.x, 0.0);
+    close(layout("#b3").size.width, 300.0);
+    close(layout("#c5").size.height, 110.0);
+    close(layout("#a5").size.height, 50.0);
+}
+
+#[test]
+fn each_part_of_a_split_inline_has_its_own_line_box() {
+    // Hit testing and selection find a text's line box through its layout
+    // parent, which for a link's text before the block is the anonymous
+    // block before it, and for its text after the block the one after it.
+    let doc = document(
+        "<div id=c style='width:300px'>before <a id=a href='#'>link <div id=b>block</div>tail</a> after</div>",
+    );
+    let children = node(&doc, "#c").layout_children.borrow().clone().unwrap();
+    assert_eq!(children.len(), 3);
+    let text = |id| {
+        let node = doc.get_node(id).unwrap();
+        let layout = node.element_data().unwrap().inline_layout_data.as_ref();
+        layout.unwrap().text.trim().to_string()
+    };
+    assert_eq!(text(children[0]), "before link");
+    assert_eq!(children[1], node(&doc, "#b").id);
+    assert_eq!(text(children[2]), "tail after");
+    let link = node(&doc, "#a");
+    let root_of = |id| doc.get_node(id).unwrap().inline_root_ancestor().unwrap().id;
+    assert_eq!(root_of(link.children[0]), children[0]);
+    assert_eq!(root_of(link.children[2]), children[2]);
+}
+
+#[test]
+fn restyling_a_split_inline_lays_out_both_of_its_parts() {
+    let mut doc = document(
+        "<div id=c style='width:300px;font:20px/30px sans-serif'><a id=a href='#'>link<div id=b style='height:50px'></div>tail</a></div>",
+    );
+    close(node(&doc, "#b").final_layout().location.y, 30.0);
+    close(node(&doc, "#c").final_layout().size.height, 110.0);
+    let link = node(&doc, "#a").id;
+    doc.set_style_property(link, "line-height", "60px");
+    doc.resolve(0.0);
+    close(node(&doc, "#b").final_layout().location.y, 60.0);
+    close(node(&doc, "#c").final_layout().size.height, 170.0);
+}
+
+#[test]
+fn a_split_inline_has_its_edges_only_where_it_starts_and_ends() {
+    // As in browsers, the block cuts the link's box: its left border is on
+    // the line before the block, its right border on the line after it, and
+    // no border goes around the block.
+    let mut doc = document(
+        "<style>body{font:20px/30px sans-serif}</style><div style='width:300px'><a href='#'
+         style='padding:0 10px;border:2px solid #00f'><div style='height:50px;background:#f00'></div></a>text</div>",
+    );
+    let pixels = paint(&mut doc);
+    let at = |x: usize, y: usize| <[u8; 4]>::try_from(&pixels[(y * 400 + x) * 4..][..4]).unwrap();
+    assert_eq!(at(0, 15), [0, 0, 255, 255], "start edge before the block");
+    assert_ne!(at(11, 15), [0, 0, 255, 255], "cut after the start");
+    assert_eq!(at(1, 55), [255, 0, 0, 255], "the block without a border");
+    assert_eq!(at(11, 95), [0, 0, 255, 255], "end edge after the block");
+    assert_ne!(at(0, 95), [0, 0, 255, 255], "cut before the end");
+}
+
+#[test]
+fn an_inline_table_sits_on_its_first_rows_baseline() {
+    // As in Blink, a row's baseline is its baseline-aligned cells' first
+    // baseline, and without one, as with the `middle` cells of most tables,
+    // the bottom of the row, so the line's descent goes below the table. A
+    // table's `valign` sets its own `vertical-align`, as in Blink.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{display:inline-table;border-spacing:0}</style>
+         <div id=a><table id=ta><tr><td>First<br>Second</td></tr></table></div>
+         <div id=b><table id=tb><tr><td style='vertical-align:baseline'>First<br>Second</td></tr></table></div>
+         <div id=c><table id=tc valign=top><tr><td>First<br>Second</td></tr></table></div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    for table in ["#ta", "#tb", "#tc"] {
+        close(layout(table).size.height, 60.0);
+    }
+    assert!(layout("#a").size.height > 63.0, "{:?}", layout("#a").size);
+    close(layout("#b").size.height, 60.0);
+    close(layout("#c").size.height, 60.0);
+}
+
+#[test]
+fn an_inline_tables_baseline_is_below_its_captions() {
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{display:inline-table;border-spacing:0}</style>
+         <div id=a style='font:40px/60px sans-serif'>x <table id=t style='font:20px/30px sans-serif'>
+         <caption>Caption</caption><tr><td style='vertical-align:baseline'>A</td></tr></table></div>",
+    );
+    // The row's baseline is the table's, 30px below its top here, so the
+    // table's top is at the top of the line, which the caption fills.
+    close(node(&doc, "#t").final_layout().location.y, 0.0);
+}
+
+#[test]
+fn a_table_is_never_narrower_than_its_captions() {
+    // As in Blink, a caption's min-content width, here its longest word, is
+    // a minimum of the table's width, so the caption doesn't break inside
+    // its words to fit columns that are narrower.
+    let doc = document(
+        "<style>body{font:20px/30px sans-serif} table{border-spacing:0}</style>
+         <table id=t><caption>Wide caption</caption><tr><td>A</td></tr></table>
+         <div id=w style='display:inline-block'>caption</div>",
+    );
+    let table = node(&doc, "#t").final_layout().size.width;
+    let word = node(&doc, "#w").final_layout().size.width;
+    assert!(table >= word - 0.5, "{table} < {word}");
+}
+
+#[test]
+fn fixed_layout_columns_share_the_table_as_blink_does() {
+    // As in Blink, percentages with their cells' padding scale down to fit
+    // the table, length and percentage columns scale up to fill it when no
+    // auto column takes the rest, and length columns wider than the table
+    // widen it (CSS 2.1 section 17.5.2.1).
+    let doc = document(
+        "<style>table{width:400px;table-layout:fixed;border-spacing:0}</style>
+         <table><tr><td id=a1 style='width:25%;padding-right:16px;border-right:1px solid'></td>
+         <td id=b1 style='width:75%;padding-left:16px'></td></tr></table>
+         <table><tr><td id=a2 style='width:100px'></td><td id=b2 style='width:100px'></td></tr></table>
+         <table><tr><td id=a3 style='width:100px'></td><td id=b3></td><td id=c3></td></tr></table>
+         <table id=t4><tr><td style='width:300px'></td><td style='width:200px'></td></tr></table>
+         <table><tr><td id=a5 style='width:20%'></td><td id=b5 style='width:30%'></td></tr></table>
+         <table><tr><td id=a6 style='width:100px'></td><td id=b6 style='width:50%'></td><td id=c6></td></tr></table>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    for (selector, expected) in [
+        ("#a1", 108.1),
+        ("#b1", 291.9),
+        ("#a2", 200.0),
+        ("#b2", 200.0),
+        ("#a3", 100.0),
+        ("#b3", 150.0),
+        ("#c3", 150.0),
+        ("#t4", 500.0),
+        ("#a5", 160.0),
+        ("#b5", 240.0),
+        ("#a6", 100.0),
+        ("#b6", 200.0),
+        ("#c6", 100.0),
+    ] {
+        close(width(selector), expected);
+    }
+}
+
+#[test]
+fn an_auto_table_widens_to_its_columns_within_its_container() {
+    // As in browsers, a table narrower than its columns' minimums widens to
+    // them. Only where they would overflow its container do text-only cells
+    // break their words instead, once the table takes all the room it has.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} html,body{overflow-wrap:break-word}
+         table{border-spacing:0}</style>
+         <div style='width:400px'><table id=a style='width:60px'><tr><td>Alimentari</td>
+         <td>Riuniti</td></tr></table></div>
+         <div style='width:100px'><table id=b style='width:60px'><tr><td>Alimentari</td>
+         <td>Riuniti</td></tr></table></div>
+         <span id=w style='display:inline-block'>Alimentari</span>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    assert!(
+        width("#a") > width("#w") + 20.0,
+        "{} {}",
+        width("#a"),
+        width("#w")
+    );
+    assert!(width("#a") < 400.0, "{}", width("#a"));
+    close(width("#b"), 100.0);
+}
+
+#[test]
+fn collapsed_borders_follow_the_rows_below_a_caption() {
+    // A caption above the table moves its rows down, and the borders the
+    // table paints for them in the collapsing model go with them.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'><caption style='height:40px'></caption>
+         <tr><td style='border:2px solid #00f;width:50px;height:20px'></td></tr></table>",
+    );
+    let pixels = paint(&mut doc);
+    let blue = |y: usize| pixels[(y * 400 + 25) * 4..][..4] == [0, 0, 255, 255];
+    let rows: Vec<usize> = (0..80).filter(|&y| blue(y)).collect();
+    assert!(
+        !rows.is_empty() && rows.iter().all(|&y| y >= 39),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn a_details_lays_out_its_summary_first_and_hides_the_rest_while_closed() {
+    // As its shadow tree has it in browsers, a closed `<details>` shows only
+    // its summary, text included, and an open one shows its summary first,
+    // wherever it is, and everything else after it in one block.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif}</style>
+         <details id=a><summary id=s>Sum</summary>Hidden bare text</details>
+         <details id=b open>Before <summary id=t>Sum</summary> after</details>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    close(layout("#a").size.height, layout("#s").size.height);
+    close(layout("#t").location.y, 0.0);
+    close(layout("#b").size.height, layout("#t").size.height + 20.0);
+}
+
+#[test]
+fn empty_inline_elements_make_no_line_and_keep_their_blocks_sizes() {
+    // A line box with only an empty inline element and white space that
+    // collapses away is a zero-height line box (CSS 2.1 section 9.4.2), so
+    // margins collapse through it, and a block that holds one keeps its own
+    // size, as a spacer with an anchor or an empty span in it does.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} ul{margin:16px 0}
+         h1{margin:21px 0;font-size:32px;line-height:38px}</style>
+         <ul id=u><li>x</li></ul>
+         <a name=x></a>
+         <h1 id=h>Title</h1>
+         <div id=a style='height:20px'><span></span></div>
+         <div id=b style='min-height:30px'><a name=y></a></div>",
+    );
+    let layout = |selector| *node(&doc, selector).final_layout();
+    let list = layout("#u");
+    close(
+        layout("#h").location.y,
+        list.location.y + list.size.height + 21.0,
+    );
+    close(layout("#a").size.width, 400.0);
+    close(layout("#a").size.height, 20.0);
+    close(layout("#b").size.height, 30.0);
+}
+
+#[test]
+fn a_line_with_only_an_atomic_inline_without_height_keeps_its_strut() {
+    // An image, inline block or inline table is in-flow content even when it
+    // has no height (CSS 2.1 section 9.4.2), so its line is as tall as the
+    // block's line height, as in browsers.
+    let doc = document(
+        "<style>div{font:50px/1 sans-serif}</style>
+         <div id=a><img width=20 height=0 src='images/spacer.gif'></div>
+         <div id=b><span style='display:inline-block'></span></div>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 50.0);
+    close(node(&doc, "#b").final_layout().size.height, 50.0);
+}
+
+#[test]
+fn lang_matches_the_nearest_language_by_extended_filtering() {
+    // An element's language is its own `lang` or its nearest ancestor's, which
+    // `:lang()` matches by RFC 4647 extended filtering (Selectors 4 section
+    // 7.2), so a regional German matches `:lang(de)`, and an empty language
+    // matches nothing, as in browsers.
+    let doc = document(
+        "<style>div{height:10px} :lang(de){width:100px} p:lang(fr){width:200px}</style>
+         <div id=a lang=de-CH></div>
+         <div id=b lang=en></div>
+         <div lang=fr><p id=c></p></div>
+         <div lang=de style='width:300px'><div id=d lang=''></div></div>",
+    );
+    let width = |selector| node(&doc, selector).final_layout().size.width;
+    close(width("#a"), 100.0);
+    close(width("#b"), 400.0);
+    close(width("#c"), 200.0);
+    close(width("#d"), 300.0);
+}
+
+#[test]
+fn superscripts_and_subscripts_shift_as_far_as_in_blink() {
+    // Blink and WebKit raise `vertical-align: super` by a third of the
+    // parent's font size and lower `sub` by a fifth of it, each plus a pixel,
+    // so these lines are 26.3 and 24.2 pixels tall in Chrome.
+    let doc = document(
+        "<style>p{margin:0;font:16px/20px sans-serif}</style>
+         <p id=a>x<span style='vertical-align:super'>y</span></p>
+         <p id=b>x<span style='vertical-align:sub'>y</span></p>",
+    );
+    close(node(&doc, "#a").final_layout().size.height, 26.3);
+    close(node(&doc, "#b").final_layout().size.height, 24.2);
+}
+
+#[test]
+fn shrink_to_fit_widths_keep_their_fractions_and_lines() {
+    // A float is as wide as its content to the fraction, as in browsers,
+    // where Blitz rounded it up to a whole pixel, and content that just fits
+    // stays on one line (upstream #1375 and #1449).
+    let doc = document(
+        "<div id=f style='float:left'><span id=a style='display:inline-block;width:10.25px;height:5px'></span><span id=b style='display:inline-block;width:20.5px;height:5px'></span></div>",
+    );
+    let width = node(&doc, "#f").unrounded_layout().size.width;
+    assert!((width - 30.75).abs() < 0.01, "{width} != 30.75");
+    let a = node(&doc, "#a").unrounded_layout().location;
+    let b = node(&doc, "#b").unrounded_layout().location;
+    assert_eq!(a.y, b.y);
+    assert!((b.x - 10.25).abs() < 0.01, "{} != 10.25", b.x);
+}
+
+#[test]
+fn a_fixed_table_with_a_percentage_width_fills_the_box_around_it() {
+    // Blink makes a fixed-layout table with a percentage width a million
+    // pixels wide at its max-content size, so a float or an auto-width table
+    // around one takes all the room it has, as the columns around SendGrid's
+    // image wrappers do on phones, whatever the images' sizes.
+    let doc = document(
+        "<div id=f style='float:left'><table style='table-layout:fixed;width:100%'><tr><td><div style='width:10px;height:10px'></div></td></tr></table></div>
+         <div style='clear:both'></div>
+         <table id=t><tr><td><table style='table-layout:fixed;width:100%'><tr><td><div style='width:10px;height:10px'></div></td></tr></table></td></tr></table>",
+    );
+    close(node(&doc, "#f").final_layout().size.width, 400.0);
+    close(node(&doc, "#t").final_layout().size.width, 400.0);
+}
+
+#[test]
+fn a_fixed_size_inline_block_keeps_its_baseline_when_its_cell_is_measured() {
+    // An inline block whose styles fix its size sits on its text's baseline
+    // when a table measures its cell, as it does when laid out, so the row is
+    // as tall as the line, 32 pixels as in Chrome. It sat on its bottom edge
+    // while measured, which made the row about 8 pixels taller.
+    let doc = document(
+        "<style>table{border-spacing:0} span{display:inline-block;width:32px;height:32px;line-height:32px;font-size:16px}</style>
+         <table id=t><tr><td><div style='font:15px/1.65 sans-serif'><span>A</span></div></td></tr></table>",
+    );
+    close(node(&doc, "#t").final_layout().size.height, 32.0);
+}
+
+#[test]
+fn a_block_level_replaced_element_shrinks_with_its_column() {
+    // A replaced element whose `max-width` is a percentage adds nothing to
+    // its column's minimum width (CSS Sizing 3 section 5.2.2) when it is
+    // block-level as when it is inline, as in Chrome, so a table column
+    // holding a `display: block` image can shrink on a narrow screen. An
+    // image showing its alt text keeps its width, as a broken one in Chrome.
+    let doc = document(
+        "<style>table{border-spacing:0}</style>
+         <table style='width:1px'><tr><td id=a><canvas style='display:block;width:48px;max-width:100%'></canvas></td></tr></table>
+         <table style='width:1px'><tr><td id=b><canvas style='display:block;width:48px'></canvas></td></tr></table>
+         <table style='width:1px'><tr><td id=c><img alt='editorialista' style='display:block;width:48px;max-width:100%'></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 1.0);
+    close(node(&doc, "#b").final_layout().size.width, 48.0);
+    close(node(&doc, "#c").final_layout().size.width, 48.0);
+}
+
+#[test]
+fn percentage_columns_share_the_whole_table_in_proportion() {
+    // The percentage columns of a table with a set width and no other
+    // columns share all of its width in proportion to their percentages, as
+    // in browsers, also when the percentages fall short of 100% or a column's
+    // content outgrows its percentage. Part of the table was left empty.
+    let doc = document(
+        "<table width=300 cellspacing=0><tr><td id=a width='40%'>a</td><td id=b width='40%'>b</td></tr></table>
+         <table width=300 cellspacing=0><tr><td id=c width='75%'>c</td><td id=d width='25%'><div style='width:120px'></div></td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 150.0);
+    close(node(&doc, "#b").final_layout().size.width, 150.0);
+    close(node(&doc, "#c").final_layout().size.width, 180.0);
+    close(node(&doc, "#d").final_layout().size.width, 120.0);
+}
+
+#[test]
+fn an_inline_block_of_blocks_sits_on_its_last_line() {
+    // An inline block's baseline is that of its last line box (CSS 2.1
+    // section 10.8.1), also when its lines are in block children, so a
+    // one-line inline block beside a three-line one lines up with the last
+    // line, as in browsers, in a table cell too. Taffy's block layout reports
+    // a first baseline only, so it lined up with the first.
+    let doc = document(
+        "<style>body{font:16px/20px sans-serif} p{margin:0} .c{display:inline-block;width:150px}</style>
+         <div><div class=c><p>One</p><p>Two</p><p>Three</p></div><div id=b class=c><p>Only one</p></div></div>
+         <table cellspacing=0><tr><td id=t><div class=c><p>One</p><p>Two</p><p>Three</p></div><div id=c class=c><p>Only one</p></div></td></tr></table>",
+    );
+    close(node(&doc, "#b").final_layout().location.y, 40.0);
+    close(node(&doc, "#c").final_layout().location.y, 40.0);
+    close(node(&doc, "#t").final_layout().size.height, 60.0);
+}
+
+#[test]
+fn a_preserved_tab_advances_to_its_tab_stop_and_copies_as_a_tab() {
+    // A preserved tab advances to the next multiple of `tab-size` columns
+    // (CSS Text 3 section 4.2), which in the monospace font `<pre>` has is
+    // that many spaces, so it is as wide as them, and copies as the tab. It
+    // was drawn as a missing glyph.
+    let mut doc = document(
+        "<style>pre{display:inline-block;margin:0}</style>
+         <div><pre id=a>ab\tc</pre></div>
+         <div><pre id=b>ab      c</pre></div>
+         <div><pre id=c style='tab-size:4'>ab\tc</pre></div>
+         <div><pre id=d>ab  c</pre></div>",
+    );
+    let width = |doc: &HtmlDocument, selector| node(doc, selector).final_layout().size.width;
+    close(width(&doc, "#a"), width(&doc, "#b"));
+    close(width(&doc, "#c"), width(&doc, "#d"));
+    let a = doc.query_selector("#a").unwrap().unwrap();
+    let len = doc
+        .get_node(a)
+        .unwrap()
+        .element_data()
+        .unwrap()
+        .inline_layout_data
+        .as_ref()
+        .unwrap()
+        .text
+        .len();
+    doc.set_text_selection(a, 0, a, len);
+    assert_eq!(doc.get_selected_text().as_deref(), Some("ab\tc"));
+}
+
+#[test]
+fn the_root_or_body_background_covers_the_canvas_once() {
+    // The root element's background, or the body's when the root has none,
+    // is the canvas background (CSS Backgrounds 3 section 2.11): it covers
+    // the body's margins and the canvas below the root's box, is tiled from
+    // the root's box, and isn't painted again in the element's own box.
+    let tile = image::RgbaImage::from_fn(10, 10, |x, _| {
+        image::Rgba(if x < 5 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 255, 255]
+        })
+    });
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::ImageRgba8(tile),
+    );
+    let paint = |html: &str| {
+        let images = std::sync::Arc::new(HeldImages::default());
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                net_provider: Some(images.clone()),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        for (url, handler) in images.0.lock().unwrap().drain(..) {
+            handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(&png));
+        }
+        doc.resolve(0.0);
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+            400,
+            300,
+        )
+    };
+    let at = |pixels: &[u8], x: usize, y: usize| -> [u8; 4] {
+        pixels[(y * 400 + x) * 4..][..4].try_into().unwrap()
+    };
+    let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+
+    let pixels = paint(
+        "<body style='margin:12px;background:url(https://example.com/tile.png)'>
+         <div style='height:50px'></div></body>",
+    );
+    assert_eq!(at(&pixels, 2, 2), red);
+    assert_eq!(at(&pixels, 7, 2), blue);
+    assert_eq!(at(&pixels, 2, 250), red);
+    // Tiled from the root's box at 0, not the body's at 12
+    assert_eq!(at(&pixels, 10, 20), red);
+    assert_eq!(at(&pixels, 15, 20), blue);
+
+    // A root background keeps the body's in the body's box
+    let pixels = paint(
+        "<html style='background:url(https://example.com/tile.png)'>
+         <body style='margin:20px;background:#0f0'><div style='height:50px'></div></body></html>",
+    );
+    assert_eq!(at(&pixels, 2, 2), red);
+    assert_eq!(at(&pixels, 30, 30), [0, 255, 0, 255]);
+    assert_eq!(at(&pixels, 2, 250), red);
+
+    // A translucent root background is painted once
+    let pixels = paint(
+        "<html style='background:rgba(255,0,0,0.5)'><body><div style='height:50px'></div></body></html>",
+    );
+    let alpha = at(&pixels, 5, 5)[3];
+    assert!((126..=130).contains(&alpha), "{alpha}");
+}
+
+#[test]
+fn ex_and_cap_come_from_the_glyphs_when_the_font_does_not_give_them() {
+    // A font whose OS/2 table is version 1, as DejaVu's is, gives no x-height
+    // or cap height. As in browsers, `ex` and `cap` then measure the top of
+    // its "x" and "H", which match the values this font gives. They were half
+    // an em and the ascent.
+    let font = include_bytes!(
+        "../../../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf"
+    );
+    let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+    let os2 = (0..tables)
+        .map(|index| &font[12 + 16 * index..28 + 16 * index])
+        .find(|record| &record[..4] == b"OS/2")
+        .unwrap();
+    let os2 = u32::from_be_bytes(os2[8..12].try_into().unwrap()) as usize;
+    let mut version_1 = font.to_vec();
+    version_1[os2..os2 + 2].copy_from_slice(&1u16.to_be_bytes());
+    let widths = |font: Vec<u8>| {
+        let mut font_ctx = blitz_dom::FontContext::default();
+        font_ctx.collection.register_fonts(font.into(), None);
+        let mut doc = HtmlDocument::from_html(
+            "<div id=ex style=\"font:20px 'Google Sans Flex';width:10ex\"></div>
+             <div id=cap style=\"font:20px 'Google Sans Flex';width:10cap\"></div>",
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                font_ctx: Some(font_ctx),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        let width = |selector| node(&doc, selector).final_layout().size.width;
+        (width("#ex"), width("#cap"))
+    };
+    let (ex, cap) = widths(font.to_vec());
+    let (glyph_ex, glyph_cap) = widths(version_1);
+    close(ex, 102.0);
+    close(glyph_ex, ex);
+    close(glyph_cap, cap);
 }

@@ -166,6 +166,7 @@ fn android_main(app: slint::android::AndroidApp) {
         Ok(spelling) => platform.spelling = Some(std::sync::Arc::new(spelling)),
         Err(error) => tracing::warn!(%error, "spell checking unavailable"),
     }
+    platform.qr_scanner = Some(std::sync::Arc::new(qr_scanner::AndroidQrScanner::new(&app)));
     slint::android::init(app).expect("failed to initialize Slint's Android backend");
     flectar_mail::run(platform).expect("Flectar Mail terminated with an error");
     // Work that outlives the activity, such as a check for new mail, asks
@@ -201,6 +202,7 @@ mod motion;
 mod pdf;
 #[cfg(target_os = "android")]
 mod proxy;
+mod qr_scanner;
 #[cfg(target_os = "android")]
 mod spelling;
 #[cfg(target_os = "android")]
