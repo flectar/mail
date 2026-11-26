@@ -419,6 +419,7 @@ pub(super) fn render_current(
         state.conversation_messages.clear();
         state.conversation_selected_index = 0;
         state.conversation_rows.set_vec(Vec::new());
+        state.kept.clear();
         app.global::<ReaderUi>().set_email_tiles(Default::default());
         app.global::<ReaderUi>().set_email_links(Default::default());
         return Ok(());
@@ -514,6 +515,7 @@ pub(super) fn render_current(
         state.conversation_messages.clear();
         state.conversation_selected_index = 0;
         state.conversation_rows.set_vec(Vec::new());
+        state.kept.clear();
         drop(state);
         // "View plain text" is a message action, not a global display mode.
         app.global::<ReaderUi>().set_text_mode(false);
@@ -635,6 +637,23 @@ pub(super) fn render_current(
     if let Some(email) = selected_email {
         let email_id = email.id;
         let thread_subject = email.subject.clone();
+        // Messages kept open follow the conversation's active message (#435).
+        {
+            let mut state = state.borrow_mut();
+            let state = &mut *state;
+            let active = (state.conversation_owner_id == Some(email_id))
+                .then(|| {
+                    state
+                        .conversation_messages
+                        .get(state.conversation_selected_index)
+                })
+                .flatten()
+                .map(|message| message.id);
+            match active {
+                Some(active) => kept_messages::reconcile(app, state, active),
+                None => state.kept.clear(),
+            }
+        }
         let (mut display_email, conversation_ready, conversation_selected_index, sent_here) = {
             let state = state.borrow();
             let conversation_ready = state.conversation_owner_id == Some(email_id)
@@ -659,17 +678,22 @@ pub(super) fn render_current(
                 .flatten()
                 .unwrap_or(email);
             if conversation_ready {
+                let viewport_width = email_viewport_size(&ReaderRef::main(app)).0 as f32;
+                let kept = kept_messages::rows(&state, viewport_width);
                 reconcile_model_rows_by(
                     &state.conversation_rows,
                     make_thread_rows(
                         &state.conversation_messages,
                         state.conversation_selected_index,
                         &favicon_icons,
+                        &kept,
                     ),
                     |row| row.index,
                     PartialEq::eq,
                 );
             }
+            app.global::<OpenMessages>()
+                .set_count(i32::try_from(state.kept.open.count()).unwrap_or(i32::MAX));
             (
                 display_email,
                 conversation_ready,
@@ -710,16 +734,24 @@ pub(super) fn render_current(
         );
         reminder.set_open_due(display_email.reply_reminder_due);
         reminder.set_can_remind(sent_here);
-        apply_email(
+        let applied = apply_email(
             &ReaderRef::main(app),
             display_email,
             &email_renderer,
             use_wgpu,
             allow_remote_images,
-        )
+        );
+        // Messages kept open show their messages as they are now.
+        let mut state = state.borrow_mut();
+        if kept_messages::paint(app, &mut state) {
+            refresh_thread_rows(app, &state);
+        }
+        applied
     } else {
         app.global::<EmailReader>().invoke_ensure_body(-1);
         email_renderer.borrow_mut().clear();
+        state.borrow_mut().kept.clear();
+        app.global::<OpenMessages>().set_count(1);
         app.global::<ReaderUi>().set_selected_sender("".into());
         app.global::<ReaderUi>().set_selected_address("".into());
         app.global::<ReaderUi>()
@@ -790,10 +822,13 @@ pub(super) fn select_thread_message(
     render_current(app, state, runtime)
 }
 
+/// The rows of a conversation. `kept` gives each row's message kept open, if
+/// any, in the same order (#435).
 pub(super) fn make_thread_rows(
     messages: &[MailMessage],
     selected_index: usize,
     favicon_icons: &HashMap<String, FaviconImages>,
+    kept: &[kept_messages::KeptRow],
 ) -> Vec<ThreadMessageRow> {
     let now = Local::now();
     messages
@@ -802,6 +837,7 @@ pub(super) fn make_thread_rows(
         .map(|(index, message)| {
             let favicons = favicon_icons.get(&message.domain);
             let favicon = favicons.map(|icons| slint_image(&icons.regular));
+            let kept = kept.get(index).cloned().unwrap_or_default();
             ThreadMessageRow {
                 index: i32::try_from(index).unwrap_or(i32::MAX),
                 sender: message.sender.clone().into(),
@@ -819,9 +855,36 @@ pub(super) fn make_thread_rows(
                 outgoing: message.is_outgoing,
                 body_pending: message.body_pending,
                 selected: index == selected_index,
+                open: kept.layout.open,
+                body_aspect: kept.layout.body_aspect,
+                body_extra: kept.layout.body_extra,
+                aspect_above: kept.layout.aspect_above,
+                extra_above: kept.layout.extra_above,
+                width_ratio: kept.width_ratio,
+                tiles: kept.tiles,
             }
         })
         .collect()
+}
+
+/// Build the conversation's rows again, after a message kept open was
+/// painted or changed height.
+pub(super) fn refresh_thread_rows(app: &AppWindow, state: &InboxState) {
+    let viewport_width = email_viewport_size(&ReaderRef::main(app)).0 as f32;
+    let kept = kept_messages::rows(state, viewport_width);
+    reconcile_model_rows_by(
+        &state.conversation_rows,
+        make_thread_rows(
+            &state.conversation_messages,
+            state.conversation_selected_index,
+            &state.favicon_icons,
+            &kept,
+        ),
+        |row| row.index,
+        PartialEq::eq,
+    );
+    app.global::<OpenMessages>()
+        .set_count(i32::try_from(state.kept.open.count()).unwrap_or(i32::MAX));
 }
 
 pub(super) fn apply_label_rows(
@@ -1459,11 +1522,14 @@ pub(super) fn refresh_rows_only(
         let state = state.borrow();
         (state.conversation_owner_id == selected_id && !state.conversation_messages.is_empty())
             .then(|| {
+                let viewport_width = email_viewport_size(&ReaderRef::main(app)).0 as f32;
+                let kept = kept_messages::rows(&state, viewport_width);
                 (
                     make_thread_rows(
                         &state.conversation_messages,
                         state.conversation_selected_index,
                         &favicon_icons,
+                        &kept,
                     ),
                     Rc::clone(&state.conversation_rows),
                 )
@@ -2149,7 +2215,7 @@ mod tests {
         sent.preview = "Tuesday works for me.".into();
         sent.is_outgoing = true;
 
-        let rows = make_thread_rows(&[received, sent], 1, &HashMap::new());
+        let rows = make_thread_rows(&[received, sent], 1, &HashMap::new(), &[]);
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].sender, "Maya");

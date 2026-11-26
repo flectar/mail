@@ -381,6 +381,12 @@ fn restore_preferences(
     {
         settings.conversation_view = enabled;
     }
+    if let Some(enabled) = preferences
+        .get("keepMessagesOpen")
+        .and_then(|value| value.as_bool())
+    {
+        settings.keep_messages_open = enabled;
+    }
     if let Some(frame) = preferences
         .get("windowFrame")
         .and_then(|value| value.as_str())
@@ -1416,6 +1422,7 @@ pub(super) fn register_data_management_callbacks(
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
                     "conversationView": settings.conversation_view,
+                    "keepMessagesOpen": settings.keep_messages_open,
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,

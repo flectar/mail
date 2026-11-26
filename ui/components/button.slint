@@ -20,9 +20,14 @@ export component Button inherits Rectangle {
     // A button that fills a fixed-width column may elide a label that does
     // not fit there; other buttons are given room for the whole label.
     in property <TextOverflow> label-overflow: clip;
+    // A full-width phone button may wrap a long label onto more lines;
+    // give it `height: max(…, self.label-height)` so the lines fit.
+    in property <bool> wrap-label: false;
     // The width that shows the whole label, for buttons sized to it. The
     // label row moves when pressed, so it does not size the button itself.
     out property <length> content-width: label-row.preferred-width;
+    // The height the label row needs at the button's width.
+    out property <length> label-height: label-row.preferred-height;
     out property <bool> focus-visible: keyboard.focus-visible;
     callback clicked;
 
@@ -81,6 +86,7 @@ export component Button inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: root.label-overflow;
+            wrap: root.wrap-label ? word-wrap : no-wrap;
         }
     }
 

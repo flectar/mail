@@ -2375,6 +2375,15 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_keep_messages_open(&self, enabled: bool) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.keep_messages_open = enabled;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_group_mail_by_date(&self, enabled: bool) -> Result<(), String> {
         self.core
             .set_group_mail_by_date(enabled)

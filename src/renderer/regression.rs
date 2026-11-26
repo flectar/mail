@@ -1967,3 +1967,24 @@ fn memory_pressure_through_one_renderer_stops_overscan_for_every_renderer() {
     // Tiles 3 to 5 show 2000-2900, with no overscan around them.
     assert_eq!(second.tiles.keys().copied().collect::<Vec<_>>(), [3, 4, 5]);
 }
+
+#[test]
+fn an_offscreen_message_holds_no_tiles_until_it_is_in_view_again() {
+    let mut r = renderer(&long_message());
+    r.set_visible_region(0.0, 900.0);
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    assert!(!r.tiles.is_empty());
+    // A hundred 110px paragraphs and the surface's 12px pad under them,
+    // shown at their own size.
+    let height = r.displayed_height();
+    assert_eq!(height, 11_012.0);
+
+    r.set_offscreen();
+    assert!(r.tiles.is_empty());
+    assert!(r.needs_repaint());
+    r.render_cpu_if_needed(520, 900, 1.0)
+        .unwrap()
+        .expect("in view, it is painted again");
+    assert!(!r.tiles.is_empty());
+    assert_eq!(r.displayed_height(), height);
+}

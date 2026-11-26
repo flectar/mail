@@ -3332,6 +3332,10 @@ pub struct Settings {
     /// lists, opens and acts on every message on its own.
     #[serde(default = "default_true")]
     pub conversation_view: bool,
+    /// Messages opened in a conversation stay open when another one opens.
+    /// Off shows one message at a time (#435).
+    #[serde(default)]
+    pub keep_messages_open: bool,
     /// Workspace presentation: "default" keeps lists and details side by
     /// side, while "minimal" navigates between those shared surfaces.
     /// `mailLayout` was the short-lived original key before Contacts shared
@@ -3806,6 +3810,7 @@ impl Default for Settings {
             preview_lines: default_preview_lines(),
             show_tabs: true,
             conversation_view: true,
+            keep_messages_open: false,
             workspace_layout: default_workspace_layout(),
             workspace_list_pane_width: default_workspace_list_pane_width(),
             window_frame: default_window_frame(),
@@ -4361,6 +4366,8 @@ mod tests {
         assert!(s.conversation_view);
         // Messages are written over the mail until Settings says otherwise.
         assert!(!s.compose_in_window);
+        // One message is open at a time until Settings says otherwise.
+        assert!(!s.keep_messages_open);
         // New installs draw their own frame; a saved choice stays.
         assert_eq!(s.window_frame, "integrated");
         let saved: Settings = serde_json::from_str(
@@ -4430,6 +4437,7 @@ mod tests {
         assert_eq!(serialized["groupMailByDate"], true);
         assert_eq!(serialized["showTabs"], true);
         assert_eq!(serialized["conversationView"], true);
+        assert_eq!(serialized["keepMessagesOpen"], false);
         assert_eq!(
             serialized["workspaceListPaneWidth"],
             MIN_WORKSPACE_LIST_PANE_WIDTH
