@@ -101,9 +101,14 @@ type RemoteDraftAttachment = (Option<String>, Option<String>, String, Option<Str
 /// Google lists them at
 /// <https://developers.google.com/workspace/gmail/api/reference/quota>. A
 /// request that fails costs as much.
-pub(super) mod cost {
+pub(crate) mod cost {
     /// What a user may spend in a minute, in each project.
     pub(super) const USER_MINUTE: u32 = 6_000;
+    /// What downloads ahead of time may spend in a minute, together with
+    /// everything else the account sent in it: a third of a user's quota, so
+    /// opening mail, sync and the app on the user's other devices keep the
+    /// rest.
+    pub(crate) const BACKGROUND_MINUTE: u32 = USER_MINUTE / 3;
     pub(super) const GET_PROFILE: u32 = 1;
     pub(super) const HISTORY_LIST: u32 = 2;
     pub(super) const LABELS_LIST: u32 = 1;
@@ -116,7 +121,7 @@ pub(super) mod cost {
     pub(super) const MESSAGES_GET: u32 = 20;
     /// messages.get with the `full`, `raw` or `html` format.
     pub(super) const MESSAGES_GET_CONTENT: u32 = 60;
-    pub(super) const MESSAGES_ATTACHMENTS_GET: u32 = 20;
+    pub(crate) const MESSAGES_ATTACHMENTS_GET: u32 = 20;
     pub(super) const MESSAGES_MODIFY: u32 = 5;
     pub(super) const MESSAGES_BATCH_MODIFY: u32 = 50;
     pub(super) const MESSAGES_TRASH: u32 = 20;

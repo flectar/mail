@@ -1925,7 +1925,7 @@ impl Core {
                     .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
                 if !matches!(
                     config.mail_protocol,
-                    MailProtocol::Imap | MailProtocol::Jmap
+                    MailProtocol::Imap | MailProtocol::Jmap | MailProtocol::Gmail
                 ) {
                     return Err(CoreError::Other(format!(
                         "{} downloads mail as its provider allows",

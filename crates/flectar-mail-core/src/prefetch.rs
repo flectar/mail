@@ -1,15 +1,19 @@
 //! Attachments downloaded ahead of time for the accounts set to download
 //! everything (#253), so they open without a connection: one at a time, the
 //! newest mail first, inside each account's mail history, while its server
-//! doesn't ask to wait.
+//! doesn't ask to wait. A Gmail account's attachments only spend what its
+//! quota leaves work in the background (see [`cost::BACKGROUND_MINUTE`]).
 
 use crate::Core;
 use crate::db::repo;
 use crate::error::Result;
 use crate::events::CoreEvent;
-use crate::models::{DownloadPolicy, MailProtocol, now_ms};
+use crate::models::{AccountConfig, DownloadPolicy, MailProtocol, now_ms};
+use crate::sync::gmail::cost;
+use crate::sync::pacing::AccountPace;
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::time::Instant;
 
 /// An attachment that didn't download waits this long before another try.
 const RETRY_AFTER_MS: i64 = 60 * 60 * 1000;
@@ -59,9 +63,18 @@ impl Core {
                     }
                 }
             };
+            // A Gmail account whose quota had no room goes on once it has.
+            let room = self.gmail_room_again().await;
+            let room = async {
+                match room {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 () = self.prefetch.notified() => {}
                 () = tokio::time::sleep(IDLE) => {}
+                () = room => {}
                 woken = woken => match woken {
                     Woken::Mail => {}
                     // What failed without a connection gets another try.
@@ -85,9 +98,10 @@ impl Core {
             let everything = config.settings.download == DownloadPolicy::Everything
                 && matches!(
                     config.mail_protocol,
-                    MailProtocol::Imap | MailProtocol::Jmap
+                    MailProtocol::Imap | MailProtocol::Jmap | MailProtocol::Gmail
                 );
-            if !everything || self.pace.account(config.id).paused().is_some() {
+            let pace = self.pace.account(config.id);
+            if !everything || pace.paused().is_some() || gmail_room(&config, &pace).is_some() {
                 continue;
             }
             let account_id = config.id;
@@ -121,6 +135,29 @@ impl Core {
         }
         Ok(next.map(|(attachment_id, _)| attachment_id))
     }
+
+    /// The soonest a Gmail account set to download everything has room in
+    /// its quota again, when one has none now.
+    async fn gmail_room_again(&self) -> Option<Instant> {
+        self.list_account_configs()
+            .await
+            .ok()?
+            .iter()
+            .filter(|config| config.settings.download == DownloadPolicy::Everything)
+            .filter_map(|config| gmail_room(config, &self.pace.account(config.id)))
+            .min()
+    }
+}
+
+/// When a Gmail account's quota leaves room again for an attachment
+/// downloaded ahead of time, if it has none now: each download counts against
+/// the user's quota, and work in the background spends only its share.
+fn gmail_room(config: &AccountConfig, pace: &AccountPace) -> Option<Instant> {
+    if config.mail_protocol != MailProtocol::Gmail {
+        return None;
+    }
+    let room = pace.room_at(cost::MESSAGES_ATTACHMENTS_GET, cost::BACKGROUND_MINUTE);
+    (room > Instant::now()).then_some(room)
 }
 
 #[cfg(test)]
@@ -251,5 +288,55 @@ mod tests {
                 .is_err()
         );
         assert_eq!(core.next_prefetch(&HashMap::new()).await.unwrap(), None);
+    }
+
+    /// A Gmail account set to download everything gets its attachments too,
+    /// with what its quota leaves work in the background (#253).
+    #[tokio::test]
+    async fn a_gmail_account_downloads_attachments_within_its_quota_share() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let today = crate::models::now_ms();
+        let attachment = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail' WHERE id = 1",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, folder_id, subject, from_addr, date,
+                                           is_read, is_draft, is_outgoing, gm_msgid)
+                     VALUES (10, 1, 1, 'Files', 'a@example.com', ?1, 1, 0, 0, 'g10')",
+                    [today],
+                )?;
+                conn.execute(
+                    "INSERT INTO attachments (message_id, part_id, filename, size,
+                                              provider_attachment_id)
+                     VALUES (10, '1', 'a.pdf', 10, 'gmail-name')",
+                    [],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        core.set_account_download(1, DownloadPolicy::Everything)
+            .await
+            .unwrap();
+        assert_eq!(
+            core.next_prefetch(&HashMap::new()).await.unwrap(),
+            Some(attachment)
+        );
+        assert_eq!(core.gmail_room_again().await, None);
+        // Work in the background spent the account's share of this minute.
+        core.pace
+            .account(1)
+            .spend(crate::sync::gmail::cost::BACKGROUND_MINUTE);
+        assert_eq!(core.next_prefetch(&HashMap::new()).await.unwrap(), None);
+        let room = core.gmail_room_again().await.expect("it waits for room");
+        assert!(room > tokio::time::Instant::now());
     }
 }
