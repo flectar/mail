@@ -2889,7 +2889,15 @@ fn returned_receipt(resource: &Value, report: &[u8]) -> Option<crate::mime::Disp
     )
 }
 
+/// Gmail's `format=full` hands text parts over already converted to UTF-8,
+/// while the part headers still name the charset the sender used. Decoding
+/// those bytes again as, say, ISO-8859-1 turns "ç" into "Ã§". Bytes that are
+/// valid UTF-8 are therefore taken as UTF-8; the declared charset only
+/// applies to bytes that are not.
 fn decode_text_part(bytes: &[u8], charset: Option<&str>) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
+    }
     let encoding = charset
         .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
         .unwrap_or(encoding_rs::UTF_8);
@@ -5142,6 +5150,21 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_part_gmail_already_converted_is_not_decoded_twice() {
+        // Gmail sends a part declared ISO-8859-1 as UTF-8 bytes.
+        let bytes = "Atualizações está 🤩".as_bytes();
+        assert_eq!(
+            decode_text_part(bytes, Some("iso-8859-1")),
+            "Atualizações está 🤩"
+        );
+        // Bytes that are not UTF-8 still use the declared charset.
+        assert_eq!(
+            decode_text_part(b"Atualiza\xe7\xf5es", Some("iso-8859-1")),
+            "Atualizações"
+        );
+    }
 
     /// A Gmail account 1 with Inbox, Sent, Spam, Archive and All Mail.
     pub(super) async fn gmail_account() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
