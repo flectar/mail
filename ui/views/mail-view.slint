@@ -11,6 +11,7 @@ import { Notice } from "../notice.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
+import { DialogArea } from "../components/window-backdrop.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -77,6 +78,21 @@ export component MailView inherits FocusScope {
     out property <bool> list-focus-visible: root.single-pane
         ? compact-list-pane.keyboard-focus-visible : desktop-list-pane.keyboard-focus-visible;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
+    // The reader's dialogs cover its pane. The window dims around that pane
+    // while one is open.
+    out property <DialogArea> dialog-area: root.single-pane ? {
+        open: compact-reading-pane.dialog-open && compact-reading-pane.visible,
+        x: compact-reading-pane.absolute-position.x,
+        y: compact-reading-pane.absolute-position.y,
+        width: compact-reading-pane.width,
+        height: compact-reading-pane.height,
+    } : {
+        open: desktop-reading-pane.dialog-open,
+        x: desktop-reading-pane.absolute-position.x,
+        y: desktop-reading-pane.absolute-position.y,
+        width: desktop-reading-pane.width,
+        height: desktop-reading-pane.height,
+    };
     // The shown list's offset, saved with the tab when it is left.
     private property <length> list-scroll-offset: -(root.single-pane ? compact-list-pane.scroll-y : desktop-list-pane.scroll-y);
     changed list-scroll-offset => { TabsUi.list-offset = root.list-scroll-offset; }

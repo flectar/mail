@@ -894,6 +894,8 @@ export component MailReadingPane inherits FocusScope {
     }
     private property <string> display-subject: root.selected_subject == "" ? @tr("(No subject)") : root.selected_subject;
     private property <bool> label-editor-open: false;
+    // The rendering info and the label editor cover this pane.
+    out property <bool> dialog-open: root.rendering_info_open || root.label-editor-open;
     private property <string> label-search-query: "";
     private property <int> label-editor-id: -1;
     private property <bool> label-editor-is-auto: false;

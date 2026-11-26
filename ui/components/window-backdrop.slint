@@ -1,0 +1,71 @@
+import { AppTheme } from "../design-system.slint";
+import { WindowDragArea } from "../window-chrome.slint";
+
+// The part of the window that an open dialog's own scrim dims, in window
+// coordinates.
+export struct DialogArea {
+    open: bool,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
+// A piece of the backdrop. It takes the pointer, the wheel included, so
+// nothing under it reacts while the dialog is open.
+component BackdropPiece inherits Rectangle {
+    background: AppTheme.scrim;
+
+    TouchArea {
+        scroll-event(event) => { return accept; }
+    }
+}
+
+// Dims the rest of the window around an open dialog's scrim, so the whole
+// window darkens as one: the top bar, the tabs, the rail and any other pane.
+// It sits below the window controls, which stay usable, and its part of the
+// top band still moves the window.
+export component WindowBackdrop inherits Rectangle {
+    in property <DialogArea> area;
+    // Where the top band that moves the window lies, in window coordinates.
+    // Zero high when the system frame moves it.
+    in property <length> band-y;
+    in property <length> band-height;
+
+    private property <length> area-right: root.area.x + root.area.width;
+    private property <length> area-bottom: root.area.y + root.area.height;
+
+    // Above, below, left of and right of the dialog's area.
+    BackdropPiece {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: max(0px, root.area.y);
+    }
+    BackdropPiece {
+        x: 0px;
+        y: root.area-bottom;
+        width: root.width;
+        height: max(0px, root.height - root.area-bottom);
+    }
+    BackdropPiece {
+        x: 0px;
+        y: root.area.y;
+        width: max(0px, root.area.x);
+        height: root.area.height;
+    }
+    BackdropPiece {
+        x: root.area-right;
+        y: root.area.y;
+        width: max(0px, root.width - root.area-right);
+        height: root.area.height;
+    }
+
+    // Only where the backdrop covers the band, never over the dialog.
+    if root.band-height > 0px && root.area.y > root.band-y : WindowDragArea {
+        x: 0px;
+        y: root.band-y;
+        width: root.width;
+        height: min(root.band-height, root.area.y - root.band-y);
+    }
+}

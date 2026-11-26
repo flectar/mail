@@ -35,6 +35,7 @@ export { InvitationSettings } from "invitation-settings.slint";
 import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { AgentAccess } from "agent-access.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
+import { DialogArea, WindowBackdrop } from "components/window-backdrop.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
 import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf";
@@ -1689,6 +1690,47 @@ export component AppWindow inherits Window {
     private property <length> content-y: root.safe-area-insets.top + (root.top-bar ? WindowChrome.band-height : 0px);
     private property <length> content-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     private property <length> content-height: root.height - root.content-y - root.safe-area-insets.bottom;
+    // Dialogs dim the whole window. A dialog's own scrim covers the part of
+    // the window it opens over, and the backdrop dims the rest, the top bar,
+    // the tabs and the rail included. The dialogs placed here cover the
+    // content area; on phones the composer, the event editor and the
+    // attachment preview are full pages instead.
+    private property <bool> window-dialog-open: Unsubscribe.stage != ""
+        || BlockSender.stage != ""
+        || ContactImport.stage != ""
+        || root.trash-delete-open
+        || root.mark-all-read-open
+        || MailRules.run-open
+        || AutoReplies.question-open
+        || AccountImport.open
+        || MovePickerUi.open
+        || WhenUi.open
+        || SavedSearchUi.stage != ""
+        || root.folder-dialog-open
+        || (root.welcome-join && SyncUi.dialog == "join" && !(root.has-mail && root.settings-open))
+        || (!root.compact-layout && (ComposerUi.open || root.calendar-editor-shown || MailAttachments.open));
+    // The views report where their own dialogs open. Only the view on screen
+    // counts, since a view that goes away can't take its report back.
+    private property <DialogArea> settings-dialog;
+    private property <DialogArea> files-dialog;
+    private property <DialogArea> calendar-dialog;
+    private property <DialogArea> mail-dialog;
+    private property <DialogArea> no-dialog;
+    private property <DialogArea> view-dialog: !root.has-mail ? root.no-dialog
+        : root.active_view == "settings" ? root.settings-dialog
+        : root.active_view == "files" ? root.files-dialog
+        : root.active_view == "calendar" ? root.calendar-dialog
+        : root.active_view == "mail" ? root.mail-dialog
+        : root.no-dialog;
+    private property <DialogArea> dialog-area: root.window-dialog-open ? {
+        open: true,
+        x: root.content-x,
+        y: root.content-y,
+        width: root.content-width,
+        height: root.content-height,
+    } : root.view-dialog;
+    // Tab shortcuts wait while a dialog is open.
+    out property <bool> dialog-open: root.dialog-area.open;
     // Linux draws the whole frame, so it also provides the resize border and
     // window outline that the window manager would otherwise draw.
     private property <bool> client-frame: root.no-frame && !root.maximized && !root.full-screen;
@@ -2010,7 +2052,9 @@ export component AppWindow inherits Window {
                 ReaderUi.email-viewport-width = self.email-viewport-width;
                 ReaderUi.email-viewport-height = self.email-viewport-height;
                 ReaderUi.email-scroll-document-height = self.email-scroll-document-height;
+                root.mail-dialog = self.dialog-area;
             }
+            changed dialog-area => { root.mail-dialog = self.dialog-area; }
             changed email-viewport-width => { ReaderUi.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { ReaderUi.email-viewport-height = self.email-viewport-height; }
             changed email-scroll-document-height => { ReaderUi.email-scroll-document-height = self.email-scroll-document-height; }
@@ -2158,6 +2202,8 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         FunctionalCalendarView {
+            init => { root.calendar-dialog = self.dialog-area; }
+            changed dialog-area => { root.calendar-dialog = self.dialog-area; }
             active: root.active_view == "calendar";
             x: 0px;
             y: 0px;
@@ -2327,6 +2373,8 @@ export component AppWindow inherits Window {
             available-width: parent.width;
             available-height: parent.height;
             files-view := FilesView {
+                init => { root.files-dialog = self.dialog-area; }
+                changed dialog-area => { root.files-dialog = self.dialog-area; }
                 active: root.active_view == "files";
                 width: parent.width;
                 height: parent.height;
@@ -2347,6 +2395,8 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         SettingsDialog {
+            init => { root.settings-dialog = self.dialog-area; }
+            changed dialog-area => { root.settings-dialog = self.dialog-area; }
             compact: root.compact-layout;
             x: 0px;
             y: 0px;
@@ -2662,9 +2712,14 @@ export component AppWindow inherits Window {
         // A message on its way out, with a way to take it back. A phone's
         // composer covers the window, so it waits for that to close.
         if Notice.shown && !(root.compact-layout && ComposerUi.open) : NoticeToast {
+            // While a view's dialog is open, the notice centers on the
+            // dialog's area, so the window backdrop never cuts across it.
+            private property <bool> over-view-dialog: root.view-dialog.open && !root.window-dialog-open;
+            private property <length> room-x: self.over-view-dialog ? root.view-dialog.x - root.content-x : 0px;
+            private property <length> room-width: self.over-view-dialog ? root.view-dialog.width : parent.width;
             text: I18n.ui-message(Notice.message.key, Notice.message.argument, Notice.message.second_argument, Notice.message.third_argument);
-            width: min(parent.width - 32px, min(560px, max(320px, self.preferred-width)));
-            x: (parent.width - self.width) / 2;
+            width: min(self.room-width - 32px, min(560px, max(320px, self.preferred-width)));
+            x: self.room-x + (self.room-width - self.width) / 2;
             // Above the phone's navigation, and above the compose button
             // where it shows.
             y: parent.height - self.height - 20px
@@ -3207,6 +3262,19 @@ export component AppWindow inherits Window {
             root.settings_tab = "Accounts";
             root.open-settings();
         }
+    }
+
+    // Above the top bar and every dialog layer, below the action help and the
+    // window controls, which stay usable.
+    if root.dialog-open : WindowBackdrop {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        z: 45000;
+        area: root.dialog-area;
+        band-y: root.safe-area-insets.top;
+        band-height: WindowChrome.controls-visible ? WindowChrome.band-height : 0px;
     }
 
     // Action help, above the panes and dialogs.
