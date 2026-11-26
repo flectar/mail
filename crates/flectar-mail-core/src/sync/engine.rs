@@ -4051,7 +4051,7 @@ const BACKGROUND_BODY_BUDGET_KIB: u32 = 16 * 1024;
 static BACKGROUND_BODY_BUDGET: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
     std::sync::OnceLock::new();
 
-async fn reserve_background_body_bytes(bytes: u64) -> tokio::sync::OwnedSemaphorePermit {
+pub(crate) async fn reserve_background_body_bytes(bytes: u64) -> tokio::sync::OwnedSemaphorePermit {
     let permits = bytes
         .div_ceil(1024)
         .clamp(1, u64::from(BACKGROUND_BODY_BUDGET_KIB)) as u32;

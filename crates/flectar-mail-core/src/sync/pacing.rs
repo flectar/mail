@@ -1,7 +1,7 @@
 //! When sync asks a server again (#251): after a failure, after the server
 //! asked to wait, between checks for new mail, and when many accounts start
 //! at once. Also how many connections an IMAP account opens for work in the
-//! background.
+//! background, and how much of its server's quota an account spent lately.
 //!
 //! A failure such as a dropped connection is tried again soon, sooner than
 //! most clients do, since it is usually the network. A server that asked to
@@ -12,7 +12,7 @@
 
 use crate::error::{CoreError, LimitKind};
 use crate::models::{AccountSettings, CheckInterval, now_ms};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -40,6 +40,10 @@ const BULK_CONNECTIONS: usize = 3;
 /// Accounts that download their older headers at the same time.
 const HISTORY_TURNS: usize = 3;
 static HISTORY_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+/// How long a server counts what a request cost against the account's
+/// quota: Gmail limits the units a user spends in a minute.
+const QUOTA_WINDOW: Duration = Duration::from_secs(60);
 
 /// Accounts that start together connect at once up to this many; the rest
 /// take turns.
@@ -279,6 +283,9 @@ struct PaceState {
     bulk_owed: usize,
     /// The account's first connection waits until then.
     start: Option<Instant>,
+    /// What the account's requests cost in the last [`QUOTA_WINDOW`] and
+    /// when each went out, oldest first.
+    spent: VecDeque<(Instant, u32)>,
 }
 
 impl AccountPace {
@@ -290,6 +297,7 @@ impl AccountPace {
                 bulk_allowed: BULK_CONNECTIONS,
                 bulk_owed: 0,
                 start: None,
+                spent: VecDeque::new(),
             }),
             bulk: Arc::new(Semaphore::new(BULK_CONNECTIONS)),
         }
@@ -370,6 +378,37 @@ impl AccountPace {
             .filter(|start| *start > Instant::now())
     }
 
+    /// A request of the account went out that costs `units` of its
+    /// server's quota.
+    pub(crate) fn spend(&self, units: u32) {
+        let now = Instant::now();
+        let mut state = lock(&self.state);
+        forget_spent(&mut state.spent, now);
+        state.spent.push_back((now, units));
+    }
+
+    /// When `units` more keep what the account spent in the last minute
+    /// within `ceiling`: now, or once enough of it is a minute old. Work in
+    /// the background waits for it, so it only spends what the rest leaves.
+    pub(crate) fn room_at(&self, units: u32, ceiling: u32) -> Instant {
+        let now = Instant::now();
+        let mut state = lock(&self.state);
+        forget_spent(&mut state.spent, now);
+        let (units, ceiling) = (u64::from(units), u64::from(ceiling));
+        let mut spent: u64 = state.spent.iter().map(|(_, cost)| u64::from(*cost)).sum();
+        if spent + units <= ceiling {
+            return now;
+        }
+        for (at, cost) in &state.spent {
+            spent -= u64::from(*cost);
+            if spent + units <= ceiling {
+                return *at + QUOTA_WINDOW;
+            }
+        }
+        // More than the ceiling on its own: once nothing else counts.
+        state.spent.back().map_or(now, |(at, _)| *at + QUOTA_WINDOW)
+    }
+
     fn fewer_connections(&self, state: &mut PaceState) {
         if state.bulk_allowed <= 1 {
             return;
@@ -440,6 +479,16 @@ impl Drop for BulkPermit {
             state.bulk_owed -= 1;
             permit.forget();
         }
+    }
+}
+
+/// Drops what was spent a [`QUOTA_WINDOW`] or more before `now`.
+fn forget_spent(spent: &mut VecDeque<(Instant, u32)>, now: Instant) {
+    while spent
+        .front()
+        .is_some_and(|(at, _)| now.saturating_duration_since(*at) >= QUOTA_WINDOW)
+    {
+        spent.pop_front();
     }
 }
 
@@ -726,5 +775,35 @@ mod tests {
         tokio::time::advance(START_TOGETHER).await;
         pace.starting(9);
         assert_eq!(pace.account(9).take_start(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn background_work_spends_what_the_last_minute_left() {
+        let pace = Pace::default();
+        let account = pace.account(1);
+        let start = Instant::now();
+        assert_eq!(account.room_at(60, 2_000), start);
+        // Every task of the account counts toward the same minute.
+        pace.account(1).spend(1_500);
+        tokio::time::advance(Duration::from_secs(10)).await;
+        account.spend(400);
+        assert_eq!(account.room_at(60, 2_000), Instant::now());
+        account.spend(100);
+        // 2,000 spent: room comes when the first 1,500 is a minute old.
+        assert_eq!(account.room_at(60, 2_000), start + QUOTA_WINDOW);
+        assert_eq!(pace.account(2).room_at(60, 2_000), Instant::now());
+        tokio::time::advance(Duration::from_secs(50)).await;
+        assert_eq!(account.room_at(60, 2_000), Instant::now());
+        // Nothing older than a minute counts.
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(account.room_at(1_999, 2_000), Instant::now());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cost_over_the_ceiling_waits_for_an_empty_minute() {
+        let account = Pace::default().account(1);
+        account.spend(20);
+        let last = Instant::now();
+        assert_eq!(account.room_at(3_000, 2_000), last + QUOTA_WINDOW);
     }
 }
