@@ -3151,10 +3151,28 @@ async fn store_hydrated_body(
             for attachment in attachments {
                 let existing: Option<i64> =
                     if let Some(provider_id) = attachment.provider_attachment_id.as_deref() {
+                        // Gmail names a part anew each time it's read, and
+                        // the old name still works: a message's file is the
+                        // same while its part's number, name, type and size
+                        // are, and keeps what was downloaded of it. A draft's
+                        // files can change under the same numbers.
                         tx.query_row(
-                            "SELECT id FROM attachments
-                         WHERE message_id = ?1 AND provider_attachment_id = ?2",
-                            params![local_message_id, provider_id],
+                            "SELECT a.id FROM attachments a JOIN messages m ON m.id = a.message_id
+                             WHERE a.message_id = ?1
+                               AND (a.provider_attachment_id = ?2
+                                    OR (m.is_draft = 0 AND a.provider_attachment_id IS NOT NULL
+                                        AND a.part_id = ?3 AND a.filename IS ?4
+                                        AND a.mime_type IS ?5 AND a.size = ?6))
+                             ORDER BY a.provider_attachment_id = ?2 DESC
+                             LIMIT 1",
+                            params![
+                                local_message_id,
+                                provider_id,
+                                attachment.part_id,
+                                attachment.filename,
+                                attachment.mime_type,
+                                attachment.size,
+                            ],
                             |row| row.get(0),
                         )
                         .optional()?
@@ -5388,6 +5406,124 @@ mod tests {
         let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
         assert_eq!(body.text.as_deref(), Some("Atualizações"));
         assert!(body.html.unwrap().contains("Спасибо"));
+    }
+
+    /// A Gmail message whose file part is named `attachment_id` this time.
+    fn with_file(attachment_id: &str, draft: bool) -> Value {
+        let labels = if draft {
+            json!(["DRAFT"])
+        } else {
+            json!(["INBOX"])
+        };
+        json!({
+            "id": "files", "threadId": "t-files", "labelIds": labels,
+            "internalDate": "1763434800000", "sizeEstimate": 2_000_400,
+            "payload": {
+                "partId": "", "mimeType": "multipart/mixed", "filename": "",
+                "headers": [
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "me@test.dev"},
+                    {"name": "Subject", "value": "The report"},
+                    {"name": "Date", "value": "Wed, 18 Nov 2026 12:00:00 +0900"},
+                    {"name": "Message-ID", "value": "<files@example.com>"},
+                ],
+                "body": {"size": 0},
+                "parts": [
+                    {
+                        "partId": "0", "mimeType": "text/plain", "filename": "",
+                        "headers": [{"name": "Content-Type", "value": "text/plain"}],
+                        "body": {"size": 11, "data": URL_SAFE_NO_PAD.encode("The report.")},
+                    },
+                    {
+                        "partId": "1", "mimeType": "application/pdf", "filename": "report.pdf",
+                        "headers": [{"name": "Content-Disposition",
+                                     "value": "attachment; filename=\"report.pdf\""}],
+                        "body": {"size": 2_000_000, "attachmentId": attachment_id},
+                    },
+                ],
+            },
+        })
+    }
+
+    /// Reads `resource` whole as an open does, and returns its files as
+    /// (id, Gmail's name for it, where it's kept).
+    async fn read_files(
+        ctx: &SyncCtx,
+        config: &AccountConfig,
+        resource: &Value,
+    ) -> Vec<(i64, Option<String>, Option<String>)> {
+        store_resources(
+            ctx,
+            config,
+            std::slice::from_ref(resource),
+            None,
+            true,
+            false,
+            None,
+            Arrivals::None,
+        )
+        .await
+        .unwrap();
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let body = hydrate_parts(&api, GMAIL_API, resource).await.unwrap();
+        store_hydrated_body(ctx, config, "files".into(), body)
+            .await
+            .unwrap();
+        ctx.db
+            .read(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT a.id, a.provider_attachment_id, a.file_path
+                     FROM attachments a JOIN messages m ON m.id = a.message_id
+                     WHERE m.gm_msgid = 'files' ORDER BY a.id",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_file_keeps_what_was_downloaded_when_gmail_renames_it() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let first = read_files(&ctx, &config, &with_file("first-name", false)).await;
+        let [(id, Some(name), None)] = first.as_slice() else {
+            panic!("{first:?}");
+        };
+        assert_eq!(name, "first-name");
+        let id = *id;
+        ctx.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE attachments SET file_path = '/kept/report.pdf' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        // Gmail names the part anew when the message is read again.
+        let again = read_files(&ctx, &config, &with_file("second-name", false)).await;
+        assert_eq!(
+            again,
+            [(
+                id,
+                Some("second-name".to_owned()),
+                Some("/kept/report.pdf".to_owned())
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drafts_files_follow_gmails_names() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let first = read_files(&ctx, &config, &with_file("first-name", true)).await;
+        let again = read_files(&ctx, &config, &with_file("second-name", true)).await;
+        assert_eq!(again.len(), 1);
+        assert_ne!(again[0].0, first[0].0);
+        assert_eq!(again[0].1.as_deref(), Some("second-name"));
     }
 
     #[tokio::test]
