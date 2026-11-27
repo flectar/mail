@@ -42,6 +42,9 @@ export component TextEdit inherits Rectangle {
         color: AppTheme.placeholder;
         font-size: root.font-size;
         wrap: word-wrap;
+        // A hint, such as person@example.org=FULL_FINGERPRINT, is cut short
+        // where a narrow phone has no room for it, as a field's hint is.
+        overflow: elide;
     }
 
     // Longer text scrolls inside the field, and the caret stays in view.
