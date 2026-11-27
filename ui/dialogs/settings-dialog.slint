@@ -1,4 +1,5 @@
-import { AccountMailPreferences, AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { AccountMailPreferences, AccountMailSection } from "../components/account-mail-preferences.slint";
+import { Tabs } from "../components/tabs.slint";
 import { LargeFilesCard } from "../link-services.slint";
 import { TranslationPage } from "../translation.slint";
 import { AiPage } from "../ai.slint";
@@ -512,6 +513,11 @@ export component SettingsDialog inherits Rectangle {
     // The account whose card shows its settings, one at a time; -1 for none.
     // The card of an only account always shows them.
     in-out property <int> open-account: -1;
+    // The tab the open card shows: General, Signatures, Composing, OpenPGP
+    // or Automatic replies. Cards are built again when the accounts change,
+    // so it's kept here, and a card opens on General.
+    private property <int> account-tab: 0;
+    changed open-account => { root.account-tab = 0; }
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_tabs: true;
@@ -3062,7 +3068,10 @@ export component SettingsDialog inherits Rectangle {
                             }
                             for account[account-index] in root.connected_accounts : drop-target := DropArea {
                                 private property <bool> signing-in: account.id == root.sign-in-account;
-                                init => { self.sign-in-requested(); }
+                                init => {
+                                    self.sign-in-requested();
+                                    self.load-mail-settings();
+                                }
                                 changed signing-in => { self.sign-in-requested(); }
                                 function sign-in-requested() {
                                     if self.signing-in {
@@ -3089,6 +3098,17 @@ export component SettingsDialog inherits Rectangle {
                                 private property <bool> expanded: self.single || root.open-account == account.id;
                                 function toggle() {
                                     root.open-account = root.open-account == account.id ? -1 : account.id;
+                                }
+                                // The tabs after General show the account's mail settings,
+                                // which AccountMailPreferences holds for one account at a time.
+                                private property <bool> mail-settings-shown: self.expanded && root.account-tab > 0;
+                                private property <bool> mail-settings-loaded: AccountMailPreferences.account-id == account.id;
+                                private property <bool> mail-settings-wanted: self.mail-settings-shown && !self.mail-settings-loaded && !AccountMailPreferences.busy;
+                                changed mail-settings-wanted => { self.load-mail-settings(); }
+                                function load-mail-settings() {
+                                    if self.mail-settings-wanted {
+                                        AccountMailPreferences.load(account.id);
+                                    }
                                 }
 
                                 // The card's grid. The avatar and the settings' texts start
@@ -3133,7 +3153,10 @@ export component SettingsDialog inherits Rectangle {
                                         : self.timeout-end;
                                 private property <length> shown-end: self.has-shown-folders ? shown-row.y + shown-row.height - self.plain-end : self.kind-end;
                                 private property <length> contacts-end: contacts-row.y + contacts-row.height - self.plain-end;
-                                private property <length> expanded-height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
+                                // Where the tabs end, and the settings of the chosen one.
+                                private property <length> tabs-end: account-tabs.y + account-tabs.height;
+                                private property <length> expanded-height: (root.account-tab == 0 ? calendars.y + calendars.height : mail-settings.y + mail-settings.height)
+                                    + (root.compact ? 18px : 16px);
                                 height: self.expanded ? self.expanded-height : self.collapsed-height;
                                 animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
@@ -3292,437 +3315,472 @@ export component SettingsDialog inherits Rectangle {
                                             remove => { root.confirm-account-removal(account); }
                                             sync => { root.sync_account(account.id); }
                                         }
-                                        // Select rows pad their texts by `select-top` and 8px on
-                                        // a phone, 16px on a desktop; switch rows by 16px. Each
-                                        // row is placed so its texts start at `content-x` and its
-                                        // control ends 16px from the card's edge.
-                                        name-row := SettingsTextRow {
-                                            x: drop-target.content-x - (root.compact ? 8px : 16px);
-                                            y: drop-target.collapsed-height + (root.compact ? 56px : 22px) - drop-target.select-top;
-                                            width: parent.width - self.x - 8px;
-                                            compact: root.compact;
-                                            compact-description-height: 51px;
-                                            title: @tr("Account name");
-                                            description: @tr("Shown instead of the address in the sidebar and lists. People you email don't see it.");
-                                            value: account.custom_name;
-                                            placeholder: account.default_name;
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            committed(name) => { root.save_account_name(account.id, name); }
-                                        }
-                                        history-row := SettingsSelectRow {
-                                            x: name-row.x;
-                                            y: drop-target.name-end + drop-target.gap - drop-target.select-top;
-                                            width: name-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Mail history");
-                                            compact-description-height: 51px;
-                                            description: account.mail_history == "all"
-                                                ? @tr("Download the full mailbox. Large accounts can take considerable time and storage.")
-                                                : @tr("How far back to download. Mail already stored on this device is kept.");
-                                            choices: root.mail-history-options;
-                                            selected-index: root.mail-history-index(account.mail_history);
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => { root.select-mail-history(account.id, index); }
-                                        }
-                                        download-row := SettingsSelectRow {
-                                            visible: drop-target.has-download;
-                                            x: history-row.x;
-                                            y: drop-target.history-end + drop-target.gap - drop-target.select-top;
-                                            width: history-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Download");
-                                            compact-description-height: 51px;
-                                            description: account.download == "headers" ? @tr("Messages download when you open them.")
-                                                : account.download == "everything" ? @tr("Messages and their attachments up to 25 MB download ahead of time, to open them offline.")
-                                                : @tr("Messages download ahead of time, and attachments when you open them.");
-                                            choices: root.download-options;
-                                            selected-index: account.download == "headers" ? 0 : account.download == "everything" ? 2 : 1;
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => {
-                                                root.save_account_download(account.id, index == 0 ? "headers" : index == 2 ? "everything" : "messages");
-                                            }
-                                        }
-                                        check-row := SettingsSelectRow {
-                                            x: history-row.x;
-                                            y: drop-target.download-end + drop-target.gap - drop-target.select-top;
-                                            width: history-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Check for new mail");
-                                            description: account.check_interval == "manual" ? @tr("When the app starts, and when you check for new mail.")
-                                                : account.check_interval == "app" ? @tr("As often as set in General.")
-                                                : @tr("How often this account checks its server.");
-                                            choices: root.check-interval-options;
-                                            selected-index: root.check-interval-index(account.check_interval);
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => { root.select-check-interval(account.id, index); }
-                                        }
-                                        push-row := SettingsSwitchRow {
-                                            visible: drop-target.has-push;
-                                            x: drop-target.content-x - 16px;
-                                            y: drop-target.check-end + drop-target.gap - 16px;
-                                            width: parent.width - self.x - 8px;
-                                            compact: root.compact;
-                                            title: @tr("Instant updates");
-                                            control-shift: drop-target.switch-shift;
-                                            description: account.check_interval == "manual"
-                                                ? @tr("Off while the account checks only when you ask.")
-                                                : @tr("The server tells Flectar Mail of new mail as soon as it arrives.");
-                                            checked: account.push && account.check_interval != "manual";
-                                            enabled: account.check_interval != "manual";
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            toggled(checked) => { root.save_account_push(account.id, checked); }
-                                        }
-                                        timeout-row := SettingsSelectRow {
-                                            visible: drop-target.has-timeout;
-                                            x: history-row.x;
-                                            y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
-                                            width: history-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Server timeout");
-                                            description: @tr("How long to wait for a slow server before giving up.");
-                                            choices: root.server-timeout-options;
-                                            selected-index: root.server-timeout-index(account.server_timeout);
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => { root.select-server-timeout(account.id, index); }
-                                        }
-                                        sent-copy-row := SettingsSelectRow {
-                                            visible: drop-target.has-sent-copy;
-                                            x: history-row.x;
-                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
-                                            width: history-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Sent copies");
-                                            compact-description-height: 51px;
-                                            description: @tr("Choose who saves sent mail. Use Flectar Mail if your server does not save a copy.");
-                                            choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar Mail saves a copy")];
-                                            selected-index: account.sent_copy_policy == "server" ? 1 : account.sent_copy_policy == "client" ? 2 : 0;
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => {
-                                                root.save_account_sent_copy_policy(account.id, index == 1 ? "server" : index == 2 ? "client" : "auto");
-                                            }
-                                        }
-                                        subscribed-row := SettingsSwitchRow {
-                                            visible: drop-target.has-subscriptions;
-                                            x: push-row.x;
-                                            y: drop-target.sent-copy-end + drop-target.gap - 16px;
-                                            width: push-row.width;
-                                            compact: root.compact;
-                                            compact-description-height: 51px;
-                                            title: @tr("Subscribed folders only");
-                                            control-shift: drop-target.switch-shift;
-                                            description: @tr("Show and sync only the folders you subscribed to on the server, plus Inbox and the folders mail is filed into.");
-                                            checked: account.subscribed_folders_only;
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
-                                        }
-                                        // Which folders Sent, Drafts and the rest are (#252).
-                                        folders-row := Rectangle {
-                                            visible: drop-target.has-subscriptions;
+                                        // Below the header, or the actions on a phone. They stack
+                                        // where their labels don't fit side by side.
+                                        account-tabs := Tabs {
                                             x: drop-target.content-x;
-                                            y: subscribed-row.y + subscribed-row.height - drop-target.switch-end + drop-target.gap - drop-target.plain-lead;
-                                            width: parent.width - self.x - 16px;
-                                            height: 12px + folders-label.height + folders-description.height;
-                                            folders-label := Text {
-                                                x: 0px; y: drop-target.plain-top;
-                                                width: parent.width - folders-button.width - 16px; height: max(20px, self.preferred-height);
-                                                text: @tr("Special folders");
-                                                color: root.body-text;
-                                                font-size: TypeScale.body;
-                                                font-weight: 600;
-                                                vertical-alignment: center;
-                                            }
-                                            folders-description := Text {
-                                                x: 0px; y: folders-label.y + folders-label.height + 1px;
-                                                width: folders-label.width; height: max(18px, self.preferred-height);
-                                                text: @tr("Sent, Drafts, Trash, Spam and Archive");
-                                                color: root.faint-text;
-                                                font-size: TypeScale.caption;
-                                                wrap: word-wrap;
-                                                vertical-alignment: center;
-                                            }
-                                            folders-button := Button {
-                                                x: parent.width - self.width;
-                                                y: drop-target.plain-control-y;
-                                                width: 136px;
-                                                height: 34px;
-                                                text: @tr("Choose…");
-                                                clicked => { root.open-folder-roles(account, account-index); }
-                                            }
-                                        }
-                                        server-copies-row := SettingsSelectRow {
-                                            visible: drop-target.has-server-copies;
-                                            x: history-row.x;
-                                            y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
-                                            width: history-row.width;
-                                            compact: root.compact;
-                                            title: @tr("Keep mail on the server");
-                                            compact-description-height: 51px;
-                                            description: account.keep_on_server == "untilDeleted" ? @tr("Mail you delete here is removed from the server too.")
-                                                : account.keep_on_server == "untilDownloaded" ? @tr("Mail is removed from the server once it's on this device.")
-                                                : account.keep_on_server == "always" ? @tr("Flectar Mail never removes mail from the server.")
-                                                : @tr("Mail is removed after this time, or once deleted here.");
-                                            choices: root.keep-on-server-options;
-                                            selected-index: root.keep-on-server-index(account.keep_on_server);
-                                            title-color: root.body-text;
-                                            description-color: root.faint-text;
-                                            selected(index, value) => { root.select-keep-on-server(account.id, index); }
-                                        }
-                                        // The server's own rule wins over the account's choice.
-                                        server-rule := Text {
-                                            visible: drop-target.has-server-copies && root.server-removes-sooner(account);
-                                            x: drop-target.content-x;
-                                            y: server-copies-row.y + server-copies-row.height - drop-target.select-end + (self.visible ? 8px : 0px);
-                                            width: parent.width - self.x - 16px;
-                                            height: self.visible ? self.preferred-height : 0px;
-                                            text: account.server_keeps_mail_days == 0
-                                                ? @tr("This server removes mail as soon as it's downloaded.")
-                                                : @tr("This server removes downloaded mail after one day." | "This server removes downloaded mail after {n} days." % account.server_keeps_mail_days);
-                                            color: AppTheme.destructive;
-                                            font-size: TypeScale.caption;
-                                            wrap: word-wrap;
-                                        }
-                                        server-copies-note := Text {
-                                            visible: drop-target.has-server-copies && (account.keep_on_server != "always" || root.server-removes-sooner(account));
-                                            x: server-rule.x;
-                                            y: server-rule.y + server-rule.height + (self.visible ? 4px : 0px);
-                                            width: server-rule.width;
-                                            height: self.visible ? self.preferred-height : 0px;
-                                            text: @tr("Mail removed from the server is kept only on this device. Database snapshots in Storage include it.");
-                                            color: root.faint-text;
-                                            font-size: TypeScale.caption;
-                                            wrap: word-wrap;
-                                        }
-                                        // Which folders show in the sidebar (#253).
-                                        shown-row := Rectangle {
-                                            visible: drop-target.has-shown-folders;
-                                            x: drop-target.content-x;
-                                            y: drop-target.kind-end + drop-target.gap - drop-target.plain-lead;
-                                            width: parent.width - self.x - 16px;
-                                            height: 12px + shown-label.height + shown-description.height;
-                                            shown-label := Text {
-                                                x: 0px; y: drop-target.plain-top;
-                                                width: parent.width - shown-button.width - 16px; height: max(20px, self.preferred-height);
-                                                text: @tr("Folders");
-                                                color: root.body-text;
-                                                font-size: TypeScale.body;
-                                                font-weight: 600;
-                                                vertical-alignment: center;
-                                            }
-                                            shown-description := Text {
-                                                x: 0px; y: shown-label.y + shown-label.height + 1px;
-                                                width: shown-label.width; height: max(18px, self.preferred-height);
-                                                text: account.mail_protocol == "imap" ? @tr("Which folders show in the sidebar and sync") : @tr("Which folders show in the sidebar");
-                                                color: root.faint-text;
-                                                font-size: TypeScale.caption;
-                                                wrap: word-wrap;
-                                                vertical-alignment: center;
-                                            }
-                                            shown-button := Button {
-                                                x: parent.width - self.width;
-                                                y: drop-target.plain-control-y;
-                                                width: 136px;
-                                                height: 34px;
-                                                text: @tr("Choose…");
-                                                clicked => { root.open-folders(account, account-index); }
-                                            }
-                                        }
-                                        // Contacts from the account's CardDAV server, or a Gmail
-                                        // account's Google Contacts (#423).
-                                        contacts-row := Rectangle {
-                                            // Gmail accounts offer their Google Contacts first. An
-                                            // account syncs one contacts server, so a connected one
-                                            // decides.
-                                            property <bool> offers-google: !account.carddav_connected && account.provider == "gmail";
-                                            property <bool> google: account.carddav_connected && account.carddav_google;
-                                            property <bool> needs-sign-in: account.carddav_connected && account.carddav_status == "needs_reauth";
-                                            // The button that asks Google: to connect, or to sign in again.
-                                            property <bool> asks-google: self.offers-google || (self.google && self.needs-sign-in);
-                                            // Browser sign-ins run one at a time.
-                                            property <bool> sign-in-free: !root.oauth_in_progress && !root.oauth_settings_saving;
-                                            property <string> connect-error: root.contacts_connect_error_account == account.id ? root.contacts_connect_error : "";
-                                            // A server error has no explanation of its own; it is shown
-                                            // as is, as the calendars show theirs.
-                                            property <string> sync-error: account.carddav_connected && account.carddav_status != "needs_reauth" && account.carddav_status != "offline"
-                                                ? account.carddav_status : "";
-                                            property <bool> shows-error: self.connect-error != "" || self.sync-error != "";
-                                            // Below the texts: an error, then, on phones, the buttons.
-                                            property <length> texts-end: contacts-description.y + contacts-description.height;
-                                            property <length> error-end: self.shows-error ? contacts-error.y + contacts-error.height : self.texts-end;
-                                            x: drop-target.content-x;
-                                            y: drop-target.shown-end + drop-target.gap - drop-target.plain-lead;
-                                            width: parent.width - self.x - 16px;
-                                            height: (root.compact ? contacts-actions.y + contacts-actions.height : self.error-end) + drop-target.plain-end;
-                                            contacts-label := Text {
-                                                x: 0px; y: drop-target.plain-top;
-                                                width: parent.width - contacts-controls.width - 16px; height: max(20px, self.preferred-height);
-                                                text: @tr("Contacts");
-                                                color: root.body-text;
-                                                font-size: TypeScale.body;
-                                                font-weight: 600;
-                                                vertical-alignment: center;
-                                            }
-                                            contacts-description := Text {
-                                                x: 0px; y: contacts-label.y + contacts-label.height + 1px;
-                                                width: root.compact ? parent.width : contacts-label.width; height: max(18px, self.preferred-height);
-                                                text: contacts-row.offers-google ? @tr("Sync contacts with your Google account.")
-                                                    : !account.carddav_connected ? @tr("Sync contacts with a standards-compliant CardDAV server.")
-                                                    : contacts-row.needs-sign-in
-                                                        ? (contacts-row.google ? @tr("Sign-in required") : @tr("The server did not accept the username or app password."))
-                                                    : account.carddav_status == "offline" ? @tr("Offline · retrying automatically")
-                                                    : contacts-row.google ? @tr("Google Contacts")
-                                                    : account.carddav_url;
-                                                color: contacts-row.needs-sign-in ? AppTheme.destructive : root.faint-text;
-                                                font-size: TypeScale.caption;
-                                                overflow: elide;
-                                                vertical-alignment: center;
-                                            }
-                                            // On the title's line: the switch, and the buttons beside
-                                            // it where they fit.
-                                            contacts-controls := HorizontalLayout {
-                                                x: parent.width - self.width;
-                                                y: drop-target.plain-control-y;
-                                                width: self.preferred-width;
-                                                height: 34px;
-                                                spacing: 12px;
-                                                cross-axis-alignment: center;
-                                                if account.carddav_connected : Switch {
-                                                    checked: account.carddav_enabled;
-                                                    control-label: @tr("Contacts");
-                                                    toggled => { root.set_account_carddav_enabled(account.id, self.checked); }
-                                                }
-                                                if !root.compact && contacts-row.asks-google : Button {
-                                                    width: max(136px, self.content-width);
-                                                    height: 34px;
-                                                    text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
-                                                    enabled: contacts-row.sign-in-free;
-                                                    clicked => { root.connect_google_contacts(account.id); }
-                                                }
-                                                if !root.compact && contacts-row.google && !contacts-row.needs-sign-in : Button {
-                                                    width: max(136px, self.content-width);
-                                                    height: 34px;
-                                                    text: @tr("Disconnect");
-                                                    clicked => { root.disconnect_carddav(account.id); }
-                                                }
-                                                if !root.compact && !contacts-row.google : Button {
-                                                    width: max(136px, self.content-width);
-                                                    height: 34px;
-                                                    text: contacts-row.offers-google ? @tr("Connect CardDAV")
-                                                        : !account.carddav_connected ? @tr("Connect")
-                                                        : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
-                                                    clicked => { root.open-carddav-settings(account); }
-                                                }
-                                            }
-                                            contacts-error := CopyableDiagnostic {
-                                                visible: contacts-row.shows-error;
-                                                x: 0px; y: contacts-row.texts-end + 6px;
-                                                width: parent.width;
-                                                text: contacts-row.connect-error != "" ? @tr("Could not connect Google Contacts: {}", contacts-row.connect-error)
-                                                    : @tr("Contacts sync error: {}", contacts-row.sync-error);
-                                                text-color: AppTheme.destructive;
-                                                font-size: TypeScale.caption;
-                                            }
-                                            // Phones stack the buttons below the texts, as the
-                                            // calendars do.
-                                            contacts-actions := VerticalLayout {
-                                                visible: root.compact;
-                                                x: 0px; y: contacts-row.error-end + 10px;
-                                                width: parent.width;
-                                                height: self.preferred-height;
-                                                spacing: 8px;
-                                                if contacts-row.asks-google : Button {
-                                                    height: 44px;
-                                                    text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
-                                                    enabled: contacts-row.sign-in-free;
-                                                    clicked => { root.connect_google_contacts(account.id); }
-                                                }
-                                                if contacts-row.google && !contacts-row.needs-sign-in : Button {
-                                                    height: 44px;
-                                                    text: @tr("Disconnect");
-                                                    clicked => { root.disconnect_carddav(account.id); }
-                                                }
-                                                if !contacts-row.google : Button {
-                                                    height: 44px;
-                                                    text: contacts-row.offers-google ? @tr("Connect CardDAV")
-                                                        : !account.carddav_connected ? @tr("Connect")
-                                                        : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
-                                                    clicked => { root.open-carddav-settings(account); }
-                                                }
-                                            }
-                                        }
-                                        profile-row := Rectangle {
-                                            x: drop-target.content-x;
-                                            y: drop-target.contacts-end + drop-target.gap - (root.compact ? drop-target.plain-lead : 5px);
-                                            width: parent.width - self.x - 16px;
-                                            height: 12px + profile-label.height + profile-description.height;
-                                            background: transparent;
-                                            profile-label := Text {
-                                                x: 0px; y: drop-target.plain-top;
-                                                width: parent.width - 152px; height: max(20px, self.preferred-height);
-                                                text: @tr("Profile");
-                                                color: root.body-text;
-                                                font-size: TypeScale.body;
-                                                font-weight: 600;
-                                                vertical-alignment: center;
-                                            }
-                                            profile-description := Text {
-                                                x: 0px; y: profile-label.y + profile-label.height + 1px;
-                                                width: parent.width - 152px; height: max(18px, self.preferred-height);
-                                                text: account.has_profile
-                                                    ? @tr("Uses the {} color in the mail list", account.profile_name)
-                                                    : account.has_account_color
-                                                        ? @tr("Uses a custom account color")
-                                                        : @tr("Uses a generated account color");
-                                                color: root.faint-text;
-                                                font-size: TypeScale.caption;
-                                                overflow: elide;
-                                                vertical-alignment: center;
-                                            }
-                                            Button {
-                                                x: parent.width - self.width;
-                                                y: drop-target.plain-control-y;
-                                                width: 136px;
-                                                height: 34px;
-                                                text: account.has_profile ? account.profile_name : @tr("No profile");
-                                                clicked => { root.open-account-profile-picker(account, account-index); }
-                                            }
-                                            Rectangle {
-                                                x: parent.width - 126px;
-                                                y: drop-target.plain-control-y + 12px;
-                                                width: 10px; height: 10px;
-                                                border-radius: 5px;
-                                                background: account.profile_color;
-                                            }
-                                        }
-                                        calendars := AccountCalendars {
-                                            x: drop-target.content-x;
-                                            // Its title sits 1px into its line.
-                                            y: profile-row.y + profile-row.height - drop-target.plain-end + drop-target.gap - 1px;
-                                            width: parent.width - self.x - 16px;
+                                            y: drop-target.collapsed-height + (root.compact ? 56px : 16px);
+                                            width: min(self.preferred-width, parent.width - self.x - 16px);
                                             height: self.preferred-height;
-                                            account: account;
+                                            row-height: root.compact ? LayoutMetrics.touch-target : 36px;
+                                            labels: [@tr("General"), @tr("Signatures"), @tr("Composing"), @tr("OpenPGP"), @tr("Automatic replies")];
+                                            current: root.account-tab;
+                                            chosen(index) => { root.account-tab = index; }
+                                        }
+                                        // Placed as switch rows are; the section lines up the rest.
+                                        mail-settings := AccountMailSection {
+                                            x: drop-target.content-x - 16px;
+                                            y: drop-target.tabs-end + (root.compact ? 10px : 12px);
+                                            width: parent.width - self.x - 8px;
+                                            height: self.preferred-height;
+                                            section: !drop-target.mail-settings-shown ? ""
+                                                : root.account-tab == 1 ? "signatures"
+                                                : root.account-tab == 2 ? "composing"
+                                                : root.account-tab == 3 ? "openpgp" : "replies";
                                             compact: root.compact;
-                                            provider-actions-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            loaded: drop-target.mail-settings-loaded;
                                             title-color: root.body-text;
                                             description-color: root.faint-text;
                                             line-color: root.border-subtle;
-                                            connect-provider => { root.connect_account_calendar(account.id); }
-                                            add-caldav => { root.add-caldav(account); }
-                                            edit(connection) => { root.edit-caldav(account, connection); }
-                                            remove(connection) => { root.confirm-calendar-removal(account, connection); }
-                                            set-enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
+                                        }
+                                        // The account's own settings, under General.
+                                        general-settings := Rectangle {
+                                            x: 0px;
+                                            y: 0px;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            visible: root.account-tab == 0;
+                                            // Select rows pad their texts by `select-top` and 8px on
+                                            // a phone, 16px on a desktop; switch rows by 16px. Each
+                                            // row is placed so its texts start at `content-x` and its
+                                            // control ends 16px from the card's edge.
+                                            name-row := SettingsTextRow {
+                                                x: drop-target.content-x - (root.compact ? 8px : 16px);
+                                                y: drop-target.tabs-end + (root.compact ? 18px : 22px) - drop-target.select-top;
+                                                width: parent.width - self.x - 8px;
+                                                compact: root.compact;
+                                                compact-description-height: 51px;
+                                                title: @tr("Account name");
+                                                description: @tr("Shown instead of the address in the sidebar and lists. People you email don't see it.");
+                                                value: account.custom_name;
+                                                placeholder: account.default_name;
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                committed(name) => { root.save_account_name(account.id, name); }
+                                            }
+                                            history-row := SettingsSelectRow {
+                                                x: name-row.x;
+                                                y: drop-target.name-end + drop-target.gap - drop-target.select-top;
+                                                width: name-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Mail history");
+                                                compact-description-height: 51px;
+                                                description: account.mail_history == "all"
+                                                    ? @tr("Download the full mailbox. Large accounts can take considerable time and storage.")
+                                                    : @tr("How far back to download. Mail already stored on this device is kept.");
+                                                choices: root.mail-history-options;
+                                                selected-index: root.mail-history-index(account.mail_history);
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => { root.select-mail-history(account.id, index); }
+                                            }
+                                            download-row := SettingsSelectRow {
+                                                visible: drop-target.has-download;
+                                                x: history-row.x;
+                                                y: drop-target.history-end + drop-target.gap - drop-target.select-top;
+                                                width: history-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Download");
+                                                compact-description-height: 51px;
+                                                description: account.download == "headers" ? @tr("Messages download when you open them.")
+                                                    : account.download == "everything" ? @tr("Messages and their attachments up to 25 MB download ahead of time, to open them offline.")
+                                                    : @tr("Messages download ahead of time, and attachments when you open them.");
+                                                choices: root.download-options;
+                                                selected-index: account.download == "headers" ? 0 : account.download == "everything" ? 2 : 1;
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => {
+                                                    root.save_account_download(account.id, index == 0 ? "headers" : index == 2 ? "everything" : "messages");
+                                                }
+                                            }
+                                            check-row := SettingsSelectRow {
+                                                x: history-row.x;
+                                                y: drop-target.download-end + drop-target.gap - drop-target.select-top;
+                                                width: history-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Check for new mail");
+                                                description: account.check_interval == "manual" ? @tr("When the app starts, and when you check for new mail.")
+                                                    : account.check_interval == "app" ? @tr("As often as set in General.")
+                                                    : @tr("How often this account checks its server.");
+                                                choices: root.check-interval-options;
+                                                selected-index: root.check-interval-index(account.check_interval);
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => { root.select-check-interval(account.id, index); }
+                                            }
+                                            push-row := SettingsSwitchRow {
+                                                visible: drop-target.has-push;
+                                                x: drop-target.content-x - 16px;
+                                                y: drop-target.check-end + drop-target.gap - 16px;
+                                                width: parent.width - self.x - 8px;
+                                                compact: root.compact;
+                                                title: @tr("Instant updates");
+                                                control-shift: drop-target.switch-shift;
+                                                description: account.check_interval == "manual"
+                                                    ? @tr("Off while the account checks only when you ask.")
+                                                    : @tr("The server tells Flectar Mail of new mail as soon as it arrives.");
+                                                checked: account.push && account.check_interval != "manual";
+                                                enabled: account.check_interval != "manual";
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                toggled(checked) => { root.save_account_push(account.id, checked); }
+                                            }
+                                            timeout-row := SettingsSelectRow {
+                                                visible: drop-target.has-timeout;
+                                                x: history-row.x;
+                                                y: drop-target.checks-end + drop-target.gap - drop-target.select-top;
+                                                width: history-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Server timeout");
+                                                description: @tr("How long to wait for a slow server before giving up.");
+                                                choices: root.server-timeout-options;
+                                                selected-index: root.server-timeout-index(account.server_timeout);
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => { root.select-server-timeout(account.id, index); }
+                                            }
+                                            sent-copy-row := SettingsSelectRow {
+                                                visible: drop-target.has-sent-copy;
+                                                x: history-row.x;
+                                                y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
+                                                width: history-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Sent copies");
+                                                compact-description-height: 51px;
+                                                description: @tr("Choose who saves sent mail. Use Flectar Mail if your server does not save a copy.");
+                                                choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar Mail saves a copy")];
+                                                selected-index: account.sent_copy_policy == "server" ? 1 : account.sent_copy_policy == "client" ? 2 : 0;
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => {
+                                                    root.save_account_sent_copy_policy(account.id, index == 1 ? "server" : index == 2 ? "client" : "auto");
+                                                }
+                                            }
+                                            subscribed-row := SettingsSwitchRow {
+                                                visible: drop-target.has-subscriptions;
+                                                x: push-row.x;
+                                                y: drop-target.sent-copy-end + drop-target.gap - 16px;
+                                                width: push-row.width;
+                                                compact: root.compact;
+                                                compact-description-height: 51px;
+                                                title: @tr("Subscribed folders only");
+                                                control-shift: drop-target.switch-shift;
+                                                description: @tr("Show and sync only the folders you subscribed to on the server, plus Inbox and the folders mail is filed into.");
+                                                checked: account.subscribed_folders_only;
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                toggled(checked) => { root.save_account_subscribed_folders_only(account.id, checked); }
+                                            }
+                                            // Which folders Sent, Drafts and the rest are (#252).
+                                            folders-row := Rectangle {
+                                                visible: drop-target.has-subscriptions;
+                                                x: drop-target.content-x;
+                                                y: subscribed-row.y + subscribed-row.height - drop-target.switch-end + drop-target.gap - drop-target.plain-lead;
+                                                width: parent.width - self.x - 16px;
+                                                height: 12px + folders-label.height + folders-description.height;
+                                                folders-label := Text {
+                                                    x: 0px; y: drop-target.plain-top;
+                                                    width: parent.width - folders-button.width - 16px; height: max(20px, self.preferred-height);
+                                                    text: @tr("Special folders");
+                                                    color: root.body-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                                folders-description := Text {
+                                                    x: 0px; y: folders-label.y + folders-label.height + 1px;
+                                                    width: folders-label.width; height: max(18px, self.preferred-height);
+                                                    text: @tr("Sent, Drafts, Trash, Spam and Archive");
+                                                    color: root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    wrap: word-wrap;
+                                                    vertical-alignment: center;
+                                                }
+                                                folders-button := Button {
+                                                    x: parent.width - self.width;
+                                                    y: drop-target.plain-control-y;
+                                                    width: 136px;
+                                                    height: 34px;
+                                                    text: @tr("Choose…");
+                                                    clicked => { root.open-folder-roles(account, account-index); }
+                                                }
+                                            }
+                                            server-copies-row := SettingsSelectRow {
+                                                visible: drop-target.has-server-copies;
+                                                x: history-row.x;
+                                                y: drop-target.timeout-end + drop-target.gap - drop-target.select-top;
+                                                width: history-row.width;
+                                                compact: root.compact;
+                                                title: @tr("Keep mail on the server");
+                                                compact-description-height: 51px;
+                                                description: account.keep_on_server == "untilDeleted" ? @tr("Mail you delete here is removed from the server too.")
+                                                    : account.keep_on_server == "untilDownloaded" ? @tr("Mail is removed from the server once it's on this device.")
+                                                    : account.keep_on_server == "always" ? @tr("Flectar Mail never removes mail from the server.")
+                                                    : @tr("Mail is removed after this time, or once deleted here.");
+                                                choices: root.keep-on-server-options;
+                                                selected-index: root.keep-on-server-index(account.keep_on_server);
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                selected(index, value) => { root.select-keep-on-server(account.id, index); }
+                                            }
+                                            // The server's own rule wins over the account's choice.
+                                            server-rule := Text {
+                                                visible: drop-target.has-server-copies && root.server-removes-sooner(account);
+                                                x: drop-target.content-x;
+                                                y: server-copies-row.y + server-copies-row.height - drop-target.select-end + (self.visible ? 8px : 0px);
+                                                width: parent.width - self.x - 16px;
+                                                height: self.visible ? self.preferred-height : 0px;
+                                                text: account.server_keeps_mail_days == 0
+                                                    ? @tr("This server removes mail as soon as it's downloaded.")
+                                                    : @tr("This server removes downloaded mail after one day." | "This server removes downloaded mail after {n} days." % account.server_keeps_mail_days);
+                                                color: AppTheme.destructive;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                            }
+                                            server-copies-note := Text {
+                                                visible: drop-target.has-server-copies && (account.keep_on_server != "always" || root.server-removes-sooner(account));
+                                                x: server-rule.x;
+                                                y: server-rule.y + server-rule.height + (self.visible ? 4px : 0px);
+                                                width: server-rule.width;
+                                                height: self.visible ? self.preferred-height : 0px;
+                                                text: @tr("Mail removed from the server is kept only on this device. Database snapshots in Storage include it.");
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                wrap: word-wrap;
+                                            }
+                                            // Which folders show in the sidebar (#253).
+                                            shown-row := Rectangle {
+                                                visible: drop-target.has-shown-folders;
+                                                x: drop-target.content-x;
+                                                y: drop-target.kind-end + drop-target.gap - drop-target.plain-lead;
+                                                width: parent.width - self.x - 16px;
+                                                height: 12px + shown-label.height + shown-description.height;
+                                                shown-label := Text {
+                                                    x: 0px; y: drop-target.plain-top;
+                                                    width: parent.width - shown-button.width - 16px; height: max(20px, self.preferred-height);
+                                                    text: @tr("Folders");
+                                                    color: root.body-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                                shown-description := Text {
+                                                    x: 0px; y: shown-label.y + shown-label.height + 1px;
+                                                    width: shown-label.width; height: max(18px, self.preferred-height);
+                                                    text: account.mail_protocol == "imap" ? @tr("Which folders show in the sidebar and sync") : @tr("Which folders show in the sidebar");
+                                                    color: root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    wrap: word-wrap;
+                                                    vertical-alignment: center;
+                                                }
+                                                shown-button := Button {
+                                                    x: parent.width - self.width;
+                                                    y: drop-target.plain-control-y;
+                                                    width: 136px;
+                                                    height: 34px;
+                                                    text: @tr("Choose…");
+                                                    clicked => { root.open-folders(account, account-index); }
+                                                }
+                                            }
+                                            // Contacts from the account's CardDAV server, or a Gmail
+                                            // account's Google Contacts (#423).
+                                            contacts-row := Rectangle {
+                                                // Gmail accounts offer their Google Contacts first. An
+                                                // account syncs one contacts server, so a connected one
+                                                // decides.
+                                                property <bool> offers-google: !account.carddav_connected && account.provider == "gmail";
+                                                property <bool> google: account.carddav_connected && account.carddav_google;
+                                                property <bool> needs-sign-in: account.carddav_connected && account.carddav_status == "needs_reauth";
+                                                // The button that asks Google: to connect, or to sign in again.
+                                                property <bool> asks-google: self.offers-google || (self.google && self.needs-sign-in);
+                                                // Browser sign-ins run one at a time.
+                                                property <bool> sign-in-free: !root.oauth_in_progress && !root.oauth_settings_saving;
+                                                property <string> connect-error: root.contacts_connect_error_account == account.id ? root.contacts_connect_error : "";
+                                                // A server error has no explanation of its own; it is shown
+                                                // as is, as the calendars show theirs.
+                                                property <string> sync-error: account.carddav_connected && account.carddav_status != "needs_reauth" && account.carddav_status != "offline"
+                                                    ? account.carddav_status : "";
+                                                property <bool> shows-error: self.connect-error != "" || self.sync-error != "";
+                                                // Below the texts: an error, then, on phones, the buttons.
+                                                property <length> texts-end: contacts-description.y + contacts-description.height;
+                                                property <length> error-end: self.shows-error ? contacts-error.y + contacts-error.height : self.texts-end;
+                                                x: drop-target.content-x;
+                                                y: drop-target.shown-end + drop-target.gap - drop-target.plain-lead;
+                                                width: parent.width - self.x - 16px;
+                                                height: (root.compact ? contacts-actions.y + contacts-actions.height : self.error-end) + drop-target.plain-end;
+                                                contacts-label := Text {
+                                                    x: 0px; y: drop-target.plain-top;
+                                                    width: parent.width - contacts-controls.width - 16px; height: max(20px, self.preferred-height);
+                                                    text: @tr("Contacts");
+                                                    color: root.body-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                                contacts-description := Text {
+                                                    x: 0px; y: contacts-label.y + contacts-label.height + 1px;
+                                                    width: root.compact ? parent.width : contacts-label.width; height: max(18px, self.preferred-height);
+                                                    text: contacts-row.offers-google ? @tr("Sync contacts with your Google account.")
+                                                        : !account.carddav_connected ? @tr("Sync contacts with a standards-compliant CardDAV server.")
+                                                        : contacts-row.needs-sign-in
+                                                            ? (contacts-row.google ? @tr("Sign-in required") : @tr("The server did not accept the username or app password."))
+                                                        : account.carddav_status == "offline" ? @tr("Offline · retrying automatically")
+                                                        : contacts-row.google ? @tr("Google Contacts")
+                                                        : account.carddav_url;
+                                                    color: contacts-row.needs-sign-in ? AppTheme.destructive : root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
+                                                }
+                                                // On the title's line: the switch, and the buttons beside
+                                                // it where they fit.
+                                                contacts-controls := HorizontalLayout {
+                                                    x: parent.width - self.width;
+                                                    y: drop-target.plain-control-y;
+                                                    width: self.preferred-width;
+                                                    height: 34px;
+                                                    spacing: 12px;
+                                                    cross-axis-alignment: center;
+                                                    if account.carddav_connected : Switch {
+                                                        checked: account.carddav_enabled;
+                                                        control-label: @tr("Contacts");
+                                                        toggled => { root.set_account_carddav_enabled(account.id, self.checked); }
+                                                    }
+                                                    if !root.compact && contacts-row.asks-google : Button {
+                                                        width: max(136px, self.content-width);
+                                                        height: 34px;
+                                                        text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
+                                                        enabled: contacts-row.sign-in-free;
+                                                        clicked => { root.connect_google_contacts(account.id); }
+                                                    }
+                                                    if !root.compact && contacts-row.google && !contacts-row.needs-sign-in : Button {
+                                                        width: max(136px, self.content-width);
+                                                        height: 34px;
+                                                        text: @tr("Disconnect");
+                                                        clicked => { root.disconnect_carddav(account.id); }
+                                                    }
+                                                    if !root.compact && !contacts-row.google : Button {
+                                                        width: max(136px, self.content-width);
+                                                        height: 34px;
+                                                        text: contacts-row.offers-google ? @tr("Connect CardDAV")
+                                                            : !account.carddav_connected ? @tr("Connect")
+                                                            : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
+                                                        clicked => { root.open-carddav-settings(account); }
+                                                    }
+                                                }
+                                                contacts-error := CopyableDiagnostic {
+                                                    visible: contacts-row.shows-error;
+                                                    x: 0px; y: contacts-row.texts-end + 6px;
+                                                    width: parent.width;
+                                                    text: contacts-row.connect-error != "" ? @tr("Could not connect Google Contacts: {}", contacts-row.connect-error)
+                                                        : @tr("Contacts sync error: {}", contacts-row.sync-error);
+                                                    text-color: AppTheme.destructive;
+                                                    font-size: TypeScale.caption;
+                                                }
+                                                // Phones stack the buttons below the texts, as the
+                                                // calendars do.
+                                                contacts-actions := VerticalLayout {
+                                                    visible: root.compact;
+                                                    x: 0px; y: contacts-row.error-end + 10px;
+                                                    width: parent.width;
+                                                    height: self.preferred-height;
+                                                    spacing: 8px;
+                                                    if contacts-row.asks-google : Button {
+                                                        height: 44px;
+                                                        text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
+                                                        enabled: contacts-row.sign-in-free;
+                                                        clicked => { root.connect_google_contacts(account.id); }
+                                                    }
+                                                    if contacts-row.google && !contacts-row.needs-sign-in : Button {
+                                                        height: 44px;
+                                                        text: @tr("Disconnect");
+                                                        clicked => { root.disconnect_carddav(account.id); }
+                                                    }
+                                                    if !contacts-row.google : Button {
+                                                        height: 44px;
+                                                        text: contacts-row.offers-google ? @tr("Connect CardDAV")
+                                                            : !account.carddav_connected ? @tr("Connect")
+                                                            : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
+                                                        clicked => { root.open-carddav-settings(account); }
+                                                    }
+                                                }
+                                            }
+                                            profile-row := Rectangle {
+                                                x: drop-target.content-x;
+                                                y: drop-target.contacts-end + drop-target.gap - (root.compact ? drop-target.plain-lead : 5px);
+                                                width: parent.width - self.x - 16px;
+                                                height: 12px + profile-label.height + profile-description.height;
+                                                background: transparent;
+                                                profile-label := Text {
+                                                    x: 0px; y: drop-target.plain-top;
+                                                    width: parent.width - 152px; height: max(20px, self.preferred-height);
+                                                    text: @tr("Profile");
+                                                    color: root.body-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                                profile-description := Text {
+                                                    x: 0px; y: profile-label.y + profile-label.height + 1px;
+                                                    width: parent.width - 152px; height: max(18px, self.preferred-height);
+                                                    text: account.has_profile
+                                                        ? @tr("Uses the {} color in the mail list", account.profile_name)
+                                                        : account.has_account_color
+                                                            ? @tr("Uses a custom account color")
+                                                            : @tr("Uses a generated account color");
+                                                    color: root.faint-text;
+                                                    font-size: TypeScale.caption;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
+                                                }
+                                                Button {
+                                                    x: parent.width - self.width;
+                                                    y: drop-target.plain-control-y;
+                                                    width: 136px;
+                                                    height: 34px;
+                                                    text: account.has_profile ? account.profile_name : @tr("No profile");
+                                                    clicked => { root.open-account-profile-picker(account, account-index); }
+                                                }
+                                                Rectangle {
+                                                    x: parent.width - 126px;
+                                                    y: drop-target.plain-control-y + 12px;
+                                                    width: 10px; height: 10px;
+                                                    border-radius: 5px;
+                                                    background: account.profile_color;
+                                                }
+                                            }
+                                            calendars := AccountCalendars {
+                                                x: drop-target.content-x;
+                                                // Its title sits 1px into its line.
+                                                y: profile-row.y + profile-row.height - drop-target.plain-end + drop-target.gap - 1px;
+                                                width: parent.width - self.x - 16px;
+                                                height: self.preferred-height;
+                                                account: account;
+                                                compact: root.compact;
+                                                provider-actions-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                                title-color: root.body-text;
+                                                description-color: root.faint-text;
+                                                line-color: root.border-subtle;
+                                                connect-provider => { root.connect_account_calendar(account.id); }
+                                                add-caldav => { root.add-caldav(account); }
+                                                edit(connection) => { root.edit-caldav(account, connection); }
+                                                remove(connection) => { root.confirm-calendar-removal(account, connection); }
+                                                set-enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
+                                            }
                                         }
                                     }
                                 }
                             }
-                            AccountMailPreferencesPanel { accounts: root.connected_accounts; compact: root.compact; }
                             Rectangle {
                                 height: root.custom_oauth_open ? oauth-fields.y + oauth-fields.height + 8px : oauth-card.content-y + 60px;
                                 oauth-card := SettingsCard { title: @tr("OAuth app credentials"); description: root.phone-app ? (root.custom_oauth_configured ? @tr("Your own app keys are set up on this device.") : @tr("Advanced: use your own Gmail or Microsoft app registration on this device.")) : root.custom_oauth_configured ? @tr("Custom desktop app credentials are configured.") : @tr("Advanced: use your own Gmail or Microsoft desktop app registration."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
