@@ -3255,6 +3255,45 @@ impl ListDensity {
 /// The most lines of a message's text the mail list shows.
 pub const MAX_PREVIEW_LINES: u8 = 3;
 
+/// How messages show when they open (#544). Each one can still switch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageView {
+    /// As the sender formatted them.
+    #[default]
+    Original,
+    /// In Reader mode, when they have HTML.
+    Reader,
+    /// As plain text: the text the sender wrote beside the HTML, or else the
+    /// HTML's text.
+    PlainText,
+}
+
+impl MessageView {
+    pub const ALL: [Self; 3] = [Self::Original, Self::Reader, Self::PlainText];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Reader => "reader",
+            Self::PlainText => "plainText",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+}
+
+/// Whether plain-text mail shows in a fixed-width font unless the user says
+/// otherwise: on the desktop, where it keeps text laid out in columns as it
+/// was written, and not on phones, whose narrow screens fit fewer columns.
+pub fn default_plain_text_fixed_width() -> bool {
+    cfg!(desktop)
+}
+
 /// When an unread message the user opens counts as read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3415,6 +3454,12 @@ pub struct Settings {
     /// When an unread message the user opens counts as read.
     #[serde(default)]
     pub mark_read: MarkRead,
+    /// How messages show when they open.
+    #[serde(default)]
+    pub message_view: MessageView,
+    /// Plain-text mail shows in a fixed-width font. Each device keeps its own.
+    #[serde(default = "default_plain_text_fixed_width")]
+    pub plain_text_fixed_width: bool,
     /// Directory desktop save dialogs open in. An empty value follows the
     /// platform default. The path is deliberately not validated when stored:
     /// a saved location can be unavailable later, such as an unmounted network
@@ -3855,6 +3900,8 @@ impl Default for Settings {
             link_password: false,
             load_remote_images: false,
             mark_read: MarkRead::Immediately,
+            message_view: MessageView::Original,
+            plain_text_fixed_width: default_plain_text_fixed_width(),
             download_directory: String::new(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
@@ -4327,6 +4374,10 @@ mod tests {
         use std::time::Duration;
         for choice in MarkRead::ALL {
             assert_eq!(MarkRead::parse(choice.as_str()), Some(choice));
+            assert_eq!(serde_json::to_value(choice).unwrap(), choice.as_str());
+        }
+        for choice in MessageView::ALL {
+            assert_eq!(MessageView::parse(choice.as_str()), Some(choice));
             assert_eq!(serde_json::to_value(choice).unwrap(), choice.as_str());
         }
         assert_eq!(MarkRead::parse("sometimes"), None);
