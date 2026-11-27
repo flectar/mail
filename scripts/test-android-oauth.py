@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate Android OAuth configuration and the actual build-script environment."""
+import base64
 import hashlib
 import importlib.util
 import json
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
@@ -23,6 +25,15 @@ VALID = {
     GOOGLE: "123456789-fixture.apps.googleusercontent.com",
     MICROSOFT: "abcdef01-2345-4678-9abc-def012345678",
 }
+APP_CERTIFICATE = b"OAuth test app signing certificate"
+APP_CERTIFICATE_PEM = (
+    "-----BEGIN CERTIFICATE-----\n"
+    + base64.encodebytes(APP_CERTIFICATE).decode()
+    + "-----END CERTIFICATE-----\n"
+)
+APP_REDIRECT = "msauth://com.flectar.mail/" + urllib.parse.quote(
+    base64.b64encode(hashlib.sha1(APP_CERTIFICATE).digest()).decode(), safe=""
+)
 
 
 class AndroidOAuthTests(unittest.TestCase):
@@ -51,22 +62,35 @@ class AndroidOAuthTests(unittest.TestCase):
                 self.assertIn(key, str(error.exception))
                 self.assertNotIn(value, str(error.exception))
 
-    def run_build(self, script, configuration, ci_variable=None, preview=False, ndk_revision="30.0.16248370"):
+    def run_build(self, script, configuration, ci_variable=None, preview=False, ndk_revision="30.0.16248370",
+                  signing_key="app"):
         # Run the real shell entry points. Replace Cargo with a recorder that
         # stops before compilation; no SDK downloads, signing or network calls.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
-            for name in (script, "verify-android-oauth.py", "verify-android-keystore.sh", "android-version-code.py"):
+            for name in (script, "verify-android-oauth.py", "verify-android-keystore.sh", "android-version-code.py",
+                         "android-certificate-identities.py"):
                 shutil.copyfile(SCRIPTS / name, root / "scripts" / name)
             # Exercise the real CI signing guard with a fake public certificate,
             # without depending on release secrets or a JDK.
             certificate = b"OAuth test public certificate"
             android = root / "platform/android"
             android.mkdir(parents=True)
-            (android / "app-signing-certificate.sha256").write_text(
-                hashlib.sha256(certificate).hexdigest() + "\n"
-            )
+            if signing_key == "upload":
+                # Google Play builds sign with the upload key and take the
+                # Microsoft redirect from the app signing certificate.
+                (android / "play-upload-certificate.sha256").write_text(
+                    hashlib.sha256(certificate).hexdigest() + "\n"
+                )
+                (android / "app-signing-certificate.pem").write_text(APP_CERTIFICATE_PEM)
+                (android / "app-signing-certificate.sha256").write_text(
+                    hashlib.sha256(APP_CERTIFICATE).hexdigest() + "\n"
+                )
+            else:
+                (android / "app-signing-certificate.sha256").write_text(
+                    hashlib.sha256(certificate).hexdigest() + "\n"
+                )
             sdk = root / "sdk"
             sdk.mkdir()
             toolchain = root / "ndk/toolchains/llvm/prebuilt/fixture/bin"
@@ -116,6 +140,7 @@ class AndroidOAuthTests(unittest.TestCase):
                 "FLECTAR_ANDROID_KEY_ALIAS": "fixture",
                 "FLECTAR_ANDROID_KEY_PASSWORD": "fixture",
                 "FLECTAR_ANDROID_VERSION_NAME": "0.1.0-alpha.8" if preview else "0.1.0",
+                "FLECTAR_ANDROID_SIGNING_KEY": signing_key,
                 "OAUTH_CAPTURE": str(capture),
                 **configuration,
             })
@@ -155,6 +180,32 @@ class AndroidOAuthTests(unittest.TestCase):
             result, recorded = self.run_build("build-android-release.sh", {**values, MICROSOFT: invalid})
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIsNone(recorded)
+
+    def test_play_builds_check_the_redirect_against_the_app_certificate(self):
+        # The upload key signs the bundle, but Google Play installs carry the
+        # app signing key, so its certificate decides the Entra redirect.
+        values = {**VALID, REDIRECT: APP_REDIRECT}
+        result, recorded = self.run_build("build-android-release.sh", values, signing_key="upload")
+        self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+        self.assertEqual(recorded, values)
+        result, recorded = self.run_build("build-android-release.sh", {}, preview=True, signing_key="upload")
+        self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+        upload_redirect = "msauth://com.flectar.mail/" + urllib.parse.quote(
+            base64.b64encode(hashlib.sha1(b"OAuth test public certificate").digest()).decode(), safe=""
+        )
+        for preview, redirect in ((False, upload_redirect), (True, "msauth://com.flectar.mail/other")):
+            with self.subTest(redirect=redirect):
+                result, recorded = self.run_build("build-android-release.sh", {**values, REDIRECT: redirect},
+                                                  preview=preview, signing_key="upload")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIsNone(recorded)
+                self.assertIn("does not match the app signing certificate", result.stderr)
+
+    def test_unknown_signing_key_is_refused_before_compilation(self):
+        result, recorded = self.run_build("build-android-release.sh", {}, preview=True, signing_key="other")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIsNone(recorded)
+        self.assertIn("Unknown Android signing key: other", result.stderr)
 
     def test_ndk_older_than_r30_is_refused_before_compilation(self):
         # Slint's prebuilt Skia binaries need the libc++ of NDK r30 or newer.

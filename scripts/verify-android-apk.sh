@@ -101,7 +101,16 @@ signing_args=("$signing_mode")
 if [[ "$signing_mode" == production || "${CI:-}" == true || "${GITHUB_ACTIONS:-}" == true ]]; then
   # Published previews and stable releases must match the same committed
   # certificate. Verification needs no access to the private key or password.
-  expected_sha256="$(cat "$project_dir/platform/android/app-signing-certificate.sha256")"
+  # Google Play builds are signed with the upload key, which has its own pin.
+  case "${FLECTAR_ANDROID_SIGNING_KEY:-app}" in
+    app) pin=app-signing-certificate.sha256 ;;
+    upload) pin=play-upload-certificate.sha256 ;;
+    *)
+      printf 'Unknown Android signing key: %s\n' "$FLECTAR_ANDROID_SIGNING_KEY" >&2
+      exit 1
+      ;;
+  esac
+  expected_sha256="$(cat "$project_dir/platform/android/$pin")"
 elif [[ "$signing_mode" == test ]]; then
   data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
   keystore="${FLECTAR_ANDROID_TEST_KEYSTORE:-$data_home/flectar-mail/android/test-signing.keystore}"

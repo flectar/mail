@@ -35,7 +35,11 @@ if [[ -n "${FLECTAR_ANDROID_VERSION_CODE:-}" && "$FLECTAR_ANDROID_VERSION_CODE" 
   exit 1
 fi
 export FLECTAR_ANDROID_VERSION_CODE="$version_code"
-bash "$project_dir/scripts/verify-android-keystore.sh" >/dev/null
+# The app signing key signs APKs published on GitHub. Google Play builds are
+# signed with the upload key (FLECTAR_ANDROID_SIGNING_KEY=upload), and Play
+# signs what people install with its copy of the app signing key.
+signing_key="${FLECTAR_ANDROID_SIGNING_KEY:-app}"
+signing_sha256="$(bash "$project_dir/scripts/verify-android-keystore.sh")"
 
 if [[ "$preview" == true ]]; then
   if [[ "$FLECTAR_ANDROID_VERSION_NAME" != *-* ]]; then
@@ -49,6 +53,20 @@ fi
 if [[ "$preview" == false || -n "${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-}" ]]; then
   if [[ ! "${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-}" =~ ^msauth://com\.flectar\.mail/.+ ]]; then
     printf 'Microsoft redirect must be msauth://com.flectar.mail/<signature-hash>.\n' >&2
+    exit 1
+  fi
+fi
+# Copies from Google Play carry the app signing key, not the upload key that
+# signs this build, so their redirect comes from the app's certificate.
+if [[ "$signing_key" == upload && -n "${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-}" ]]; then
+  app_redirect="$(python3 "$project_dir/scripts/android-certificate-identities.py" \
+    "$project_dir/platform/android/app-signing-certificate.pem" \
+    --pin "$project_dir/platform/android/app-signing-certificate.sha256" |
+    sed -n 's/^Microsoft redirect URI: //p')"
+  if [[ "$app_redirect" != "$FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI" ]]; then
+    printf 'The Entra redirect does not match the app signing certificate.\n' >&2
+    printf 'Configured: %s\nExpected:   %s\n' \
+      "$FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI" "$app_redirect" >&2
     exit 1
   fi
 fi
@@ -121,8 +139,15 @@ if ! command -v jarsigner >/dev/null 2>&1 \
   printf 'The production App Bundle signature could not be verified.\n' >&2
   exit 1
 fi
+bundle_sha256="$(keytool -printcert -J-Duser.language=en -J-Duser.country=US \
+  -jarfile "$artifact_dir/flectar-mail.aab" |
+  sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+if [[ "$bundle_sha256" != "$signing_sha256" ]]; then
+  printf 'The App Bundle is not signed by the pinned %s key.\n' "$signing_key" >&2
+  exit 1
+fi
 
-if [[ -n "${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-}" ]]; then
+if [[ "$signing_key" == app && -n "${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-}" ]]; then
   actual_redirect="$(ANDROID_HOME="$android_sdk" "$project_dir/scripts/android-signing-identities.sh" \
     "$artifact_dir/flectar-mail.apk" | sed -n 's/^Microsoft redirect URI: //p')"
   if [[ "$actual_redirect" != "$FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI" ]]; then
@@ -135,5 +160,5 @@ fi
 
 ANDROID_HOME="$android_sdk" "$project_dir/scripts/verify-android-apk.sh" \
   "$artifact_dir/flectar-mail.apk" production
-printf 'Signed release artifacts:\n  %s\n  %s\n' \
+printf 'Release artifacts signed with the %s key:\n  %s\n  %s\n' "$signing_key" \
   "$artifact_dir/flectar-mail.apk" "$artifact_dir/flectar-mail.aab"

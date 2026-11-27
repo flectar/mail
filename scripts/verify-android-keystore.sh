@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
-# Check the single app signing identity used by every published Android APK.
+# Check a pinned Android signing identity: the app signing key that every
+# published APK carries (the default), or the upload key that signs bundles for
+# Google Play (FLECTAR_ANDROID_SIGNING_KEY=upload).
 set -euo pipefail
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+case "${FLECTAR_ANDROID_SIGNING_KEY:-app}" in
+  app)
+    key_name='app signing'
+    pin_file="$project_dir/platform/android/app-signing-certificate.sha256"
+    replaced='Alpha, beta, and stable must use the original key; do not replace the fingerprint.'
+    ;;
+  upload)
+    key_name='Google Play upload'
+    pin_file="$project_dir/platform/android/play-upload-certificate.sha256"
+    replaced='Restore the upload key from the google-play environment, or reset it in Play Console and pin the new certificate.'
+    ;;
+  *)
+    printf 'Unknown Android signing key: %s\n' "$FLECTAR_ANDROID_SIGNING_KEY" >&2
+    exit 1
+    ;;
+esac
 for name in FLECTAR_ANDROID_KEYSTORE FLECTAR_ANDROID_KEYSTORE_PASSWORD FLECTAR_ANDROID_KEY_ALIAS FLECTAR_ANDROID_KEY_PASSWORD; do
   if [[ -z "${!name:-}" ]]; then
-    printf 'Android signing requires %s. Restore the original app signing key and its credentials; never generate a replacement release key.\n' "$name" >&2
+    printf 'Android signing requires %s. Restore the original %s key and its credentials; never generate a replacement release key.\n' "$name" "$key_name" >&2
     exit 1
   fi
 done
 if [[ ! -f "$FLECTAR_ANDROID_KEYSTORE" ]]; then
-  printf 'The configured Android app signing keystore does not exist.\n' >&2
+  printf 'The configured Android %s keystore does not exist.\n' "$key_name" >&2
   exit 1
 fi
 
@@ -26,16 +44,16 @@ if [[ "$FLECTAR_ANDROID_KEYSTORE_PASSWORD" != "$FLECTAR_ANDROID_KEY_PASSWORD" ]]
   fi
 fi
 
-expected="$(cat "$project_dir/platform/android/app-signing-certificate.sha256")"
+expected="$(cat "$pin_file")"
 if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-  printf 'The pinned Android app signing certificate SHA-256 is invalid.\n' >&2
+  printf 'The pinned Android %s certificate SHA-256 is invalid.\n' "$key_name" >&2
   exit 1
 fi
 actual="$(keytool -exportcert -keystore "$FLECTAR_ANDROID_KEYSTORE" \
   -alias "$FLECTAR_ANDROID_KEY_ALIAS" \
   -storepass:env FLECTAR_ANDROID_KEYSTORE_PASSWORD | sha256sum)"
 if [[ "${actual%% *}" != "$expected" ]]; then
-  printf 'Android signing key differs from the pinned app identity. Alpha, beta, and stable must use the original key; do not replace the fingerprint.\n' >&2
+  printf 'Android signing key differs from the pinned %s identity. %s\n' "$key_name" "$replaced" >&2
   exit 1
 fi
 # Exporting a certificate alone also succeeds for certificate-only entries.
