@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-26 13:30+0000\n"
+"PO-Revision-Date: 2026-11-27 01:33+0000\n"
 "Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: Russian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ru/>\n"
@@ -9744,16 +9744,16 @@ msgstr ""
 "показывать, открывать и обрабатывать каждое письмо отдельно."
 
 #: ui/dialogs/settings-dialog.slint:1816
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "Новые сообщения"
+msgstr "Не закрывать сообщения"
 
 #: ui/dialogs/settings-dialog.slint:1817
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"Сообщения, открытые в переписке, остаются открытыми, когда вы открываете "
+"другое. Выключите, чтобы читать по одному."
 
 #: ui/dialogs/settings-dialog.slint:1830
 msgid "Mark messages as read"
@@ -13329,10 +13329,8 @@ msgid "Copy name and email address"
 msgstr "Копировать имя и адрес почты"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "Перемещать сообщения"
+msgstr "Закрыть сообщение"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."

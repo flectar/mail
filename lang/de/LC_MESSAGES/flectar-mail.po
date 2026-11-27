@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
-"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
+"PO-Revision-Date: 2026-11-27 12:18+0000\n"
+"Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
 "mail/de/>\n"
 "Language: de\n"
@@ -10227,7 +10227,7 @@ msgstr "Jetzt entfernen"
 
 #: ui/dialogs/settings-dialog.slint:2437
 msgid "Clear suggested people"
-msgstr "Vorgeschlagene Personen entfernen"
+msgstr "Vorschläge löschen"
 
 #: ui/dialogs/settings-dialog.slint:2460
 msgid "Blocked senders"

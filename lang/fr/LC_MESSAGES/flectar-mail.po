@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
-"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
+"PO-Revision-Date: 2026-11-27 12:18+0000\n"
+"Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
 "Language: fr\n"
@@ -805,7 +805,7 @@ msgstr[1] "{n} intéractions"
 
 #: ui/app.slint:279 ui/components/composer-fields.slint:20
 msgid "New message"
-msgstr "Écrire un nouveau message"
+msgstr "Nouveau message"
 
 #: ui/app.slint:280 ui/reader-window.slint:45
 #: ui/views/mail-list-pane.slint:1499
@@ -2003,7 +2003,7 @@ msgstr "Sauvegarde de Flectar Mail"
 #: ui/app.slint:611 ui/dialogs/import-dialog.slint:406
 #: ui/views/onboarding-view.slint:298
 msgid "Import accounts and mail"
-msgstr "Importer des comptes et des messages"
+msgstr "Importer comptes et messages"
 
 #: ui/app.slint:612
 msgid "Choose a Thunderbird profile or a folder of mail"
@@ -4700,7 +4700,7 @@ msgstr "Remettre les filtres à zéro"
 #: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:166
 #: ui/components/calendar.slint:1005
 msgid "New event"
-msgstr "Créer un événement"
+msgstr "Nouvel événement"
 
 #: ui/components/calendar.slint:32
 msgid "+{n} more"
@@ -4842,11 +4842,11 @@ msgstr "Aller à la période suivante"
 
 #: ui/components/calendar.slint:753
 msgid "Week"
-msgstr "Vue semaine"
+msgstr "Semaine"
 
 #: ui/components/calendar.slint:754 ui/components/calendar.slint:1017
 msgid "Month"
-msgstr "Vue mois"
+msgstr "Mois"
 
 #: ui/components/calendar.slint:755 ui/components/calendar.slint:1018
 msgid "Agenda"
@@ -6132,7 +6132,7 @@ msgstr "Couleur propre"
 
 #: ui/components/profile-controls.slint:411
 msgid "Generated color"
-msgstr "Couleur générée automatiquement"
+msgstr "Couleur générée"
 
 #: ui/components/profile-controls.slint:417
 msgid "New profile…"
@@ -9569,7 +9569,7 @@ msgstr "mises à jour nouvelle version publication téléchargement vérificatio
 
 #: ui/dialogs/settings-dialog.slint:1463 ui/dialogs/settings-dialog.slint:4454
 msgid "SETTINGS"
-msgstr "PARAMÈTRES DE L’APPLICATION"
+msgstr "PARAMÈTRES"
 
 #: ui/dialogs/settings-dialog.slint:1466 ui/dialogs/settings-dialog.slint:4456
 msgid "No settings found"
@@ -9632,7 +9632,7 @@ msgstr "Services"
 #: ui/dialogs/settings-dialog.slint:1480 ui/dialogs/settings-dialog.slint:4131
 #: ui/dialogs/settings-dialog.slint:4470
 msgid "About"
-msgstr "À propos de l’application"
+msgstr "À propos"
 
 #: ui/dialogs/settings-dialog.slint:1504
 msgid "Manage appearance, privacy, and synchronization."
@@ -9984,7 +9984,7 @@ msgstr "Seulement quand je réponds"
 
 #: ui/dialogs/settings-dialog.slint:1993
 msgid "Remote images"
-msgstr "Chargement des images distantes"
+msgstr "Images distantes"
 
 #: ui/dialogs/settings-dialog.slint:1994
 msgid "Load sender favicons and images embedded in message bodies."

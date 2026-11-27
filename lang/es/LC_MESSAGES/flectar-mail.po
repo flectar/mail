@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-26 13:30+0000\n"
+"PO-Revision-Date: 2026-11-27 12:18+0000\n"
 "Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
@@ -9751,16 +9751,16 @@ msgstr ""
 "ver, abrir y gestionar cada mensaje por separado."
 
 #: ui/dialogs/settings-dialog.slint:1816
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "Mensajes nuevos"
+msgstr "Mantener mensajes abiertos"
 
 #: ui/dialogs/settings-dialog.slint:1817
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"Los mensajes que abres en una conversación siguen abiertos cuando abres "
+"otro. Desactívalo para leerlos de uno en uno."
 
 #: ui/dialogs/settings-dialog.slint:1830
 msgid "Mark messages as read"
@@ -11805,7 +11805,7 @@ msgstr "Iniciar sesión en el navegador"
 
 #: ui/link-services.slint:213 ui/link-services.slint:231
 msgid "Use an app password"
-msgstr "Usar una contraseña de aplicación"
+msgstr "Usar contraseña de aplicación"
 
 #: ui/link-services.slint:248
 msgid "Links work for"
@@ -13343,10 +13343,8 @@ msgid "Copy name and email address"
 msgstr "Copiar nombre y dirección de correo"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "Mover mensajes"
+msgstr "Cerrar mensaje"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."
