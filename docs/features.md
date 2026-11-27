@@ -348,11 +348,12 @@ show. A hidden folder renamed in Flectar Mail stays hidden, and Flectar Mail
 Sync hides it on your other devices too. This works for IMAP, JMAP and POP3
 accounts. Gmail keeps its labels.
 
-An IMAP account can also leave folders out of what this device syncs, such as a
-large archive. Turn off a folder's **Sync** switch in **Folders**, and its mail
-stops downloading in the background, while the mail already here stays. Opening
-the folder checks it then. The Inbox, Sent and Drafts always sync, and each
-device keeps its own choice.
+An IMAP or JMAP account can also leave folders out of what this device syncs,
+such as a large archive. Turn off a folder's **Sync** switch in **Folders**, and
+its mail stops downloading in the background, while the mail already here
+stays. Opening the folder checks it then. Mail that's in a synced folder too
+keeps syncing. The Inbox, Sent and Drafts always sync, and each device keeps its
+own choice.
 
 ## Sender addresses
 

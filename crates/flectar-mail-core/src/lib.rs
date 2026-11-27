@@ -2229,8 +2229,11 @@ impl Core {
                     )));
                 }
                 let hidden_ids = repo::folders::hidden_ids(conn, Some(account_id))?;
-                // Only IMAP accounts sync folder by folder.
-                let imap = config.mail_protocol == MailProtocol::Imap;
+                // IMAP and JMAP accounts choose which folders sync.
+                let per_folder = matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                );
                 let mut folders = repo::folders::list_info(conn, Some(account_id))?
                     .into_iter()
                     .map(|folder| {
@@ -2248,7 +2251,7 @@ impl Core {
                             synced: always_synced
                                 || !config.settings.unsynced_folders.contains(&folder.path),
                             always_synced,
-                            syncable: imap && folder.selectable && role != Some(roles::ALL),
+                            syncable: per_folder && folder.selectable && role != Some(roles::ALL),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -2303,9 +2306,9 @@ impl Core {
         Ok(())
     }
 
-    /// Choose whether this device syncs a folder of an IMAP account in the
-    /// background (#253). One left out is checked when it's opened, and keeps
-    /// the mail it has. The Inbox, Sent and Drafts always sync.
+    /// Choose whether this device syncs a folder of an IMAP or JMAP account in
+    /// the background (#253). One left out is checked when it's opened, and
+    /// keeps the mail it has. The Inbox, Sent and Drafts always sync.
     pub async fn set_folder_synced(&self, folder_id: i64, synced: bool) -> Result<()> {
         let (account_id, settings) = self
             .db
@@ -2315,7 +2318,10 @@ impl Core {
                     .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
                 let mut config = repo::accounts::get_config(&tx, folder.account_id)?
                     .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
-                if config.mail_protocol != MailProtocol::Imap {
+                if !matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                ) {
                     return Err(CoreError::Other(format!(
                         "{} syncs all its folders together",
                         config.email
@@ -2355,7 +2361,12 @@ impl Core {
                     return Ok(None);
                 };
                 let unsynced = repo::accounts::get_config(conn, folder.account_id)?
-                    .filter(|config| config.mail_protocol == MailProtocol::Imap)
+                    .filter(|config| {
+                        matches!(
+                            config.mail_protocol,
+                            MailProtocol::Imap | MailProtocol::Jmap
+                        )
+                    })
                     .is_some_and(|config| {
                         !repo::folders::syncs(&folder, &config.settings.unsynced_folders)
                     });
@@ -17316,10 +17327,11 @@ mod hidden_folder_tests {
         assert!(core.account_folders(1).await.is_err());
     }
 
-    /// An IMAP account leaves folders out of its sync, but for the Inbox,
-    /// Sent and Drafts, and others sync all their folders together (#253).
+    /// IMAP and JMAP accounts leave folders out of their sync, but for the
+    /// Inbox, Sent and Drafts, and others sync all their folders together
+    /// (#253).
     #[tokio::test]
-    async fn an_imap_account_chooses_the_folders_it_syncs() {
+    async fn imap_and_jmap_accounts_choose_the_folders_they_sync() {
         let temp = tempfile::tempdir().unwrap();
         let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
             .await
@@ -17368,16 +17380,35 @@ mod hidden_folder_tests {
         core.set_folder_synced(lists, true).await.unwrap();
         assert!(sync().await.iter().all(|(_, synced, ..)| *synced));
 
-        core.db
-            .write(|conn| {
+        // A JMAP account's folders are its mailboxes, which have ids.
+        let protocol = |protocol: &'static str| {
+            core.db.write(move |conn| {
                 conn.execute(
-                    "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1",
-                    [],
+                    "UPDATE accounts SET mail_protocol = ?1 WHERE id = 1",
+                    [protocol],
+                )?;
+                conn.execute(
+                    "UPDATE folders SET jmap_id = CASE WHEN ?1 = 'jmap' THEN 'mailbox-' || id END
+                     WHERE account_id = 1",
+                    [protocol],
                 )?;
                 Ok(())
             })
-            .await
-            .unwrap();
+        };
+        protocol("jmap").await.unwrap();
+        core.set_folder_synced(lists, false).await.unwrap();
+        assert_eq!(
+            sync().await,
+            [
+                (1, true, true, true),
+                (lists, false, false, true),
+                (sent, true, true, true),
+            ]
+        );
+        core.check_folder(lists).await.unwrap();
+        core.set_folder_synced(lists, true).await.unwrap();
+
+        protocol("pop3").await.unwrap();
         assert!(core.set_folder_synced(lists, false).await.is_err());
         assert!(!sync().await.iter().any(|(_, _, _, syncable)| *syncable));
     }

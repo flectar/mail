@@ -1498,7 +1498,7 @@ async fn adopting_a_message_drops_the_attachment_rows_of_its_previous_copy() {
         .read(move |conn| {
             let adopted = repo::messages::by_jmap_id(conn, 1, "email-a")?.unwrap();
             assert_eq!(adopted.id, local);
-            let queue = repo::messages::jmap_attachment_listing_queue(conn, 1, 10)?;
+            let queue = repo::messages::jmap_attachment_listing_queue(conn, 1, 10, &[])?;
             assert_eq!(
                 queue.iter().map(|item| item.message_id).collect::<Vec<_>>(),
                 [local]
@@ -3478,4 +3478,139 @@ fn flowed_text_parts_read_back_into_paragraphs() {
     .unwrap();
     let (plain, _) = body_text(&email).unwrap();
     assert_eq!(plain.as_deref(), Some("A paragraph that \r\ngoes on.\r\n"));
+}
+
+/// Lists, folder 10, which this device leaves out of the account's sync
+/// (#253).
+async fn leave_out_lists(ctx: &SyncCtx, config: &mut AccountConfig) {
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, path, jmap_id)
+                 VALUES (10, 1, 'Lists', 'lists-remote')",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    config.settings.unsynced_folders.insert("Lists".into());
+}
+
+/// `email` in `mailboxes` alone.
+fn in_mailboxes(mut email: Value, mailboxes: &[&str]) -> Value {
+    email["mailboxIds"] = mailboxes
+        .iter()
+        .map(|mailbox| ((*mailbox).to_owned(), json!(true)))
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    email
+}
+
+/// A message kept here from Lists, as JMAP mail is kept.
+async fn kept_in_lists(ctx: &SyncCtx, remote_id: &'static str) {
+    ctx.db
+        .write(move |conn| {
+            let (_, message) =
+                crate::db::testutil::seed_message(conn, "sender@mail.example", "Kept", false);
+            conn.execute(
+                "UPDATE messages SET folder_id = 10, uid = NULL, jmap_id = ?2,
+                   jmap_blob_id = 'blob-' || ?2
+                 WHERE id = ?1",
+                params![message, remote_id],
+            )?;
+            conn.execute(
+                "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 10)",
+                [message],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// The Email ids of the mail here.
+async fn stored_mail(ctx: &SyncCtx) -> Vec<String> {
+    ctx.db
+        .read(|conn| {
+            Ok(conn
+                .prepare("SELECT jmap_id FROM messages WHERE jmap_id IS NOT NULL ORDER BY jmap_id")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn new_mail_only_in_a_left_out_folder_waits_until_it_is_opened() {
+    let (_dir, ctx, mut config) = fixture().await;
+    leave_out_lists(&ctx, &mut config).await;
+    kept_in_lists(&ctx, "gone").await;
+    // An earlier pass caught up, so this one follows Email/changes.
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO jmap_sync_state (account_id, email_state) VALUES (1, 'state-0')",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mock = MockJmap {
+        emails: vec![
+            in_mailboxes(email("only-lists", "t1"), &["lists-remote"]),
+            in_mailboxes(email("both", "t2"), &["inbox-remote", "lists-remote"]),
+            email("inbox", "t3"),
+        ],
+        changes: Some(json!({
+            "created": ["only-lists", "both", "inbox"], "updated": [], "destroyed": []
+        })),
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    // Mail in the Inbox too syncs. What the server deleted from Lists without
+    // a word stays until Lists is opened.
+    assert_eq!(stored_mail(&ctx).await, ["both", "gone", "inbox"]);
+
+    // Opening Lists checks it: its new mail comes, and what's gone goes.
+    check_left_out(&ctx, &config, &mock.connected, &HashSet::from([10]))
+        .await
+        .unwrap();
+    assert_eq!(stored_mail(&ctx).await, ["both", "inbox", "only-lists"]);
+    let queried = mock.calls("Email/query");
+    assert_eq!(
+        queried.last().unwrap()["filter"],
+        json!({"inMailbox": "lists-remote"})
+    );
+    mock.task.abort();
+}
+
+#[tokio::test]
+async fn a_full_sync_leaves_left_out_folders_out_and_keeps_their_mail() {
+    let (_dir, ctx, mut config) = fixture().await;
+    leave_out_lists(&ctx, &mut config).await;
+    kept_in_lists(&ctx, "kept").await;
+    let mock = MockJmap {
+        emails: vec![
+            in_mailboxes(email("kept", "t0"), &["lists-remote"]),
+            in_mailboxes(email("only-lists", "t1"), &["lists-remote"]),
+            email("inbox", "t3"),
+        ],
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    run_sync(&ctx, &config, &mock.connected).await.unwrap();
+    assert_eq!(stored_mail(&ctx).await, ["inbox", "kept"]);
+    for query in mock.calls("Email/query") {
+        assert_eq!(
+            query["filter"],
+            json!({"inMailboxOtherThan": ["lists-remote"]})
+        );
+    }
+    mock.task.abort();
 }

@@ -184,14 +184,14 @@ pub struct AccountHandle {
     settings_tx: Option<watch::Sender<crate::models::AccountSettings>>,
     /// The account's server timeout, which its tasks wait by (#252).
     server_timeout: std::time::Duration,
-    /// IMAP accounts: folders opened that the account's sync leaves out,
-    /// which its next cycle checks (#253).
+    /// IMAP and JMAP accounts: folders opened that the account's sync leaves
+    /// out, which its next pass checks (#253).
     folder_checks: Option<FolderChecks>,
     tasks: Vec<tokio::task::AbortHandle>,
 }
 
-/// Folders an IMAP account's worker checks in its next cycle (#253).
-type FolderChecks = Arc<std::sync::Mutex<HashSet<i64>>>;
+/// Folders an IMAP or JMAP account's worker checks in its next pass (#253).
+pub(crate) type FolderChecks = Arc<std::sync::Mutex<HashSet<i64>>>;
 
 /// A request to download a stored message's original file again after it
 /// went missing from this device. Answered with the file's new path.
@@ -461,7 +461,11 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
     // Every task of the account waits for its servers as long as its server
     // timeout says (#252).
     let server_timeout = config.settings.connection.server_timeout();
-    let folder_checks = (config.mail_protocol == MailProtocol::Imap).then(FolderChecks::default);
+    let folder_checks = matches!(
+        config.mail_protocol,
+        MailProtocol::Imap | MailProtocol::Jmap
+    )
+    .then(FolderChecks::default);
     // API protocols own their submission queues. SMTP-based protocols get a
     // dedicated submission worker that never waits behind mailbox sync.
     let (joins, send_tx, restore_tx) =
@@ -472,7 +476,14 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
                 None,
             ),
             MailProtocol::Jmap => (
-                crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx),
+                crate::jmap::sync::spawn(
+                    ctx,
+                    config,
+                    rx,
+                    body_rx,
+                    settings_rx,
+                    folder_checks.clone().unwrap_or_default(),
+                ),
                 None,
                 None,
             ),
