@@ -13,14 +13,14 @@
 // FLECTAR_TEXT_FIT_SNAPSHOTS to a directory to save a render of each state.
 
 use flectar_mail::{
-    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow, CalendarBar,
-    CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock,
-    CalendarWeekDay, ComposerUi, ContactAccountRow, ContactRow, ContactSidebarRow,
-    ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow,
-    ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment,
-    MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRole, MailboxRow,
-    MotionSettings, ProfileMemberRow, ReaderUi, SidebarRow, SidebarRowKind, StorageUsageRow,
-    ThreadMessageRow,
+    AccountImport, AccountMailPreferences, AccountRow, AppIcon, AppTheme, AppWindow,
+    CalendarAgendaRow, CalendarBar, CalendarConnectionRow, CalendarDay, CalendarEventRow,
+    CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, ComposerUi, ContactAccountRow,
+    ContactRow, ContactSidebarRow, ContactSidebarRowKind, ContactSyncState, ContactValueRow,
+    EmailRow, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow,
+    LocalizedMessage, MailAttachment, MailAttachments, MailLabelRow, MailListEntry, MailProfileRow,
+    MailboxRole, MailboxRow, MotionSettings, ProfileMemberRow, ReaderUi, SidebarRow,
+    SidebarRowKind, StorageUsageRow, ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
@@ -734,6 +734,7 @@ fn reset(app: &AppWindow) {
     app.set_active_mail_profile(MailProfileRow::default());
     app.invoke_close_settings();
     app.set_settings_open_account(-1);
+    app.global::<AccountMailPreferences>().set_account_id(-1);
     app.set_contact_source("Personal · jamie.rivera@example.com".into());
     app.set_contact_sync(ContactSyncState::Pending);
     app.set_settings_tab("General".into());
@@ -1126,6 +1127,15 @@ fn states() -> Vec<State> {
             app.set_caldav_connection_id(2);
             app.set_caldav_url("https://dav.example.com/".into());
             app.set_caldav_username("alex.morgan@example.com".into());
+        }),
+        state("settings account composing", |app| {
+            app.set_settings_tab("Accounts".into());
+            app.invoke_open_settings();
+            let preferences = app.global::<AccountMailPreferences>();
+            preferences.set_account_id(1);
+            preferences.set_account_label("alex.morgan@example.com".into());
+            // The tabs are a row on desktop and a column on phones.
+            press(app, "Composing");
         }),
     ];
     for tab in [

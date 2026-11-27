@@ -265,12 +265,12 @@ msgstr ""
 msgid "API key, if the server asks for one"
 msgstr ""
 
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:138
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:675
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:675
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601 ui/dialogs/folder-dialog.slint:138
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:675
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601 ui/dialogs/folder-dialog.slint:138 ui/network.slint:325 ui/translation.slint:378 ui/views/files-view.slint:675
 msgid "Save"
 msgstr ""
 
@@ -312,10 +312,10 @@ msgstr ""
 msgid "Make it shorter, keeping what matters."
 msgstr ""
 
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:381
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:381 ui/dialogs/settings-dialog.slint:83
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:381 ui/dialogs/settings-dialog.slint:83 ui/link-services.slint:118
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:381 ui/dialogs/settings-dialog.slint:83 ui/link-services.slint:118 ui/views/contacts-view.slint:632
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:408
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:83
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:83 ui/link-services.slint:118
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:83 ui/link-services.slint:118 ui/views/contacts-view.slint:632
 msgid "Remove"
 msgstr ""
 
@@ -821,11 +821,11 @@ msgstr[1] ""
 msgid "Archive"
 msgstr ""
 
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464 ui/dialogs/saved-search-dialog.slint:121
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464 ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:635
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491 ui/dialogs/saved-search-dialog.slint:121
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491 ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:635
 msgid "Delete"
 msgstr ""
 
@@ -3672,549 +3672,563 @@ msgstr ""
 msgid "Add CalDAV calendar"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:271
-#: ui/components/account-mail-preferences.slint:271
-#: ui/components/account-mail-preferences.slint:271
-#: ui/components/account-mail-preferences.slint:271 ui/views/mail-reading-pane.slint:413
+#: ui/components/account-mail-preferences.slint:274
+#: ui/components/account-mail-preferences.slint:274
+#: ui/components/account-mail-preferences.slint:274
+#: ui/components/account-mail-preferences.slint:274 ui/views/mail-reading-pane.slint:413
 msgid "Cc"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:272
+#: ui/components/account-mail-preferences.slint:275
 msgid "Addresses that get a copy (optional)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:275
-#: ui/components/account-mail-preferences.slint:275
-#: ui/components/account-mail-preferences.slint:275
-#: ui/components/account-mail-preferences.slint:275
+#: ui/components/account-mail-preferences.slint:278
+#: ui/components/account-mail-preferences.slint:278
+#: ui/components/account-mail-preferences.slint:278
+#: ui/components/account-mail-preferences.slint:278
 msgid "Bcc"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:276
+#: ui/components/account-mail-preferences.slint:279
 msgid "Addresses that get a hidden copy (optional)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:292
-msgid "Cc {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:293
-msgid "Bcc {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:294
-msgid "Bcc {} from your provider"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:300
-msgid "Server allows any address at this domain"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:303
-msgid "Awaiting verification by the provider; cannot be selected yet"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:306
-msgid "The server refused the last message from this address: {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:306
-msgid "The server refused the last message from this address"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:309
-msgid "Sign-in address · replies go to {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:309
-msgid "Sign-in address"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:313
-msgid "Added by you · accepted by the server · replies go to {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:313
-msgid "Added by you · accepted by the server"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:315
-msgid "Added by you · not used yet · replies go to {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:315
-msgid "Added by you · not used yet"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:317
-msgid "Provided by the server · replies go to {}"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:317
-msgid "Provided by the server"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:321
-msgid "Sender identities, signatures, OpenPGP & automatic replies"
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:322
-msgid ""
-"Choose an account to manage its sender identity, signature, message "
-"protection and automatic replies."
-msgstr ""
-
-#: ui/components/account-mail-preferences.slint:333
+#: ui/components/account-mail-preferences.slint:289
 msgid "Signatures"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:334
+#: ui/components/account-mail-preferences.slint:290
+msgid "Composing"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:335
+#: ui/components/account-mail-preferences.slint:292
 msgid "Automatic replies"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:340
-#: ui/components/account-mail-preferences.slint:340
-#: ui/components/account-mail-preferences.slint:340
+#: ui/components/account-mail-preferences.slint:301
+msgid "Cc {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:302
+msgid "Bcc {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:303
+msgid "Bcc {} from your provider"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:309
+msgid "Server allows any address at this domain"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:312
+msgid "Awaiting verification by the provider; cannot be selected yet"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:315
+msgid "The server refused the last message from this address: {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:315
+msgid "The server refused the last message from this address"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:318
+msgid "Sign-in address · replies go to {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:318
+msgid "Sign-in address"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:322
+msgid "Added by you · accepted by the server · replies go to {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:322
+msgid "Added by you · accepted by the server"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:324
+msgid "Added by you · not used yet · replies go to {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:324
+msgid "Added by you · not used yet"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:326
+msgid "Provided by the server · replies go to {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:326
+msgid "Provided by the server"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:330
+msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:331
+msgid ""
+"Choose an account to manage its sender identity, signature, how its messages "
+"are written, message protection and automatic replies."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:367
+#: ui/components/account-mail-preferences.slint:367
+#: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:340
-#: ui/components/account-mail-preferences.slint:340
+#: ui/components/account-mail-preferences.slint:367
+#: ui/components/account-mail-preferences.slint:367
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:386
 msgid "Save sender default"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:360
+#: ui/components/account-mail-preferences.slint:387
 msgid "Refresh sender identities"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:365
-#: ui/components/account-mail-preferences.slint:365
+#: ui/components/account-mail-preferences.slint:392
+#: ui/components/account-mail-preferences.slint:392
 msgid "Search sender addresses"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:380
-#: ui/components/account-mail-preferences.slint:380
-#: ui/components/account-mail-preferences.slint:380 ui/dialogs/settings-dialog.slint:3232
-#: ui/components/account-mail-preferences.slint:380 ui/dialogs/settings-dialog.slint:3232
+#: ui/components/account-mail-preferences.slint:407
+#: ui/components/account-mail-preferences.slint:407
+#: ui/components/account-mail-preferences.slint:407 ui/dialogs/settings-dialog.slint:3232
+#: ui/components/account-mail-preferences.slint:407 ui/dialogs/settings-dialog.slint:3232
 msgid "Edit"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:386
+#: ui/components/account-mail-preferences.slint:413
 msgid "Showing {} of {} addresses. Search to find the others."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:390
-#: ui/components/account-mail-preferences.slint:390
+#: ui/components/account-mail-preferences.slint:417
+#: ui/components/account-mail-preferences.slint:417
 msgid "No matching addresses"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:392
+#: ui/components/account-mail-preferences.slint:419
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:397
+#: ui/components/account-mail-preferences.slint:424
 msgid "Copies of mail from {}"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:398
+#: ui/components/account-mail-preferences.slint:425
 msgid "Edit sender address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:398
+#: ui/components/account-mail-preferences.slint:425
 msgid "Add a sender address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:403
+#: ui/components/account-mail-preferences.slint:430
 msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:405
+#: ui/components/account-mail-preferences.slint:432
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:406
+#: ui/components/account-mail-preferences.slint:433
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
 "server decides when you send; Flectar Mail shows whether it accepted the "
 "last message."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:408
-#: ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:4975
-#: ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:4975 ui/views/onboarding-view.slint:342
-#: ui/components/account-mail-preferences.slint:408 ui/dialogs/settings-dialog.slint:4975 ui/views/onboarding-view.slint:342
+#: ui/components/account-mail-preferences.slint:435
+#: ui/components/account-mail-preferences.slint:435 ui/dialogs/settings-dialog.slint:4975
+#: ui/components/account-mail-preferences.slint:435 ui/dialogs/settings-dialog.slint:4975 ui/views/onboarding-view.slint:342
+#: ui/components/account-mail-preferences.slint:435 ui/dialogs/settings-dialog.slint:4975 ui/views/onboarding-view.slint:342
 msgid "Email address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:408
+#: ui/components/account-mail-preferences.slint:435
 msgid "alias@example.com"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:409
+#: ui/components/account-mail-preferences.slint:436
 msgid "Sender name"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:409
+#: ui/components/account-mail-preferences.slint:436
 msgid "Name shown to recipients (optional)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:410
+#: ui/components/account-mail-preferences.slint:437
 msgid "Reply-to address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:410
+#: ui/components/account-mail-preferences.slint:437
 msgid "Where replies should go (optional)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:417
-#: ui/components/account-mail-preferences.slint:417
+#: ui/components/account-mail-preferences.slint:444
+#: ui/components/account-mail-preferences.slint:444
 msgid "Save copies"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:418
+#: ui/components/account-mail-preferences.slint:445
 msgid "Save sender address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:418
+#: ui/components/account-mail-preferences.slint:445
 msgid "Add sender address"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433 ui/views/files-view.slint:480
-#: ui/components/account-mail-preferences.slint:423 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433 ui/views/files-view.slint:480 ui/views/mail-reading-pane.slint:2629
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433 ui/views/files-view.slint:480
+#: ui/components/account-mail-preferences.slint:450 ui/components/rule-editor.slint:516 ui/device-sync.slint:1189 ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726 ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378 ui/link-services.slint:131 ui/network.slint:433 ui/views/files-view.slint:480 ui/views/mail-reading-pane.slint:2629
 msgid "Cancel"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:430
+#: ui/components/account-mail-preferences.slint:457
 msgid "Automatic Cc and Bcc"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:431
+#: ui/components/account-mail-preferences.slint:458
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:441
-#: ui/components/account-mail-preferences.slint:441
-#: ui/components/account-mail-preferences.slint:441
+#: ui/components/account-mail-preferences.slint:468
+#: ui/components/account-mail-preferences.slint:468
+#: ui/components/account-mail-preferences.slint:468
 msgid "Signature"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:441
+#: ui/components/account-mail-preferences.slint:468
 msgid "Saved separately for each account."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:457
+#: ui/components/account-mail-preferences.slint:484
 msgid "Signature preview"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:460
+#: ui/components/account-mail-preferences.slint:487
 msgid ""
 "Signatures can have formatting and pictures. They open in the composer to "
 "write."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:462
+#: ui/components/account-mail-preferences.slint:489
 msgid "Edit signature"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:463
+#: ui/components/account-mail-preferences.slint:490
 msgid "New signature"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:467
+#: ui/components/account-mail-preferences.slint:494
 msgid "New messages"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:467
+#: ui/components/account-mail-preferences.slint:494
 msgid "Signature inserted when you start a message."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:473
+#: ui/components/account-mail-preferences.slint:500
 msgid "Replies & forwards"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:473
+#: ui/components/account-mail-preferences.slint:500
 msgid "Placed above the quoted message."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:478
+#: ui/components/account-mail-preferences.slint:505
 msgid "Save signature defaults"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:481
+#: ui/components/account-mail-preferences.slint:510
 msgid "Message format"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:481
+#: ui/components/account-mail-preferences.slint:510
 msgid "How new messages start. Each message can change it."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:482
+#: ui/components/account-mail-preferences.slint:511
 msgctxt "message format"
 msgid "Formatted text"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:482
+#: ui/components/account-mail-preferences.slint:511
 msgctxt "message format"
 msgid "Plain text"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:491
+#: ui/components/account-mail-preferences.slint:520
 msgid "Plain text in replies to plain text"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:491
+#: ui/components/account-mail-preferences.slint:520
 msgid "Replies and forwards to plain-text messages start as plain text."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:498
+#: ui/components/account-mail-preferences.slint:527
+msgid "Start replies below the quote"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:527
+msgid ""
+"The message you answer goes into your reply as text, to answer between its "
+"lines, and you write below it."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:498
+#: ui/components/account-mail-preferences.slint:534
 msgid ""
 "New messages ask to be told when they're read. Each message can change it "
 "under More options."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:513
+#: ui/components/account-mail-preferences.slint:549
 msgid "Send automatic replies"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:522
+#: ui/components/account-mail-preferences.slint:558
 msgid "FIRST DAY (OPTIONAL)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:523
+#: ui/components/account-mail-preferences.slint:559
 msgid "First day"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:523
-#: ui/components/account-mail-preferences.slint:523
-#: ui/components/account-mail-preferences.slint:523 ui/views/contacts-view.slint:809
+#: ui/components/account-mail-preferences.slint:559
+#: ui/components/account-mail-preferences.slint:559
+#: ui/components/account-mail-preferences.slint:559 ui/views/contacts-view.slint:809
 msgid "YYYY-MM-DD"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:527
+#: ui/components/account-mail-preferences.slint:563
 msgid "LAST DAY (OPTIONAL)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:528
+#: ui/components/account-mail-preferences.slint:564
 msgid "Last day"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:533
+#: ui/components/account-mail-preferences.slint:569
 msgid "SUBJECT"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:534
-#: ui/components/account-mail-preferences.slint:534
+#: ui/components/account-mail-preferences.slint:570
+#: ui/components/account-mail-preferences.slint:570
 msgid "Subject"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:534
+#: ui/components/account-mail-preferences.slint:570
 msgid "Such as Out of office"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:536
+#: ui/components/account-mail-preferences.slint:572
 msgid "MESSAGE"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:540
+#: ui/components/account-mail-preferences.slint:576
 msgid "Message, such as I'm away until Monday and will answer when I'm back."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:544
+#: ui/components/account-mail-preferences.slint:580
 msgid "Only reply to my contacts"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:550
+#: ui/components/account-mail-preferences.slint:586
 msgid "Only reply inside my organization"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:550
+#: ui/components/account-mail-preferences.slint:586
 msgid "Senders from other domains get no reply."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:565
-#: ui/components/account-mail-preferences.slint:565 ui/network.slint:203
+#: ui/components/account-mail-preferences.slint:601
+#: ui/components/account-mail-preferences.slint:601 ui/network.slint:203
 msgid "Saving…"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:574
+#: ui/components/account-mail-preferences.slint:610
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:575
+#: ui/components/account-mail-preferences.slint:611
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:575
+#: ui/components/account-mail-preferences.slint:611
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:576
+#: ui/components/account-mail-preferences.slint:612
 msgid "Create a new key"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:577
+#: ui/components/account-mail-preferences.slint:613
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:578
+#: ui/components/account-mail-preferences.slint:614
 msgid "Your full OpenPGP fingerprint"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:578
+#: ui/components/account-mail-preferences.slint:614
 msgid "Your full OpenPGP key fingerprint"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:580
+#: ui/components/account-mail-preferences.slint:616
 msgid "Digitally sign messages"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:580
+#: ui/components/account-mail-preferences.slint:616
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:585
+#: ui/components/account-mail-preferences.slint:621
 msgid "Require encryption"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:585
+#: ui/components/account-mail-preferences.slint:621
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:589
+#: ui/components/account-mail-preferences.slint:625
 msgid "Verified recipient keys"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:590
+#: ui/components/account-mail-preferences.slint:626
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
 "verify it."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:591
+#: ui/components/account-mail-preferences.slint:627
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:592
+#: ui/components/account-mail-preferences.slint:628
 msgid "Save OpenPGP settings"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:594
-#: ui/components/account-mail-preferences.slint:594
+#: ui/components/account-mail-preferences.slint:630
+#: ui/components/account-mail-preferences.slint:630
 msgid "Import key"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:595
-#: ui/components/account-mail-preferences.slint:595
+#: ui/components/account-mail-preferences.slint:631
+#: ui/components/account-mail-preferences.slint:631
 msgid "Export public key"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:596
-#: ui/components/account-mail-preferences.slint:596
+#: ui/components/account-mail-preferences.slint:632
+#: ui/components/account-mail-preferences.slint:632
 msgid "Show keys"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:604
+#: ui/components/account-mail-preferences.slint:640
 msgid "Open message file (.eml)"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:606
+#: ui/components/account-mail-preferences.slint:642
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:607
+#: ui/components/account-mail-preferences.slint:643
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
 "are not supported."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:610
-#: ui/components/account-mail-preferences.slint:610
+#: ui/components/account-mail-preferences.slint:646
+#: ui/components/account-mail-preferences.slint:646
 msgid "Working…"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:622
+#: ui/components/account-mail-preferences.slint:658
 msgid "OpenPGP message"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:625
+#: ui/components/account-mail-preferences.slint:661
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:626
+#: ui/components/account-mail-preferences.slint:662
 msgid "Export decrypted message"
 msgstr ""
 
-#: ui/components/account-mail-preferences.slint:627
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566 ui/views/files-view.slint:739
-#: ui/components/account-mail-preferences.slint:627 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566 ui/views/files-view.slint:739 ui/window-chrome.slint:238
+#: ui/components/account-mail-preferences.slint:663
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566 ui/views/files-view.slint:739
+#: ui/components/account-mail-preferences.slint:663 ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90 ui/components/rule-editor.slint:349 ui/device-sync.slint:1440 ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807 ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197 ui/folder-visibility.slint:136 ui/views/files-view.slint:566 ui/views/files-view.slint:739 ui/window-chrome.slint:238
 msgid "Close"
 msgstr ""
 

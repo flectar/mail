@@ -572,6 +572,10 @@ pub struct AccountSettings {
     /// when new messages start formatted.
     #[serde(default = "plain_text_replies_default")]
     pub plain_text_replies: bool,
+    /// Replies start below the original they quote, which goes into the
+    /// message as text to answer between its lines (#544).
+    #[serde(default)]
+    pub reply_below_quote: bool,
     /// New messages ask for a read receipt (RFC 8098), which each message
     /// can still change.
     #[serde(default)]
@@ -639,6 +643,7 @@ impl AccountSettings {
             keep_on_server: KeepOnServer::Always,
             message_format: MessageFormat::Formatted,
             plain_text_replies: plain_text_replies_default(),
+            reply_below_quote: false,
             request_read_receipts: false,
             subscribed_folders_only: false,
             check_interval: CheckInterval::App,
@@ -708,6 +713,13 @@ mod account_settings_tests {
         // Accounts from before the choice start formatted, with plain-text replies to plain text.
         assert_eq!(settings.message_format, MessageFormat::Formatted);
         assert!(settings.plain_text_replies);
+        // And replies above the original, until the account says otherwise.
+        assert!(!settings.reply_below_quote);
+        assert!(!AccountSettings::new(settings.connection.clone()).reply_below_quote);
+        settings.reply_below_quote = true;
+        let restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.reply_below_quote);
         let new = AccountSettings::new(settings.connection.clone());
         assert_eq!(
             (new.message_format, new.plain_text_replies),

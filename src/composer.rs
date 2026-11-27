@@ -2531,7 +2531,7 @@ impl ComposeSession {
             return;
         };
         let expanded = ui.get_quote_expanded();
-        let quoted = quote.editable_text();
+        let quoted = self.quote_for_editor(&quote);
         self.set_quote(&ui, None);
         let mut mark = None;
         self.edit(|document| {
@@ -2548,6 +2548,40 @@ impl ComposeSession {
             expanded,
             mark,
         });
+    }
+
+    /// The original as the editor holds it: in plain text with the quote
+    /// marks plain text writes, and otherwise a reply's in a quote block.
+    fn quote_for_editor(&self, quote: &ComposeQuote) -> String {
+        if self.plain_text.get() {
+            quote.plain.clone()
+        } else {
+            quote.editable_text()
+        }
+    }
+
+    /// Start a reply below the original it quotes, for an account that answers there: the
+    /// original goes into the editor as text to answer between its lines, and the caret
+    /// below it, above the signature (#544).
+    fn start_below_quote(&self) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let Some(quote) = self.quote.borrow().clone().filter(|quote| !quote.forward) else {
+            return;
+        };
+        let quoted = self.quote_for_editor(&quote);
+        self.set_quote(&ui, None);
+        {
+            let mut document = self.document.borrow_mut();
+            let inserted = format!("{quoted}\n\n");
+            let caret = inserted.len();
+            document.replace_unformatted(0..0, &inserted, caret);
+            // How the reply starts, as the signature is, not an edit to undo.
+            document.forget_history();
+        }
+        self.apply_document(&host);
     }
 
     /// Leave the original out of this message, until the user puts it back.
@@ -4505,6 +4539,11 @@ impl ComposeSession {
             .position(|s| Some(&s.id) == id.as_ref())
             .map_or(0, |i| i as i32 + 1);
         preferences.invoke_composer_signature(index);
+        if config.settings.reply_below_quote
+            && matches!(ui.get_mode().as_str(), "reply" | "reply_all")
+        {
+            self.start_below_quote();
+        }
     }
 
     fn choose_sender(&self, index: i32) {

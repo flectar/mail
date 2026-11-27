@@ -170,7 +170,12 @@ pub(super) fn prepare_message_compose(
         Some(sent_at) => UiMessage::arguments("On {}, {} wrote:", sent_at, &sender),
         None => UiMessage::detail("{} wrote:", &sender),
     });
-    let quote = ComposeQuote::reply(&attribution, original_body, source.html_body.as_deref());
+    // A reply leaves the original's signature out of what it quotes (#544).
+    let quote = ComposeQuote::reply(
+        &attribution,
+        crate::compose_quote::without_signature(original_body),
+        source.html_body.as_deref(),
+    );
 
     Ok(PreparedMessageCompose {
         account_id: source.account_id,
@@ -488,6 +493,8 @@ pub(super) fn compose_editor_style(ui: &ComposerUi<'_>) -> ComposeEditorStyle {
         ),
         selected_text: ui.get_editor_selected_text_color(),
         misspelling: ui.get_editor_misspelling_color(),
+        // Plain text is written in the font it's read in (#544).
+        fixed_width: ui.get_plain_text() && crate::plain_text_view::look().fixed_width,
     }
 }
 
@@ -760,6 +767,25 @@ mod tests {
         source.to = vec![address("Alex at work", "work@example.net")];
         let prepared = prepare_message_compose(&source, "forward", "", english).unwrap();
         assert_eq!(prepared.sender_email, "work@example.net");
+    }
+
+    #[test]
+    fn a_reply_quotes_the_original_without_its_signature() {
+        let mut source = source();
+        source.html_body = None;
+        let body = "The plan is ready.\n\n-- \nMaya\nBuild team";
+        let reply = prepare_message_compose(&source, "reply", body, english).unwrap();
+        let quote = reply.quote.unwrap();
+        assert!(
+            quote.plain.ends_with("> The plan is ready."),
+            "{}",
+            quote.plain
+        );
+        assert!(!quote.plain.contains("Maya\n"), "{}", quote.plain);
+        assert!(!quote.html.contains("Build team"), "{}", quote.html);
+        // A forward passes the whole message on.
+        let forward = prepare_message_compose(&source, "forward", body, english).unwrap();
+        assert!(forward.quote.unwrap().plain.ends_with("Build team"));
     }
 
     #[test]

@@ -491,6 +491,7 @@ pub(super) fn register(
                             ));
                             ui.set_plain_text_replies(config.settings.plain_text_replies);
                             ui.set_request_read_receipts(config.settings.request_read_receipts);
+                            ui.set_reply_below_quote(config.settings.reply_below_quote);
                             crate::auto_replies::load_tab(
                                 &app,
                                 &replies_runtime,
@@ -570,6 +571,36 @@ pub(super) fn register(
             false,
             async move {
                 core.set_account_read_receipt_requests(account_id, request)
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |app, result| {
+                if let Err(error) = result {
+                    app.global::<AccountMailPreferences>()
+                        .set_status(error.into());
+                }
+            },
+        );
+    });
+    let weak = app.as_weak();
+    let state_reply_below = state.clone();
+    let work = tasks.clone();
+    ui.on_save_reply_below_quote(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_account_id() <= 0 {
+            return;
+        }
+        let Some(core) = core(&state_reply_below) else {
+            return;
+        };
+        let account_id = i64::from(ui.get_account_id());
+        let below = ui.get_reply_below_quote();
+        work.spawn(
+            &app,
+            false,
+            async move {
+                core.set_account_reply_below_quote(account_id, below)
                     .await
                     .map_err(|error| error.to_string())
             },

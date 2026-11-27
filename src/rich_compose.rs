@@ -191,21 +191,50 @@ impl Eq for InlineImage {}
 /// `text` with its quote blocks written as plain-text mail quotes, in lines
 /// that start with `>`, for the plain-text part of a message being sent.
 pub(crate) fn with_plain_text_quotes(text: &str) -> String {
+    with_plain_text_quotes_at(text, 0).0
+}
+
+/// [`with_plain_text_quotes`], with where `offset` in `text` lands in it. A
+/// line in a quote block takes one more `>` than the marks it already has,
+/// with no space between them, as format=flowed reads quote levels (RFC
+/// 3676 section 4.5).
+fn with_plain_text_quotes_at(text: &str, offset: usize) -> (String, usize) {
     let mut plain = String::with_capacity(text.len());
+    let mut mapped = None;
+    let mut at = 0;
     for (index, line) in text.split('\n').enumerate() {
         if index > 0 {
             plain.push('\n');
+            at += 1;
         }
+        let start = plain.len();
         match line.strip_prefix(QUOTE_MARKER) {
-            Some("") => plain.push('>'),
             Some(rest) => {
-                plain.push_str("> ");
-                plain.push_str(rest);
+                let (depth, content) = flectar_mail_core::mime::flowed::quote_marks(rest);
+                plain.extend(std::iter::repeat_n('>', depth + 1));
+                if !content.is_empty() {
+                    plain.push(' ');
+                    plain.push_str(content);
+                }
+                if mapped.is_none() && (at..=at + line.len()).contains(&offset) {
+                    // Within the marks lands after them, within the text where
+                    // the same text is.
+                    let skipped = line.len() - content.len();
+                    mapped =
+                        Some(plain.len() - content.len() + (offset - at).saturating_sub(skipped));
+                }
             }
-            None => plain.push_str(line),
+            None => {
+                plain.push_str(line);
+                if mapped.is_none() && (at..=at + line.len()).contains(&offset) {
+                    mapped = Some(start + offset - at);
+                }
+            }
         }
+        at += line.len();
     }
-    plain
+    let mapped = mapped.unwrap_or(plain.len());
+    (plain, mapped)
 }
 const MAX_HISTORY: usize = 128;
 /// Text edits kept for following positions through them, such as misspelled words found in
@@ -532,6 +561,14 @@ impl RichComposeDocument {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Forgets the edits so far, for text the message starts with, which undo
+    /// never takes away.
+    pub(crate) fn forget_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+        self.typing_group_active = false;
     }
 
     /// Takes the text and formatting as they are for what was last opened or saved.
@@ -1143,15 +1180,22 @@ impl RichComposeDocument {
     /// place: links keep their addresses after their text, and pictures leave their alt text.
     /// `None` when the text has no formatting to take out.
     pub(crate) fn make_plain(&mut self) -> Option<ComposeSelection> {
-        if self
-            .styles
-            .iter()
-            .all(|run| is_plain_style(&run.style, &self.base))
+        let quotes = self
+            .text
+            .split('\n')
+            .any(|line| line.starts_with(QUOTE_MARKER));
+        if !quotes
+            && self
+                .styles
+                .iter()
+                .all(|run| is_plain_style(&run.style, &self.base))
         {
             return None;
         }
         let caret = valid_offset(&self.text, self.selection.1);
         let (text, caret) = plain_text_of(&self.text, &self.styles, false, caret);
+        // Quote blocks become the quote marks plain text writes them with.
+        let (text, caret) = with_plain_text_quotes_at(&text, caret);
         let end = self.text.len();
         Some(self.replace_styled(0..end, &text, self.base.clone(), caret))
     }
@@ -4639,8 +4683,18 @@ mod tests {
     fn quote_blocks_are_sent_as_plain_text_quotes() {
         assert_eq!(
             with_plain_text_quotes("Thanks\n\nPat wrote:\n│ Hello\n│ \n│ > earlier\nBye"),
-            "Thanks\n\nPat wrote:\n> Hello\n>\n> > earlier\nBye"
+            "Thanks\n\nPat wrote:\n> Hello\n>\n>> earlier\nBye"
         );
+        // Plain text writes quote blocks with its quote marks too, and the
+        // caret keeps its place in the text.
+        let mut document = RichComposeDocument::default();
+        let text = "Thanks\n│ Hello there\nBye";
+        let caret = text.find("there").unwrap() as i32;
+        document.load(text, caret, caret);
+        let selection = document.make_plain().unwrap();
+        assert_eq!(document.text(), "Thanks\n> Hello there\nBye");
+        let there = document.text().find("there").unwrap() as i32;
+        assert_eq!((selection.start, selection.end), (there, there));
         assert_eq!(with_plain_text_quotes("No quotes"), "No quotes");
     }
 
