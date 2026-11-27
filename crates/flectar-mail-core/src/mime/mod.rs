@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 
 mod embedded;
 pub mod flowed;
+mod seven_bit;
+
+pub use seven_bit::seven_bit;
 
 pub use embedded::{EmbeddedHeaders, is_message_type, message_file_name, message_file_stem};
 pub(crate) use embedded::{planned_messages, shows_in_body, with_messages};

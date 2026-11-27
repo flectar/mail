@@ -674,7 +674,7 @@ The plain text of every message, on its own or beside the formatted one, goes
 out as format=flowed (RFC 3676). Lines wrap at 72 characters, quotes are
 marked `>` once per level, and mail apps that read the format join each
 paragraph back together to fit their window. Text beyond ASCII goes as 8-bit
-text.
+text, or as base64 to a server that takes only 7-bit mail.
 
 **Forward as attachment**, in a message's **More** menu or in the **More** menu
 for messages chosen in the list, attaches them to a new message, each as it
