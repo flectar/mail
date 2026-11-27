@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-05 02:33+0000\n"
-"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"PO-Revision-Date: 2026-11-22 11:22+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Danish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/da/>\n"
 "Language: da\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"X-Generator: Weblate 2026.11.2\n"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -462,51 +462,51 @@ msgstr ""
 
 #: ui/app.slint:211 ui/components/calendar.slint:897
 msgid "Tue"
-msgstr ""
+msgstr "tir"
 
 #: ui/app.slint:211
 msgid "Tuesday"
-msgstr ""
+msgstr "tirsdag"
 
 #: ui/app.slint:212 ui/components/calendar.slint:897
 msgid "Wed"
-msgstr ""
+msgstr "ons"
 
 #: ui/app.slint:212
 msgid "Wednesday"
-msgstr ""
+msgstr "onsdag"
 
 #: ui/app.slint:213 ui/components/calendar.slint:897
 msgid "Thu"
-msgstr ""
+msgstr "tor"
 
 #: ui/app.slint:213
 msgid "Thursday"
-msgstr ""
+msgstr "torsdag"
 
 #: ui/app.slint:214 ui/components/calendar.slint:897
 msgid "Fri"
-msgstr ""
+msgstr "fre"
 
 #: ui/app.slint:214
 msgid "Friday"
-msgstr ""
+msgstr "fredag"
 
 #: ui/app.slint:215 ui/components/calendar.slint:897
 msgid "Sat"
-msgstr ""
+msgstr "lør"
 
 #: ui/app.slint:215
 msgid "Saturday"
-msgstr ""
+msgstr "lørdag"
 
 #: ui/app.slint:216 ui/components/calendar.slint:897
 msgid "Sun"
-msgstr ""
+msgstr "søn"
 
 #: ui/app.slint:216
 msgid "Sunday"
-msgstr ""
+msgstr "søndag"
 
 #: ui/app.slint:220
 msgctxt "time of day"
@@ -599,7 +599,7 @@ msgstr ""
 
 #: ui/app.slint:244
 msgid "All day"
-msgstr ""
+msgstr "Hele dagen"
 
 #: ui/app.slint:246 ui/components/calendar.slint:603
 msgid "Accepted"
@@ -624,7 +624,7 @@ msgstr ""
 
 #: ui/app.slint:252
 msgid "(untitled event)"
-msgstr ""
+msgstr "(begivenhed uden titel)"
 
 #: ui/app.slint:254
 msgctxt "title of a collapsible section in a message"
@@ -633,20 +633,20 @@ msgstr ""
 
 #: ui/app.slint:256
 msgid "No conversation history"
-msgstr ""
+msgstr "Ingen samtalehistorik"
 
 #: ui/app.slint:257
 msgid "Conversation history available"
-msgstr ""
+msgstr "Samtalehistorik tilgængelig"
 
 #: ui/app.slint:258
 msgid "New address-book entry"
-msgstr ""
+msgstr "Ny adressebogsindgang"
 
 #: ui/app.slint:259 ui/app.slint:1533 ui/components/composer-fields.slint:91
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
-msgstr ""
+msgstr "Ingen tilknyttet konto"
 
 #: ui/app.slint:260
 msgid "No account sends mail"
@@ -655,8 +655,8 @@ msgstr ""
 #: ui/app.slint:262
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} interaktion"
+msgstr[1] "{n} interaktioner"
 
 #: ui/app.slint:264 ui/components/composer-fields.slint:20
 msgid "New message"
@@ -733,23 +733,23 @@ msgstr ""
 
 #: ui/app.slint:289 ui/app.slint:683
 msgid "Loading local data…"
-msgstr ""
+msgstr "Indlæser lokale data…"
 
 #: ui/app.slint:290 ui/app.slint:684
 msgid "Local data ready."
-msgstr ""
+msgstr "Lokale data er klar."
 
 #: ui/app.slint:291
 msgid "Local data is unavailable: {}"
-msgstr ""
+msgstr "Lokale data er ikke tilgængelige: {}"
 
 #: ui/app.slint:292
 msgid "Could not display local mail: {}"
-msgstr ""
+msgstr "Kunne ikke vise lokal e-mail: {}"
 
 #: ui/app.slint:323
 msgid "An unexpected interface message occurred."
-msgstr ""
+msgstr "Der opstod en uventet grænsefladebesked."
 
 #: ui/app.slint:327 ui/components/profile-switcher.slint:126
 #: ui/dialogs/move-dialog.slint:53 ui/views/files-view.slint:39
@@ -840,11 +840,11 @@ msgstr ""
 
 #: ui/app.slint:347
 msgid "Notification preferences are active for this session."
-msgstr ""
+msgstr "Notifikationsindstillinger er aktive for denne session."
 
 #: ui/app.slint:348
 msgid "Notification preferences saved."
-msgstr ""
+msgstr "Notifikationsindstillingerne er gemt."
 
 #: ui/app.slint:349
 msgid "Update preference saved."
@@ -1065,7 +1065,7 @@ msgstr ""
 
 #: ui/app.slint:399
 msgid "Could not save notifications: {}"
-msgstr ""
+msgstr "Kunne ikke gemme notifikationer: {}"
 
 #: ui/app.slint:400
 msgid "Could not save the update preference: {}"
@@ -1085,7 +1085,7 @@ msgstr ""
 
 #: ui/app.slint:404
 msgid "Sync interval is active for this session."
-msgstr ""
+msgstr "Synkroniseringsinterval er aktivt for denne session."
 
 #: ui/app.slint:405
 msgid "Sync interval set to {} minutes."

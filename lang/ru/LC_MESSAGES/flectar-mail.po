@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 10:01+0000\n"
+"PO-Revision-Date: 2026-11-22 11:22+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Russian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ru/>\n"
@@ -647,11 +647,9 @@ msgid "(untitled event)"
 msgstr "(событие без названия)"
 
 #: ui/app.slint:254
-#, fuzzy
-#| msgid "Details"
 msgctxt "title of a collapsible section in a message"
 msgid "Details"
-msgstr "Сведения"
+msgstr "Подробности"
 
 #: ui/app.slint:256
 msgid "No conversation history"
@@ -671,10 +669,8 @@ msgid "No connected account"
 msgstr "Нет подключённой учётной записи"
 
 #: ui/app.slint:260
-#, fuzzy
-#| msgid "Import accounts and mail"
 msgid "No account sends mail"
-msgstr "Импорт учётных записей и почты"
+msgstr "Ни один аккаунт не отправляет почту"
 
 #: ui/app.slint:262
 msgid "{n} interaction"
@@ -1802,23 +1798,17 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "Не удалось отключить CardDAV: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Show folders"
 msgctxt "special folder"
 msgid "No folder"
-msgstr "Показать папки"
+msgstr "Нет папки"
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not create folder: {}"
 msgid "Could not read the folders: {}"
-msgstr "Не удалось создать папку: {}"
+msgstr "Не удалось прочитать папки: {}"
 
 #: ui/app.slint:578
-#, fuzzy
-#| msgid "Could not create folder: {}"
 msgid "Could not choose the folder: {}"
-msgstr "Не удалось создать папку: {}"
+msgstr "Не удалось выбрать папку: {}"
 
 #: ui/app.slint:583
 msgid "Connect an account before creating a backup."
@@ -2330,6 +2320,8 @@ msgid ""
 "Your message may have gone out, but the mail server didn't confirm it. Check "
 "Sent before you send it again."
 msgstr ""
+"Сообщение могло уйти, но почтовый сервер это не подтвердил. Проверьте «"
+"Отправленные» перед повторной отправкой."
 
 #: ui/app.slint:733
 msgid "Message action failed: message is no longer available"
@@ -3090,16 +3082,12 @@ msgid "Testing POP3 and SMTP connections…"
 msgstr "Проверка подключений POP3 и SMTP…"
 
 #: ui/app.slint:903
-#, fuzzy
-#| msgid "Testing IMAP and SMTP connections…"
 msgid "Testing the IMAP connection…"
-msgstr "Проверка подключений IMAP и SMTP…"
+msgstr "Проверка подключения IMAP…"
 
 #: ui/app.slint:904
-#, fuzzy
-#| msgid "Testing POP3 and SMTP connections…"
 msgid "Testing the POP3 connection…"
-msgstr "Проверка подключений POP3 и SMTP…"
+msgstr "Проверка подключения POP3…"
 
 #: ui/app.slint:909
 msgid ""
@@ -5599,80 +5587,60 @@ msgid "Custom certificate added for this account."
 msgstr "Пользовательский сертификат добавлен для этой учётной записи."
 
 #: ui/components/mail-security-fields.slint:211
-#, fuzzy
-#| msgid "Save settings"
 msgid "Advanced settings"
-msgstr "Сохранить настройки"
+msgstr "Дополнительные настройки"
 
 #: ui/components/mail-security-fields.slint:249
-#, fuzzy
-#| msgid "Send email"
 msgid "Send mail"
-msgstr "Написать письмо"
+msgstr "Отправка почты"
 
 #: ui/components/mail-security-fields.slint:256
 msgid ""
 "Turn off for an account that only receives mail. It then needs no SMTP "
 "server."
 msgstr ""
+"Выключите для аккаунта, который только получает почту. Тогда ему не нужен "
+"сервер SMTP."
 
 #: ui/components/mail-security-fields.slint:282
-#, fuzzy
-#| msgid "Finish sign-in"
 msgid "POP3 sign-in"
-msgstr "Завершить вход"
+msgstr "Вход POP3"
 
 #: ui/components/mail-security-fields.slint:282
-#, fuzzy
-#| msgid "Finish sign-in"
 msgid "IMAP sign-in"
-msgstr "Завершить вход"
+msgstr "Вход IMAP"
 
 #: ui/components/mail-security-fields.slint:288
 msgid "Automatic"
 msgstr "Автоматически"
 
 #: ui/components/mail-security-fields.slint:301
-#, fuzzy
-#| msgid "Finish sign-in"
 msgid "SMTP sign-in"
-msgstr "Завершить вход"
+msgstr "Вход SMTP"
 
 #: ui/components/mail-security-fields.slint:306
-#, fuzzy
-#| msgid "Not signed in"
 msgid "No sign-in"
-msgstr "Вход не выполнен"
+msgstr "Без входа"
 
 #: ui/components/mail-security-fields.slint:314
-#, fuzzy
-#| msgid "SMTP server"
 msgid "SMTP username"
-msgstr "Сервер SMTP"
+msgstr "Имя пользователя SMTP"
 
 #: ui/components/mail-security-fields.slint:316
-#, fuzzy
-#| msgid "All accounts"
 msgid "Same as the account's"
-msgstr "Все учётные записи"
+msgstr "Как у аккаунта"
 
 #: ui/components/mail-security-fields.slint:321
-#, fuzzy
-#| msgid "App password"
 msgid "SMTP password"
-msgstr "Пароль приложения"
+msgstr "Пароль SMTP"
 
 #: ui/components/mail-security-fields.slint:324
-#, fuzzy
-#| msgid "Leave blank to keep the current password"
 msgid "Leave blank to keep the current one"
-msgstr "Оставьте пустым, чтобы сохранить текущий пароль"
+msgstr "Оставьте пустым, чтобы оставить текущий"
 
 #: ui/components/mail-security-fields.slint:325
-#, fuzzy
-#| msgid "Leave blank to keep the current password"
 msgid "Leave blank to use the account's"
-msgstr "Оставьте пустым, чтобы сохранить текущий пароль"
+msgstr "Оставьте пустым, чтобы использовать данные аккаунта"
 
 #: ui/components/notice-toast.slint:42
 msgid "Open draft"
@@ -6690,58 +6658,48 @@ msgid "Save {}%"
 msgstr "Экономия {}%"
 
 #: ui/device-sync.slint:520
-#, fuzzy
-#| msgid "1 year"
 msgid "/ year"
-msgstr "1 год"
+msgstr "/ год"
 
 #: ui/device-sync.slint:520
-#, fuzzy
-#| msgid "1 month"
 msgid "/ month"
-msgstr "1 месяц"
+msgstr "/ месяц"
 
 #: ui/device-sync.slint:521
 msgid "Billed monthly"
-msgstr ""
+msgstr "Списание ежемесячно"
 
 #: ui/device-sync.slint:522
 msgid "{} a month, billed yearly"
-msgstr ""
+msgstr "{} в месяц при оплате за год"
 
 #: ui/device-sync.slint:523
-#, fuzzy
-#| msgid "Billed per mailbox."
 msgid "Billed yearly"
-msgstr "Оплата за каждый почтовый ящик."
+msgstr "Списание ежегодно"
 
 #: ui/device-sync.slint:524
 msgid "Includes tax. Cancel any time."
-msgstr ""
+msgstr "С учётом налога. Отмена в любое время."
 
 #: ui/device-sync.slint:524
 msgid "Tax is added where it applies. Cancel any time."
-msgstr ""
+msgstr "Налог добавляется, где он действует. Отмена в любое время."
 
 #: ui/device-sync.slint:534 ui/device-sync.slint:801 ui/device-sync.slint:1101
 msgid "Redeem a code"
-msgstr ""
+msgstr "Активировать код"
 
 #: ui/device-sync.slint:591
 msgid "{} a month or {} a year"
-msgstr ""
+msgstr "{} в месяц или {} в год"
 
 #: ui/device-sync.slint:592
-#, fuzzy
-#| msgid "1 month"
 msgid "{} a month"
-msgstr "1 месяц"
+msgstr "{} в месяц"
 
 #: ui/device-sync.slint:593
-#, fuzzy
-#| msgid "1 year"
 msgid "{} a year"
-msgstr "1 год"
+msgstr "{} в год"
 
 #: ui/device-sync.slint:617 ui/dialogs/settings-dialog.slint:86
 #: ui/dialogs/settings-dialog.slint:4126
@@ -6756,200 +6714,182 @@ msgid ""
 "Mail can read it. Your mail, contacts and calendars keep syncing with your "
 "mail provider."
 msgstr ""
+"Держите аккаунты, данные для входа, настройки, шаблоны, отложенные письма и "
+"напоминания об ответе одинаковыми на всех устройствах и позвольте любому из "
+"них отправлять запланированные письма. Всё зашифровано сквозным шифрованием, "
+"так что даже Flectar Mail не может это прочитать. Ваша почта, контакты и "
+"календари продолжают синхронизироваться с почтовым провайдером."
 
 #: ui/device-sync.slint:634
 msgid ""
 "This device was removed from sync on another device. Its accounts and "
 "settings stay here. Set up sync again to reconnect it."
 msgstr ""
+"Это устройство было удалено из синхронизации на другом устройстве. Его "
+"аккаунты и настройки остаются здесь. Настройте синхронизацию снова, чтобы "
+"переподключить его."
 
 #: ui/device-sync.slint:635
 msgid ""
 "Sync was deleted on another device. This device keeps its accounts and "
 "settings. Turn sync on again to start over."
 msgstr ""
+"Синхронизация была удалена на другом устройстве. Это устройство сохраняет "
+"свои аккаунты и настройки. Включите синхронизацию снова, чтобы начать заново."
 
 #: ui/device-sync.slint:641
-#, fuzzy
-#| msgid "Could not sync: {}"
 msgid "Could not turn on sync: {}"
-msgstr "Не удалось синхронизировать: {}"
+msgstr "Не удалось включить синхронизацию: {}"
 
 #: ui/device-sync.slint:642 ui/device-sync.slint:1083
 msgid "Enter the sync server's address, such as https://sync.example.com."
-msgstr ""
+msgstr "Введите адрес сервера синхронизации, например https://sync.example.com."
 
 #: ui/device-sync.slint:643
-#, fuzzy
-#| msgid "Could not delete event: {}"
 msgid "Could not remove the device: {}"
-msgstr "Не удалось удалить событие: {}"
+msgstr "Не удалось удалить устройство: {}"
 
 #: ui/device-sync.slint:644
-#, fuzzy
-#| msgid "Could not delete event: {}"
 msgid "Could not replace the recovery code: {}"
-msgstr "Не удалось удалить событие: {}"
+msgstr "Не удалось заменить код восстановления: {}"
 
 #: ui/device-sync.slint:645
-#, fuzzy
-#| msgid "Could not sync: {}"
 msgid "Could not turn off sync: {}"
-msgstr "Не удалось синхронизировать: {}"
+msgstr "Не удалось выключить синхронизацию: {}"
 
 #: ui/device-sync.slint:646
-#, fuzzy
-#| msgid "Could not delete contact: {}"
 msgid "Could not delete sync: {}"
-msgstr "Не удалось удалить контакт: {}"
+msgstr "Не удалось удалить синхронизацию: {}"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid "Could not update CardDAV sync: {}"
 msgid "Could not change password and sign-in sync: {}"
-msgstr "Не удалось обновить синхронизацию CardDAV: {}"
+msgstr "Не удалось изменить синхронизацию паролей и входов: {}"
 
 #: ui/device-sync.slint:648
-#, fuzzy
-#| msgid "Could not open draft: {}"
 msgid "Could not open the checkout: {}"
-msgstr "Не удалось открыть черновик: {}"
+msgstr "Не удалось открыть оплату: {}"
 
 #: ui/device-sync.slint:649
-#, fuzzy
-#| msgid "Could not open draft: {}"
 msgid "Could not open the subscription page: {}"
-msgstr "Не удалось открыть черновик: {}"
+msgstr "Не удалось открыть страницу подписки: {}"
 
 #: ui/device-sync.slint:657
-#, fuzzy
-#| msgid "Syncing…"
 msgid "Start syncing"
-msgstr "Синхронизация…"
+msgstr "Начать синхронизацию"
 
 #: ui/device-sync.slint:658
 msgid "Sync this device's setup to your other devices."
 msgstr ""
+"Синхронизируйте настройку этого устройства с вашими другими устройствами."
 
 #: ui/device-sync.slint:659
 msgid "Free for {n} day, then {}."
 msgid_plural "Free for {n} days, then {}."
-msgstr[0] ""
-msgstr[1] ""
-msgstr[2] ""
+msgstr[0] "Бесплатно {n} день, затем {}."
+msgstr[1] "Бесплатно {n} дня, затем {}."
+msgstr[2] "Бесплатно {n} дней, затем {}."
 
 #: ui/device-sync.slint:660
 msgctxt "the price of sync, as a sentence"
 msgid "{}."
-msgstr ""
+msgstr "{}."
 
 #: ui/device-sync.slint:661
 msgid ""
 "You get a recovery code to keep somewhere safe. Your passwords and sign-ins "
 "sync too, so your other devices are ready at once."
 msgstr ""
+"Вы получите код восстановления, который стоит хранить в надёжном месте. "
+"Пароли и данные для входа тоже синхронизируются, так что другие устройства "
+"будут готовы сразу."
 
 #: ui/device-sync.slint:670
 msgid "Turn on sync"
-msgstr ""
+msgstr "Включить синхронизацию"
 
 #: ui/device-sync.slint:679 ui/device-sync.slint:1400
-#, fuzzy
-#| msgid "On this device"
 msgid "Connect this device"
-msgstr "На этом устройстве"
+msgstr "Подключить это устройство"
 
 #: ui/device-sync.slint:680
 msgid "Already syncing on another device? Add this one to it."
-msgstr ""
+msgstr "Уже синхронизируете другое устройство? Добавьте это к нему."
 
 #: ui/device-sync.slint:682
 msgid ""
 "Scan the QR code your other device shows, enter its code, or use your "
 "recovery code."
 msgstr ""
+"Отсканируйте QR-код с другого устройства, введите его код или используйте "
+"код восстановления."
 
 #: ui/device-sync.slint:683
 msgid ""
 "Show a QR code for your phone to scan, enter the code your other device "
 "shows, or use your recovery code."
 msgstr ""
+"Покажите QR-код для сканирования телефоном, введите код с другого устройства "
+"или используйте код восстановления."
 
 #: ui/device-sync.slint:696 ui/device-sync.slint:701
-#, fuzzy
-#| msgid "Inline code"
 msgid "Enter code"
-msgstr "Встроенный код"
+msgstr "Ввести код"
 
 #: ui/device-sync.slint:697 ui/device-sync.slint:702 ui/device-sync.slint:1342
 msgid "Scan QR code"
-msgstr ""
+msgstr "Сканировать QR-код"
 
 #: ui/device-sync.slint:698 ui/device-sync.slint:703
 msgid "QR code"
-msgstr ""
+msgstr "QR-код"
 
 #: ui/device-sync.slint:699 ui/device-sync.slint:704 ui/device-sync.slint:873
 msgid "Recovery code"
-msgstr ""
+msgstr "Код восстановления"
 
 #: ui/device-sync.slint:711 ui/device-sync.slint:724
-#, fuzzy
-#| msgid "SMTP server"
 msgid "Sync server"
-msgstr "Сервер SMTP"
+msgstr "Сервер синхронизации"
 
 #: ui/device-sync.slint:712
 msgid "Leave empty to use Flectar Mail Sync, or enter your own server."
-msgstr ""
+msgstr "Оставьте пустым для Flectar Mail Sync или введите свой сервер."
 
 #: ui/device-sync.slint:731
-#, fuzzy
-#| msgid "Sent copy settings updated."
 msgid "Sync is paused"
-msgstr "Настройки копий отправленных писем обновлены."
+msgstr "Синхронизация приостановлена"
 
 #: ui/device-sync.slint:731
-#, fuzzy
-#| msgid "Sync now"
 msgid "Sync is on"
-msgstr "Синхронизировать сейчас"
+msgstr "Синхронизация включена"
 
 #: ui/device-sync.slint:733
 msgid "Sync could not finish and will try again."
-msgstr ""
+msgstr "Синхронизация не завершилась и повторит попытку."
 
 #: ui/device-sync.slint:734
 msgid "Changes made here wait to upload; nothing is lost."
-msgstr ""
+msgstr "Изменения, сделанные здесь, ждут отправки; ничего не теряется."
 
 #: ui/device-sync.slint:735
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Syncing with {}"
-msgstr "Синхронизировать {}"
+msgstr "Синхронизация с {}"
 
 #: ui/device-sync.slint:736 ui/dialogs/settings-dialog.slint:2001
 msgid "Syncing…"
 msgstr "Синхронизация…"
 
 #: ui/device-sync.slint:738
-#, fuzzy
-#| msgid "Not synced yet"
 msgid "Not synced yet."
-msgstr "Ещё не синхронизировано"
+msgstr "Ещё не синхронизировано."
 
 #: ui/device-sync.slint:739
-#, fuzzy
-#| msgid "Last synced {}"
 msgid "Last synced at {}."
-msgstr "Последняя синхронизация {}"
+msgstr "Последняя синхронизация в {}."
 
 #: ui/device-sync.slint:740
-#, fuzzy
-#| msgid "Last synced {}"
 msgid "Last synced on {}."
-msgstr "Последняя синхронизация {}"
+msgstr "Последняя синхронизация {}."
 
 #: ui/device-sync.slint:749 ui/dialogs/settings-dialog.slint:2001
 msgid "Sync now"
@@ -6957,149 +6897,152 @@ msgstr "Синхронизировать сейчас"
 
 #: ui/device-sync.slint:758 ui/device-sync.slint:773
 msgid "Free trial until {}."
-msgstr ""
+msgstr "Бесплатный пробный период до {}."
 
 #: ui/device-sync.slint:759 ui/device-sync.slint:778
 msgid "Your free trial has ended."
-msgstr ""
+msgstr "Ваш пробный период закончился."
 
 #: ui/device-sync.slint:760 ui/device-sync.slint:780
 msgid "Your free period has ended."
-msgstr ""
+msgstr "Ваш бесплатный период закончился."
 
 #: ui/device-sync.slint:761 ui/device-sync.slint:779
 msgid "Your subscription has ended."
-msgstr ""
+msgstr "Ваша подписка закончилась."
 
 #: ui/device-sync.slint:762
 msgid "Until you subscribe, changes wait on each device; nothing is lost."
 msgstr ""
+"Пока вы не подпишетесь, изменения будут ждать на каждом устройстве; ничего "
+"не теряется."
 
 #: ui/device-sync.slint:774
-#, fuzzy
-#| msgid "Remove account"
 msgid "Renews on {}."
-msgstr "Удалить учётную запись"
+msgstr "Продление {}."
 
 #: ui/device-sync.slint:775
 msgid "Ends on {}."
-msgstr ""
+msgstr "Окончание {}."
 
 #: ui/device-sync.slint:776
 msgid "The last payment didn't go through."
-msgstr ""
+msgstr "Последний платёж не прошёл."
 
 #: ui/device-sync.slint:777
-#, fuzzy
-#| msgid "{} · in {}"
 msgid "Free until {}."
-msgstr "{} · в «{}»"
+msgstr "Бесплатно до {}."
 
 #: ui/device-sync.slint:783
 msgid "Your code makes sync free on all your devices."
-msgstr ""
+msgstr "Ваш код делает синхронизацию бесплатной на всех ваших устройствах."
 
 #: ui/device-sync.slint:784
 msgid "Changes wait on each device; nothing is lost."
-msgstr ""
+msgstr "Изменения ждут на каждом устройстве; ничего не теряется."
 
 #: ui/device-sync.slint:785
 msgid ""
 "A code makes sync free until {}. Turn off renewal in Manage so you aren't "
 "charged before then."
 msgstr ""
+"Код делает синхронизацию бесплатной до {}. Выключите продление в разделе «"
+"Управление», чтобы с вас не списали плату раньше этого срока."
 
 #: ui/device-sync.slint:786
 msgid "Then free until {}, with your code."
-msgstr ""
+msgstr "Затем бесплатно до {}, с вашим кодом."
 
 #: ui/device-sync.slint:788
 msgid ""
 "Sync keeps going while the payment is tried again. Update your payment "
 "method to keep it."
 msgstr ""
+"Синхронизация продолжается, пока платёж повторяется. Обновите способ оплаты, "
+"чтобы её сохранить."
 
 #: ui/device-sync.slint:788
 msgid "Sync keeps going while the payment is tried again."
-msgstr ""
+msgstr "Синхронизация продолжается, пока платёж повторяется."
 
 #: ui/device-sync.slint:789
 msgid "Turn renewal back on, or see invoices."
-msgstr ""
+msgstr "Включите продление снова или посмотрите счета."
 
 #: ui/device-sync.slint:790
 msgid "Change your plan or payment method, see invoices, or cancel."
-msgstr ""
+msgstr "Измените тариф или способ оплаты, посмотрите счета или отмените."
 
 #: ui/device-sync.slint:806 ui/dialogs/settings-dialog.slint:3287
 msgid "Manage"
 msgstr "Управлять"
 
 #: ui/device-sync.slint:817
-#, fuzzy
-#| msgid "Services"
 msgid "Devices"
-msgstr "Сервисы"
+msgstr "Устройства"
 
 #: ui/device-sync.slint:818
 msgid "Removing a device stops it from reading anything new."
-msgstr ""
+msgstr "Удаление устройства лишает его доступа ко всему новому."
 
 #: ui/device-sync.slint:829 ui/device-sync.slint:859 ui/device-sync.slint:1268
-#, fuzzy
-#| msgid "No subject"
 msgid "Add a device"
-msgstr "Без темы"
+msgstr "Добавить устройство"
 
 #: ui/device-sync.slint:874
 msgid "Brings your sync back if you lose all your devices."
-msgstr ""
+msgstr "Вернёт синхронизацию, если вы потеряете все устройства."
 
 #: ui/device-sync.slint:875
 msgid ""
 "Replace it if someone else may have seen it. The old code stops working at "
 "once."
 msgstr ""
+"Замените код, если его мог увидеть кто-то чужой. Старый код перестанет "
+"работать сразу."
 
 #: ui/device-sync.slint:884
-#, fuzzy
-#| msgid "Replace content…"
 msgid "Replace code"
-msgstr "Заменить содержимое…"
+msgstr "Заменить код"
 
 #: ui/device-sync.slint:892
 msgid "Passwords and sign-ins"
-msgstr ""
+msgstr "Пароли и данные для входа"
 
 #: ui/device-sync.slint:893
 msgid "Your other devices are signed in to your accounts at once."
-msgstr ""
+msgstr "Ваши другие устройства сразу входят в ваши аккаунты."
 
 #: ui/device-sync.slint:894
 msgid ""
 "End-to-end encrypted, for all your devices. Anyone with your recovery code "
 "can sign in to your accounts."
 msgstr ""
+"Сквозное шифрование для всех ваших устройств. Любой, у кого есть ваш код "
+"восстановления, может войти в ваши аккаунты."
 
 #: ui/device-sync.slint:907
 msgid "Sync passwords and sign-ins"
-msgstr ""
+msgstr "Синхронизировать пароли и данные для входа"
 
 #: ui/device-sync.slint:914
 msgid "Turn off sync"
-msgstr ""
+msgstr "Выключить синхронизацию"
 
 #: ui/device-sync.slint:915
-#, fuzzy
-#| msgid "Stop syncing it and remove its events from this device."
 msgid "Stop syncing on this device, or delete sync for every device."
-msgstr "Прекратить его синхронизацию и удалить его события с этого устройства."
+msgstr ""
+"Остановить синхронизацию на этом устройстве или удалить синхронизацию для "
+"всех устройств."
 
 #: ui/device-sync.slint:916
 msgid ""
 "Turning off keeps this device's accounts and settings. Deleting also removes "
 "the encrypted copy from the server; each device keeps its own."
 msgstr ""
+"При выключении сохраняются аккаунты и настройки этого устройства. При "
+"удалении с сервера также удаляется зашифрованная копия; каждое устройство "
+"сохраняет свою."
 
 #: ui/device-sync.slint:926 ui/dialogs/settings-dialog.slint:3473
 msgid "Delete…"
@@ -7107,67 +7050,62 @@ msgstr "Удалить…"
 
 #: ui/device-sync.slint:1101
 msgid "Code redeemed"
-msgstr ""
+msgstr "Код активирован"
 
 #: ui/device-sync.slint:1111
 msgid ""
 "Enter the code you were given. Flectar Mail Sync is then free on all your "
 "devices for the time the code covers."
 msgstr ""
+"Введите полученный код. Flectar Mail Sync будет бесплатным на всех ваших "
+"устройствах на срок действия кода."
 
 #: ui/device-sync.slint:1112 ui/device-sync.slint:1113
 msgid "Flectar Mail Sync is free until {} on all your devices."
-msgstr ""
+msgstr "Flectar Mail Sync бесплатен до {} на всех ваших устройствах."
 
 #: ui/device-sync.slint:1114
 msgid ""
 "Flectar Mail Sync is free on all your devices for the time the code covers."
 msgstr ""
+"Flectar Mail Sync бесплатен на всех ваших устройствах на срок действия кода."
 
 #: ui/device-sync.slint:1122 ui/device-sync.slint:1413
 msgid "Code"
-msgstr ""
+msgstr "Код"
 
 #: ui/device-sync.slint:1132
-#, fuzzy
-#| msgid "Could not save this profile. Check the name and try again."
 msgid "That code doesn't exist. Check it and try again."
-msgstr ""
-"Не удалось сохранить этот профиль. Проверьте название и попробуйте ещё раз."
+msgstr "Такого кода нет. Проверьте его и попробуйте снова."
 
 #: ui/device-sync.slint:1133
-#, fuzzy
-#| msgid "One message was already here and was skipped."
-#| msgid_plural "{} messages were already here and were skipped."
 msgid "That code was already used."
-msgstr "{} письмо уже было здесь и пропущено."
+msgstr "Этот код уже использован."
 
 #: ui/device-sync.slint:1134
 msgid "That code has expired. Ask whoever gave it to you for a new one."
-msgstr ""
+msgstr "Срок этого кода истёк. Попросите новый у того, кто его дал."
 
 #: ui/device-sync.slint:1135
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not redeem the code: {}"
-msgstr "Не удалось удалить папку: {}"
+msgstr "Не удалось активировать код: {}"
 
 #: ui/device-sync.slint:1153
 msgid "Redeem"
-msgstr ""
+msgstr "Активировать"
 
 #. paste into another device's recovery code field.
 #: ui/device-sync.slint:1171
-#, fuzzy
-#| msgid "Flectar Mail logo"
 msgid "Flectar Mail Sync recovery code"
-msgstr "Логотип Flectar Mail"
+msgstr "Код восстановления Flectar Mail Sync"
 
 #: ui/device-sync.slint:1173
 msgid ""
 "On a new device, open Settings in Flectar Mail, then Sync, choose Recovery "
 "code and enter these 24 words in order."
 msgstr ""
+"На новом устройстве откройте «Настройки» в Flectar Mail, затем «Синхронизация"
+"», выберите «Код восстановления» и введите эти 24 слова по порядку."
 
 #: ui/device-sync.slint:1174
 msgid ""
@@ -7175,10 +7113,14 @@ msgid ""
 "accounts, passwords and sign-ins it carries. Keep this file somewhere only "
 "you can reach, such as a password manager or a USB drive."
 msgstr ""
+"Любой, у кого есть эти слова, может восстановить ваш Flectar Mail Sync "
+"вместе с аккаунтами, паролями и данными для входа. Храните этот файл там, "
+"где он доступен только вам, например в менеджере паролей или на USB-"
+"накопителе."
 
 #: ui/device-sync.slint:1177
 msgid "Save your recovery code"
-msgstr ""
+msgstr "Сохраните свой код восстановления"
 
 #: ui/device-sync.slint:1182
 msgid ""
@@ -7187,6 +7129,11 @@ msgid ""
 "down or save them somewhere only you can reach, such as a password manager. "
 "Flectar Mail cannot show them again."
 msgstr ""
+"Если вы потеряете все устройства, эти 24 слова вернут всё обратно, с "
+"выполненным входом. Любой, у кого они есть, может читать вашу почту и "
+"отправлять письма от вашего имени, поэтому запишите их или сохраните там, "
+"где они доступны только вам, например в менеджере паролей. Flectar Mail не "
+"сможет показать их снова."
 
 #: ui/device-sync.slint:1183
 msgid ""
@@ -7195,154 +7142,157 @@ msgid ""
 "somewhere only you can reach, such as a password manager. Flectar Mail "
 "cannot show them again."
 msgstr ""
+"Если вы потеряете все устройства, эти 24 слова вернут вашу синхронизацию. "
+"Любой, у кого они есть, может прочитать вашу синхронизированную настройку, "
+"поэтому запишите их или сохраните там, где они доступны только вам, например "
+"в менеджере паролей. Flectar Mail не сможет показать их снова."
 
 #: ui/device-sync.slint:1203
-#, fuzzy
-#| msgid "Copied link"
 msgid "Copied"
-msgstr "Ссылка скопирована"
+msgstr "Скопировано"
 
 #: ui/device-sync.slint:1219
-#, fuzzy
-#| msgid "Save profile"
 msgid "Save as file"
-msgstr "Сохранить профиль"
+msgstr "Сохранить в файл"
 
 #: ui/device-sync.slint:1237
-#, fuzzy
-#| msgid "Could not save theme: {}"
 msgid "Could not save the file: {}"
-msgstr "Не удалось сохранить тему: {}"
+msgstr "Не удалось сохранить файл: {}"
 
 #: ui/device-sync.slint:1246
 msgid "I saved it"
-msgstr ""
+msgstr "Я сохранил(а)"
 
 #: ui/device-sync.slint:1266
-#, fuzzy
-#| msgid "On this device"
 msgid "Add this device?"
-msgstr "На этом устройстве"
+msgstr "Добавить это устройство?"
 
 #: ui/device-sync.slint:1267
-#, fuzzy
-#| msgid "Server address"
 msgid "Device added"
-msgstr "Адрес сервера"
+msgstr "Устройство добавлено"
 
 #: ui/device-sync.slint:1272 ui/device-sync.slint:1447
-#, fuzzy
-#| msgid "Removing account…"
 msgid "Getting a code…"
-msgstr "Удаление учётной записи…"
+msgstr "Получение кода…"
 
 #: ui/device-sync.slint:1278
 msgid ""
 "On your phone or other device, open Flectar Mail, go to Settings → Sync → "
 "Connect this device, and scan this code."
 msgstr ""
+"На телефоне или другом устройстве откройте Flectar Mail, перейдите в «"
+"Настройки → Синхронизация → Подключить это устройство» и отсканируйте этот "
+"код."
 
 #: ui/device-sync.slint:1285
 msgid "QR code for adding a device"
-msgstr ""
+msgstr "QR-код для добавления устройства"
 
 #: ui/device-sync.slint:1288
 msgid ""
 "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
 "this device → Enter code, and type:"
 msgstr ""
+"На другом устройстве откройте Flectar Mail, перейдите в «Настройки → "
+"Синхронизация → Подключить это устройство → Ввести код» и введите:"
 
 #: ui/device-sync.slint:1309
 msgid ""
 "Check that the new device shows these same words. Add it only if they match."
 msgstr ""
+"Проверьте, что новое устройство показывает эти же слова. Добавляйте его, "
+"только если они совпадают."
 
 #: ui/device-sync.slint:1310
 msgid "A new device asks to join. Add it if it's yours."
-msgstr ""
+msgstr "Новое устройство просит присоединиться. Добавьте его, если оно ваше."
 
 #: ui/device-sync.slint:1324
 msgid "The device is joining. Your accounts will be ready there in a moment."
-msgstr ""
+msgstr "Устройство присоединяется. Ваши аккаунты появятся там через мгновение."
 
 #: ui/device-sync.slint:1325
 msgid ""
 "The device is joining. It will ask you to sign in to your accounts once."
 msgstr ""
+"Устройство присоединяется. Оно попросит вас один раз войти в ваши аккаунты."
 
 #: ui/device-sync.slint:1332
 msgid "The device was not added."
-msgstr ""
+msgstr "Устройство не добавлено."
 
 #: ui/device-sync.slint:1333
 msgid "The code expired. Start again to get a new one."
-msgstr ""
+msgstr "Срок кода истёк. Начните заново, чтобы получить новый."
 
 #: ui/device-sync.slint:1334 ui/device-sync.slint:1444
 msgid "That QR code isn't for Flectar Mail Sync, or it expired."
-msgstr ""
+msgstr "Этот QR-код не для Flectar Mail Sync или срок его действия истёк."
 
 #: ui/device-sync.slint:1351
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show QR code"
-msgstr "Показать папки"
+msgstr "Показать QR-код"
 
 #: ui/device-sync.slint:1351
 msgid "Use a code"
-msgstr ""
+msgstr "Использовать код"
 
 #: ui/device-sync.slint:1366
-#, fuzzy
-#| msgid "Add email"
 msgid "Add device"
-msgstr "Добавить адрес"
+msgstr "Добавить устройство"
 
 #: ui/device-sync.slint:1398
 msgid "This device is connected"
-msgstr ""
+msgstr "Это устройство подключено"
 
 #: ui/device-sync.slint:1399
 msgid "Use your recovery code"
-msgstr ""
+msgstr "Используйте свой код восстановления"
 
 #: ui/device-sync.slint:1405
 msgid ""
 "On your other device, go to Settings → Sync → Add a device → Use a code. "
 "Enter the code it shows:"
 msgstr ""
+"На другом устройстве откройте «Настройки → Синхронизация → Добавить "
+"устройство → Использовать код». Введите показанный там код:"
 
 #: ui/device-sync.slint:1422
 msgid ""
 "Type the 24 words of your recovery code, in order. Use this when no other "
 "device is at hand."
 msgstr ""
+"Введите 24 слова своего кода восстановления по порядку. Используйте это, "
+"когда под рукой нет другого устройства."
 
 #: ui/device-sync.slint:1429
 msgid "24 words, separated by spaces"
-msgstr ""
+msgstr "24 слова через пробел"
 
 #: ui/device-sync.slint:1440
 msgid "Your other device did not add this one."
-msgstr ""
+msgstr "Другое устройство не добавило это."
 
 #: ui/device-sync.slint:1441
 msgid "The code expired. Get a new one on your other device."
-msgstr ""
+msgstr "Срок кода истёк. Получите новый на другом устройстве."
 
 #: ui/device-sync.slint:1442
 msgid ""
 "No sync on this server uses these words. Check each word, and the server "
 "address."
 msgstr ""
+"Ни одна синхронизация на этом сервере не соответствует этим словам. "
+"Проверьте каждое слово и адрес сервера."
 
 #: ui/device-sync.slint:1443
 msgid "That code didn't work. Check it, or get a new one on your other device."
 msgstr ""
+"Этот код не подошёл. Проверьте его или получите новый на другом устройстве."
 
 #: ui/device-sync.slint:1448
 msgid "Scan the QR code your other device shows."
-msgstr ""
+msgstr "Отсканируйте QR-код, который показывает другое устройство."
 
 #: ui/device-sync.slint:1449 ui/dialogs/settings-dialog.slint:4352
 #: ui/views/onboarding-view.slint:438
@@ -7354,26 +7304,28 @@ msgid ""
 "On your phone, go to Settings → Sync → Add a device → Scan QR code, and scan "
 "this code."
 msgstr ""
+"На телефоне откройте «Настройки → Синхронизация → Добавить устройство → "
+"Сканировать QR-код» и отсканируйте этот код."
 
 #: ui/device-sync.slint:1462
-#, fuzzy
-#| msgid "Kept on this device"
 msgid "QR code for connecting this device"
-msgstr "Хранится на этом устройстве"
+msgstr "QR-код для подключения этого устройства"
 
 #: ui/device-sync.slint:1466
 msgid "Approve this device on your other one. It shows these same words:"
-msgstr ""
+msgstr "Подтвердите это устройство на другом. Там показаны эти же слова:"
 
 #: ui/device-sync.slint:1467
 msgid "Approve this device on your other one."
-msgstr ""
+msgstr "Подтвердите это устройство на другом."
 
 #: ui/device-sync.slint:1480
 msgid ""
 "Your accounts, signatures and preferences arrive in a moment. Accounts added "
 "on other devices ask you to sign in once."
 msgstr ""
+"Ваши аккаунты, подписи и настройки появятся через мгновение. Аккаунты, "
+"добавленные на других устройствах, попросят вас один раз войти."
 
 #: ui/device-sync.slint:1498 ui/device-sync.slint:1506
 #: ui/dialogs/settings-dialog.slint:3384 ui/link-services.slint:195
@@ -7629,11 +7581,10 @@ msgstr ""
 "поддерживает."
 
 #: ui/dialogs/import-dialog.slint:133
-#, fuzzy
-#| msgid "No outgoing mail server is configured."
 msgid ""
 "No outgoing mail server is configured, so the account only receives mail."
-msgstr "Сервер исходящей почты не настроен."
+msgstr ""
+"Сервер исходящей почты не настроен, поэтому аккаунт только получает почту."
 
 #: ui/dialogs/import-dialog.slint:134
 msgid "The outgoing server {} uses a protocol Flectar Mail does not support."
@@ -7710,6 +7661,8 @@ msgid ""
 "The outgoing server signs in as {}. If its password differs from the "
 "account's, enter it in Advanced settings when you sign in."
 msgstr ""
+"Сервер исходящей почты входит как {}. Если его пароль отличается от пароля "
+"аккаунта, введите его в дополнительных настройках при входе."
 
 #: ui/dialogs/import-dialog.slint:145
 msgid "The incoming server has no user name."
@@ -8509,7 +8462,7 @@ msgstr "Скоро"
 
 #: ui/dialogs/settings-dialog.slint:448
 msgid "Set up"
-msgstr ""
+msgstr "Настроить"
 
 #: ui/dialogs/settings-dialog.slint:448
 msgid "Learn more"
@@ -8650,22 +8603,16 @@ msgid "All mail"
 msgstr "Вся почта"
 
 #: ui/dialogs/settings-dialog.slint:806
-#, fuzzy
-#| msgid "Every minute"
 msgid "1 minute"
-msgstr "Каждую минуту"
+msgstr "1 минута"
 
 #: ui/dialogs/settings-dialog.slint:807
-#, fuzzy
-#| msgid "Every 5 minutes"
 msgid "2 minutes"
-msgstr "Каждые 5 минут"
+msgstr "2 минуты"
 
 #: ui/dialogs/settings-dialog.slint:808
-#, fuzzy
-#| msgid "Every 5 minutes"
 msgid "5 minutes"
-msgstr "Каждые 5 минут"
+msgstr "5 минут"
 
 #: ui/dialogs/settings-dialog.slint:811
 msgid "Same as all accounts"
@@ -8894,6 +8841,9 @@ msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
 msgstr ""
+"синхронизация устройства телефон компьютер сопряжение qr код код "
+"восстановления шифрование резервная копия настройка сервер подписка оплата "
+"пробный период тариф цена активация пароли данные для входа"
 
 #: ui/dialogs/settings-dialog.slint:928
 msgid ""
@@ -9856,16 +9806,12 @@ msgid "Connected · JMAP"
 msgstr "Подключено · JMAP"
 
 #: ui/dialogs/settings-dialog.slint:2996
-#, fuzzy
-#| msgid "Connected without encryption · POP3 + SMTP"
 msgid "Connected without encryption · POP3"
-msgstr "Подключено без шифрования · POP3 + SMTP"
+msgstr "Подключено без шифрования · POP3"
 
 #: ui/dialogs/settings-dialog.slint:2996
-#, fuzzy
-#| msgid "Connected · POP3 + SMTP"
 msgid "Connected · POP3"
-msgstr "Подключено · POP3 + SMTP"
+msgstr "Подключено · POP3"
 
 #: ui/dialogs/settings-dialog.slint:2996
 msgid "Connected without encryption · POP3 + SMTP"
@@ -9876,16 +9822,12 @@ msgid "Connected · POP3 + SMTP"
 msgstr "Подключено · POP3 + SMTP"
 
 #: ui/dialogs/settings-dialog.slint:2996
-#, fuzzy
-#| msgid "Connected without encryption · IMAP + SMTP"
 msgid "Connected without encryption · IMAP"
-msgstr "Подключено без шифрования · IMAP + SMTP"
+msgstr "Подключено без шифрования · IMAP"
 
 #: ui/dialogs/settings-dialog.slint:2996
-#, fuzzy
-#| msgid "Connected · JMAP"
 msgid "Connected · IMAP"
-msgstr "Подключено · JMAP"
+msgstr "Подключено · IMAP"
 
 #: ui/dialogs/settings-dialog.slint:2996
 msgid "Connected without encryption · IMAP + SMTP"
@@ -9959,30 +9901,24 @@ msgid "The server tells Flectar Mail of new mail as soon as it arrives."
 msgstr "Сервер сообщает Flectar Mail о новой почте, как только она приходит."
 
 #: ui/dialogs/settings-dialog.slint:3127
-#, fuzzy
-#| msgid "Server storage"
 msgid "Server timeout"
-msgstr "Серверное хранилище"
+msgstr "Тайм-аут сервера"
 
 #: ui/dialogs/settings-dialog.slint:3128
 msgid "How long to wait for a slow server before giving up."
-msgstr ""
+msgstr "Сколько ждать медленный сервер, прежде чем сдаться."
 
 #: ui/dialogs/settings-dialog.slint:3141
 msgid "Sent copies"
 msgstr "Копии отправленных писем"
 
 #: ui/dialogs/settings-dialog.slint:3143
-#, fuzzy
-#| msgid ""
-#| "Choose who saves sent mail. Use Flectar if your server does not save a "
-#| "copy."
 msgid ""
 "Choose who saves sent mail. Use Flectar Mail if your server does not save a "
 "copy."
 msgstr ""
-"Выберите, кто сохраняет отправленные письма. Используйте Flectar, если "
-"сервер не сохраняет копию."
+"Выберите, кто сохраняет отправленные письма. Используйте Flectar Mail, если "
+"ваш сервер не сохраняет копию."
 
 #: ui/dialogs/settings-dialog.slint:3144
 msgid "Provider default"
@@ -9993,10 +9929,8 @@ msgid "Server saves a copy"
 msgstr "Копию сохраняет сервер"
 
 #: ui/dialogs/settings-dialog.slint:3144
-#, fuzzy
-#| msgid "Flectar saves a copy"
 msgid "Flectar Mail saves a copy"
-msgstr "Копию сохраняет Flectar"
+msgstr "Копию сохраняет Flectar Mail"
 
 #: ui/dialogs/settings-dialog.slint:3159
 msgid "Subscribed folders only"
@@ -10011,20 +9945,16 @@ msgstr ""
 "сервере, а также «Входящие» и папки, куда раскладывается почта."
 
 #: ui/dialogs/settings-dialog.slint:3177 ui/folder-roles.slint:132
-#, fuzzy
-#| msgid "Search files"
 msgid "Special folders"
-msgstr "Поиск файлов"
+msgstr "Специальные папки"
 
 #: ui/dialogs/settings-dialog.slint:3186
 msgid "Sent, Drafts, Trash, Spam and Archive"
-msgstr ""
+msgstr "Отправленные, Черновики, Корзина, Спам и Архив"
 
 #: ui/dialogs/settings-dialog.slint:3197
-#, fuzzy
-#| msgid "Choose file…"
 msgid "Choose…"
-msgstr "Выбрать файл…"
+msgstr "Выбрать…"
 
 #: ui/dialogs/settings-dialog.slint:3207
 msgid "Keep mail on the server"
@@ -10429,16 +10359,12 @@ msgid "Not signed in"
 msgstr "Вход не выполнен"
 
 #: ui/dialogs/settings-dialog.slint:3794
-#, fuzzy
-#| msgid ""
-#| "A Flectar account is only needed for these optional services. Learn more "
-#| "at flectar.com/mail."
 msgid ""
 "A Flectar account is only needed for business email. Flectar Mail Sync works "
 "without one. Learn more at flectar.com/mail."
 msgstr ""
-"Аккаунт Flectar нужен только для этих дополнительных сервисов. Подробнее на "
-"flectar.com/mail."
+"Аккаунт Flectar нужен только для рабочей почты. Flectar Mail Sync работает "
+"без него. Подробнее на flectar.com/mail."
 
 #: ui/dialogs/settings-dialog.slint:3799
 msgid "Sign in with Flectar"
@@ -10458,32 +10384,29 @@ msgid ""
 "templates, snoozes and reply reminders stay the same on all of them, and any "
 "of them sends your scheduled emails."
 msgstr ""
+"Подключите телефон и компьютеры один раз. Аккаунты, настройки, шаблоны, "
+"отложенные письма и напоминания об ответе будут одинаковыми на всех из них, "
+"и любое из них отправит ваши запланированные письма."
 
 #: ui/dialogs/settings-dialog.slint:3817
 msgid "Snoozes, reply reminders and templates everywhere"
-msgstr ""
+msgstr "Отложенные письма, напоминания об ответе и шаблоны везде"
 
 #: ui/dialogs/settings-dialog.slint:3818
-#, fuzzy
-#| msgid "Mail accounts, profiles, and signatures"
 msgid "Mail accounts, profiles, signatures and preferences"
-msgstr "Почтовые аккаунты, профили и подписи"
+msgstr "Почтовые аккаунты, профили, подписи и настройки"
 
 #: ui/dialogs/settings-dialog.slint:3820
 msgid "No account needed: a recovery code restores it"
-msgstr ""
+msgstr "Аккаунт не нужен: код восстановления всё вернёт"
 
 #: ui/dialogs/settings-dialog.slint:3822
-#, fuzzy
-#| msgid ""
-#| "Your messages stay with your mail provider. Sync only carries your "
-#| "Flectar Mail setup."
 msgid ""
 "Your mail stays with your mail provider. Flectar Mail Sync carries your "
 "setup and sign-ins, and a scheduled message until it goes out."
 msgstr ""
-"Ваши письма остаются у почтового провайдера. Синхронизация передаёт только "
-"настройки Flectar Mail."
+"Ваша почта остаётся у почтового провайдера. Flectar Mail Sync передаёт вашу "
+"настройку, данные для входа и запланированное сообщение до его отправки."
 
 #: ui/dialogs/settings-dialog.slint:3837
 msgid "Business email"
@@ -10514,14 +10437,8 @@ msgid "Billed per mailbox."
 msgstr "Оплата за каждый почтовый ящик."
 
 #: ui/dialogs/settings-dialog.slint:3857
-#, fuzzy
-#| msgid ""
-#| "These services are in development. Plans and availability will be "
-#| "announced on flectar.com/mail."
 msgid "Plans and prices will be announced on flectar.com/mail."
-msgstr ""
-"Эти сервисы находятся в разработке. Тарифы и сроки доступности будут "
-"объявлены на flectar.com/mail."
+msgstr "Тарифы и цены будут объявлены на flectar.com/mail."
 
 #: ui/dialogs/settings-dialog.slint:3876
 msgid "Flectar Mail, its makers, and its community."
@@ -10821,10 +10738,8 @@ msgid "Choose a profile for {}"
 msgstr "Выберите профиль для {}"
 
 #: ui/dialogs/settings-dialog.slint:4761
-#, fuzzy
-#| msgid "Search files"
 msgid "Special folders of {}"
-msgstr "Поиск файлов"
+msgstr "Специальные папки {}"
 
 #: ui/dialogs/settings-dialog.slint:4779
 msgid "Delete all local data?"
@@ -10978,32 +10893,32 @@ msgid "Keep calendar"
 msgstr "Оставить календарь"
 
 #: ui/dialogs/settings-dialog.slint:4975
-#, fuzzy
-#| msgid "Delete mail on this device?"
 msgid "Delete sync for every device?"
-msgstr "Удалить почту с этого устройства?"
+msgstr "Удалить синхронизацию для всех устройств?"
 
 #: ui/dialogs/settings-dialog.slint:4976
 msgid ""
 "Removes your encrypted setup from the sync server and turns sync off on all "
 "your devices."
 msgstr ""
+"Удаляет вашу зашифрованную настройку с сервера синхронизации и выключает "
+"синхронизацию на всех устройствах."
 
 #: ui/dialogs/settings-dialog.slint:4977
 msgid ""
 "Each device keeps its own accounts and settings. Mail on your mail servers "
 "is not touched."
 msgstr ""
+"Каждое устройство сохраняет свои аккаунты и настройки. Почта на ваших "
+"почтовых серверах не затрагивается."
 
 #: ui/dialogs/settings-dialog.slint:4978
-#, fuzzy
-#| msgid "Delete contact"
 msgid "Delete sync"
-msgstr "Удалить контакт"
+msgstr "Удалить синхронизацию"
 
 #: ui/dialogs/settings-dialog.slint:4979
 msgid "Keep syncing"
-msgstr ""
+msgstr "Продолжить синхронизацию"
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11084,115 +10999,92 @@ msgid "Keep them"
 msgstr "Оставить их"
 
 #: ui/dialogs/when-dialog.slint:35
-#, fuzzy
-#| msgid "7 days"
 msgid "Later today"
-msgstr "7 дней"
+msgstr "Сегодня позже"
 
 #: ui/dialogs/when-dialog.slint:36
 msgid "Tomorrow"
-msgstr ""
+msgstr "Завтра"
 
 #: ui/dialogs/when-dialog.slint:37
-#, fuzzy
-#| msgid "This week"
 msgid "This weekend"
-msgstr "На этой неделе"
+msgstr "В эти выходные"
 
 #: ui/dialogs/when-dialog.slint:38
-#, fuzzy
-#| msgid "Last week"
 msgid "Next week"
-msgstr "На прошлой неделе"
+msgstr "На следующей неделе"
 
 #: ui/dialogs/when-dialog.slint:39
 msgid "Tomorrow morning"
-msgstr ""
+msgstr "Завтра утром"
 
 #: ui/dialogs/when-dialog.slint:40
 msgid "Tomorrow afternoon"
-msgstr ""
+msgstr "Завтра днём"
 
 #: ui/dialogs/when-dialog.slint:41
-#, fuzzy
-#| msgid "Monday"
 msgid "Monday morning"
-msgstr "Понедельник"
+msgstr "В понедельник утром"
 
 #: ui/dialogs/when-dialog.slint:42
-#, fuzzy
-#| msgid "30 days"
 msgid "In 3 days"
-msgstr "30 дней"
+msgstr "Через 3 дня"
 
 #: ui/dialogs/when-dialog.slint:43
-#, fuzzy
-#| msgid "Last week"
 msgid "In a week"
-msgstr "На прошлой неделе"
+msgstr "Через неделю"
 
 #: ui/dialogs/when-dialog.slint:44
 msgid "Don't remind me"
-msgstr ""
+msgstr "Не напоминать"
 
 #: ui/dialogs/when-dialog.slint:105
 msgid "Snooze until"
-msgstr ""
+msgstr "Отложить до"
 
 #: ui/dialogs/when-dialog.slint:106
 msgid "Schedule"
-msgstr ""
+msgstr "Запланировать"
 
 #: ui/dialogs/when-dialog.slint:107
-#, fuzzy
-#| msgid "Rename and move"
 msgid "Remind me"
-msgstr "Переименовывать и перемещать"
+msgstr "Напомнить"
 
 #: ui/dialogs/when-dialog.slint:108
 msgid "Snooze"
-msgstr ""
+msgstr "Отложить"
 
 #: ui/dialogs/when-dialog.slint:264
-#, fuzzy
-#| msgid "Language and time"
 msgid "Pick date and time"
-msgstr "Язык и время"
+msgstr "Выбрать дату и время"
 
 #: ui/dialogs/when-dialog.slint:276 ui/dialogs/when-dialog.slint:303
-#, fuzzy
-#| msgctxt "forwarded message header"
-#| msgid "Date: {}"
 msgid "Date"
-msgstr "Дата: {}"
+msgstr "Дата"
 
 #: ui/dialogs/when-dialog.slint:284 ui/dialogs/when-dialog.slint:311
 msgid "Time"
-msgstr ""
+msgstr "Время"
 
 #: ui/dialogs/when-dialog.slint:324
-#, fuzzy
-#| msgid "Choose an email to read it here."
 msgid "Choose a time in the future."
-msgstr "Выберите письмо, чтобы прочитать его здесь."
+msgstr "Выберите время в будущем."
 
 #: ui/dialogs/when-dialog.slint:325
-#, fuzzy
-#| msgid "Use YYYY-MM-DD for the date and a time such as {}."
 msgid "Enter the date as YYYY-MM-DD and a time, such as {}."
-msgstr "Используйте формат ГГГГ-ММ-ДД для даты и время, например {}."
+msgstr "Введите дату в формате YYYY-MM-DD и время, например {}."
 
 #: ui/folder-roles.slint:158
 msgid ""
 "Flectar Mail files mail in the folders your server marks for each purpose. "
 "Choose others if those aren't right."
 msgstr ""
+"Flectar Mail раскладывает почту по папкам, которые ваш сервер помечает для "
+"каждой цели. Выберите другие, если они неверны."
 
 #: ui/folder-roles.slint:165
-#, fuzzy
-#| msgid "Loading message…"
 msgid "Reading the folders…"
-msgstr "Загрузка сообщения…"
+msgstr "Чтение папок…"
 
 #: ui/link-services.slint:90
 msgid "Large files"
@@ -11297,14 +11189,12 @@ msgstr "Со звёздочкой"
 #: ui/mailbox-words.slint:9
 msgctxt "mailbox"
 msgid "Sent"
-msgstr ""
+msgstr "Отправленные"
 
 #: ui/mailbox-words.slint:10
-#, fuzzy
-#| msgid "Archive"
 msgctxt "mailbox"
 msgid "Archive"
-msgstr "Архивировать"
+msgstr "Архив"
 
 #: ui/mailbox-words.slint:11
 msgid "Spam"
@@ -11316,7 +11206,7 @@ msgstr "Корзина"
 
 #: ui/mailbox-words.slint:13
 msgid "Drafts"
-msgstr ""
+msgstr "Черновики"
 
 #: ui/mailbox-words.slint:16
 msgid "Snoozed"
@@ -11327,40 +11217,28 @@ msgid "Scheduled"
 msgstr "Запланировано"
 
 #: ui/mailbox-words.slint:27
-#, fuzzy
-#| msgid "Unified contacts"
 msgid "Unified Starred"
-msgstr "Общий список контактов"
+msgstr "Объединённые со звездой"
 
 #: ui/mailbox-words.slint:28
-#, fuzzy
-#| msgid "Unified Inbox"
 msgid "Unified Sent"
-msgstr "Объединённые входящие"
+msgstr "Объединённые отправленные"
 
 #: ui/mailbox-words.slint:29
-#, fuzzy
-#| msgid "Archive"
 msgid "Unified Archive"
-msgstr "Архивировать"
+msgstr "Объединённый архив"
 
 #: ui/mailbox-words.slint:30
-#, fuzzy
-#| msgid "Unified contacts"
 msgid "Unified Spam"
-msgstr "Общий список контактов"
+msgstr "Объединённый спам"
 
 #: ui/mailbox-words.slint:31
-#, fuzzy
-#| msgid "Unified contacts"
 msgid "Unified Trash"
-msgstr "Общий список контактов"
+msgstr "Объединённая корзина"
 
 #: ui/mailbox-words.slint:32
-#, fuzzy
-#| msgid "Unified contacts"
 msgid "Unified Drafts"
-msgstr "Общий список контактов"
+msgstr "Объединённые черновики"
 
 #: ui/network.slint:114
 msgid "Kind of proxy"
@@ -12619,12 +12497,12 @@ msgstr "Переслать как вложение"
 #: ui/views/mail-list-pane.slint:1023 ui/views/mail-list-pane.slint:1717
 #: ui/views/mail-reading-pane.slint:413
 msgid "Unsnooze"
-msgstr ""
+msgstr "Вернуть из отложенных"
 
 #: ui/views/mail-list-pane.slint:1023 ui/views/mail-list-pane.slint:1717
 #: ui/views/mail-reading-pane.slint:413
 msgid "Snooze…"
-msgstr ""
+msgstr "Отложить…"
 
 #: ui/views/mail-list-pane.slint:1033 ui/views/mail-list-pane.slint:1713
 #: ui/views/mail-reading-pane.slint:411 ui/views/mail-reading-pane.slint:462
@@ -12653,10 +12531,8 @@ msgid "Replied"
 msgstr "Есть ответ"
 
 #: ui/views/mail-list-pane.slint:1182 ui/views/mail-reading-pane.slint:341
-#, fuzzy
-#| msgid "No email templates yet"
 msgid "No reply yet"
-msgstr "Шаблонов писем пока нет"
+msgstr "Ответа пока нет"
 
 #: ui/views/mail-list-pane.slint:1401
 msgid "{} messages in this conversation"
@@ -12667,10 +12543,8 @@ msgid "Account: {}"
 msgstr "Учётная запись: {}"
 
 #: ui/views/mail-list-pane.slint:1566
-#, fuzzy
-#| msgid "Reply"
 msgid "No reply"
-msgstr "Ответить"
+msgstr "Нет ответа"
 
 #: ui/views/mail-list-pane.slint:1702
 msgid "Deselect {}"
@@ -12731,23 +12605,19 @@ msgstr "кому: {}"
 
 #: ui/views/mail-reading-pane.slint:335
 msgid "May have gone out. Check Sent first."
-msgstr ""
+msgstr "Могло уйти. Сначала проверьте «Отправленные»."
 
 #: ui/views/mail-reading-pane.slint:337
-#, fuzzy
-#| msgid "Next"
 msgid "Not sent: {}"
-msgstr "Далее"
+msgstr "Не отправлено: {}"
 
 #: ui/views/mail-reading-pane.slint:338
-#, fuzzy
-#| msgid "Send"
 msgid "Sends {}"
-msgstr "Отправить"
+msgstr "Отправится {}"
 
 #: ui/views/mail-reading-pane.slint:346
 msgid "Reminds you {}"
-msgstr ""
+msgstr "Напомнит {}"
 
 #: ui/views/mail-reading-pane.slint:359 ui/views/mail-reading-pane.slint:2098
 msgid "Continue editing"
@@ -12810,11 +12680,11 @@ msgstr "Обобщить переписку"
 
 #: ui/views/mail-reading-pane.slint:386 ui/views/mail-reading-pane.slint:414
 msgid "Change reminder…"
-msgstr ""
+msgstr "Изменить напоминание…"
 
 #: ui/views/mail-reading-pane.slint:386 ui/views/mail-reading-pane.slint:414
 msgid "Remind me if no reply…"
-msgstr ""
+msgstr "Напомнить, если нет ответа…"
 
 #: ui/views/mail-reading-pane.slint:389 ui/views/mail-reading-pane.slint:417
 msgid "Unsubscribe…"
@@ -12981,28 +12851,20 @@ msgid "Heading: {}"
 msgstr "Заголовок: {}"
 
 #: ui/views/mail-reading-pane.slint:2107
-#, fuzzy
-#| msgid "Sync now"
 msgid "Send now"
-msgstr "Синхронизировать сейчас"
+msgstr "Отправить сейчас"
 
 #: ui/views/mail-reading-pane.slint:2114
-#, fuzzy
-#| msgid "Language and time"
 msgid "Change time"
-msgstr "Язык и время"
+msgstr "Изменить время"
 
 #: ui/views/mail-reading-pane.slint:2122
-#, fuzzy
-#| msgid "Cancelled"
 msgid "Cancel send"
-msgstr "Отменено"
+msgstr "Отменить отправку"
 
 #: ui/views/mail-reading-pane.slint:2139
-#, fuzzy
-#| msgid "Cancelled"
 msgid "Cancel reminder"
-msgstr "Отменено"
+msgstr "Отменить напоминание"
 
 #: ui/views/mail-reading-pane.slint:2210
 msgid "No message selected"

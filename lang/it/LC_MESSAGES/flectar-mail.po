@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-05 02:34+0000\n"
-"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"PO-Revision-Date: 2026-11-22 11:22+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Italian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/it/>\n"
 "Language: it\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"X-Generator: Weblate 2026.11.2\n"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -458,7 +458,7 @@ msgstr ""
 
 #: ui/app.slint:210
 msgid "Monday"
-msgstr ""
+msgstr "lunedì"
 
 #: ui/app.slint:211 ui/components/calendar.slint:897
 msgid "Tue"
@@ -466,31 +466,31 @@ msgstr ""
 
 #: ui/app.slint:211
 msgid "Tuesday"
-msgstr ""
+msgstr "martedì"
 
 #: ui/app.slint:212 ui/components/calendar.slint:897
 msgid "Wed"
-msgstr ""
+msgstr "Mer"
 
 #: ui/app.slint:212
 msgid "Wednesday"
-msgstr ""
+msgstr "mercoledì"
 
 #: ui/app.slint:213 ui/components/calendar.slint:897
 msgid "Thu"
-msgstr ""
+msgstr "Gio"
 
 #: ui/app.slint:213
 msgid "Thursday"
-msgstr ""
+msgstr "giovedì"
 
 #: ui/app.slint:214 ui/components/calendar.slint:897
 msgid "Fri"
-msgstr ""
+msgstr "Ven"
 
 #: ui/app.slint:214
 msgid "Friday"
-msgstr ""
+msgstr "venerdì"
 
 #: ui/app.slint:215 ui/components/calendar.slint:897
 msgid "Sat"
@@ -498,15 +498,15 @@ msgstr ""
 
 #: ui/app.slint:215
 msgid "Saturday"
-msgstr ""
+msgstr "sabato"
 
 #: ui/app.slint:216 ui/components/calendar.slint:897
 msgid "Sun"
-msgstr ""
+msgstr "Dom"
 
 #: ui/app.slint:216
 msgid "Sunday"
-msgstr ""
+msgstr "domenica"
 
 #: ui/app.slint:220
 msgctxt "time of day"
@@ -599,7 +599,7 @@ msgstr ""
 
 #: ui/app.slint:244
 msgid "All day"
-msgstr ""
+msgstr "Tutto il giorno"
 
 #: ui/app.slint:246 ui/components/calendar.slint:603
 msgid "Accepted"
@@ -624,7 +624,7 @@ msgstr ""
 
 #: ui/app.slint:252
 msgid "(untitled event)"
-msgstr ""
+msgstr "(evento senza titolo)"
 
 #: ui/app.slint:254
 msgctxt "title of a collapsible section in a message"
@@ -633,20 +633,20 @@ msgstr ""
 
 #: ui/app.slint:256
 msgid "No conversation history"
-msgstr ""
+msgstr "Nessuna cronologia della conversazione"
 
 #: ui/app.slint:257
 msgid "Conversation history available"
-msgstr ""
+msgstr "Cronologia della conversazione disponibile"
 
 #: ui/app.slint:258
 msgid "New address-book entry"
-msgstr ""
+msgstr "Nuova voce in rubrica"
 
 #: ui/app.slint:259 ui/app.slint:1533 ui/components/composer-fields.slint:91
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
-msgstr ""
+msgstr "Nessun account collegato"
 
 #: ui/app.slint:260
 msgid "No account sends mail"
@@ -655,8 +655,8 @@ msgstr ""
 #: ui/app.slint:262
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} interazione"
+msgstr[1] "{n} interazioni"
 
 #: ui/app.slint:264 ui/components/composer-fields.slint:20
 msgid "New message"
@@ -733,23 +733,23 @@ msgstr ""
 
 #: ui/app.slint:289 ui/app.slint:683
 msgid "Loading local data…"
-msgstr ""
+msgstr "Caricamento dati locali…"
 
 #: ui/app.slint:290 ui/app.slint:684
 msgid "Local data ready."
-msgstr ""
+msgstr "Dati locali pronti."
 
 #: ui/app.slint:291
 msgid "Local data is unavailable: {}"
-msgstr ""
+msgstr "Dati locali non disponibili: {}"
 
 #: ui/app.slint:292
 msgid "Could not display local mail: {}"
-msgstr ""
+msgstr "Impossibile visualizzare la posta locale: {}"
 
 #: ui/app.slint:323
 msgid "An unexpected interface message occurred."
-msgstr ""
+msgstr "Si è verificato un messaggio di interfaccia imprevisto."
 
 #: ui/app.slint:327 ui/components/profile-switcher.slint:126
 #: ui/dialogs/move-dialog.slint:53 ui/views/files-view.slint:39
@@ -840,7 +840,7 @@ msgstr ""
 
 #: ui/app.slint:347
 msgid "Notification preferences are active for this session."
-msgstr ""
+msgstr "Le preferenze per le notifiche sono attive per questa sessione."
 
 #: ui/app.slint:348
 msgid "Notification preferences saved."
