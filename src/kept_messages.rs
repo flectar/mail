@@ -175,10 +175,12 @@ impl KeptMessages {
     }
 }
 
-/// The message as the reader would show it: its translation, its body, or a
-/// stand-in made of its preview while the body loads.
+/// The message as the reader would show it: its translation, its plain text
+/// laid out for reading, its body, or a stand-in made of its preview while the
+/// body loads.
 fn shown_html(message: &MailMessage) -> String {
     crate::translation::shown_html(i64::from(message.id))
+        .or_else(|| crate::plain_text_view::shown_html(message))
         .or_else(|| message.html.clone())
         .unwrap_or_else(|| {
             format!(

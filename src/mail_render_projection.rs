@@ -271,8 +271,8 @@ pub(super) fn apply_email(
         host.preferences().invoke_close_reader();
         reader.set_auto_fit(true);
         email_renderer.borrow_mut().set_auto_fit(true);
-        reader.set_use_authored_text(false);
         reader.set_message_id(email.id);
+        reader.set_default_view_applied(false);
         reader.set_query("".into());
         reader.set_find_status("".into());
         reader.set_notice("".into());
@@ -286,10 +286,23 @@ pub(super) fn apply_email(
         "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><p>{}</p></body></html>",
         preview
     );
-    // A message the user translated shows its translation (#240).
+    // A message the user translated shows its translation (#240), and plain
+    // text shows laid out for reading (#544).
     let translation = crate::translation::shown_html(i64::from(email.id));
+    let plain = translation
+        .is_none()
+        .then(|| crate::plain_text_view::shown_html(&email))
+        .flatten();
+    reader.set_plain_text(translation.is_none() && crate::plain_text_view::shows_plain(&email));
+    reader.set_html_part(email.html_part);
+    // Once its body is in, the message opens the way messages show.
+    if email.html.is_some() && !email.body_pending && !reader.get_default_view_applied() {
+        reader.set_default_view_applied(true);
+        reader.set_reader_mode(crate::plain_text_view::opens_in_reader_mode(&email));
+    }
     let html = translation
         .as_deref()
+        .or(plain.as_deref())
         .or(email.html.as_deref())
         .unwrap_or(&fallback_html);
     email_renderer

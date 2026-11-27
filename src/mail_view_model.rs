@@ -2283,6 +2283,7 @@ mod tests {
             is_outgoing: false,
             labels: Vec::new(),
             html: None,
+            html_part: false,
             text: None,
             attachments: Vec::new(),
             body_pending: true,

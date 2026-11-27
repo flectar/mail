@@ -543,6 +543,8 @@ export component SettingsDialog inherits Rectangle {
     // When an opened unread message counts as read: "immediately",
     // "afterTwoSeconds", "afterFiveSeconds" or "never".
     in-out property <string> mark_read: "immediately";
+    in-out property <string> message_view: "original";
+    in-out property <bool> plain_text_fixed_width: false;
     // Tighter mail list rows, and how many lines of each message's text
     // they show (0 to 3).
     in-out property <bool> compact_rows: false;
@@ -688,6 +690,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_compose_text_style(string, string);
     callback save_compose_in_window(bool);
     callback save_mark_read(string);
+    callback save_message_view(string);
+    callback save_plain_text_fixed_width(bool);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -847,6 +851,14 @@ export component SettingsDialog inherits Rectangle {
     private property <int> mark-read-index: root.mark_read == "never" ? 3
         : root.mark_read == "afterFiveSeconds" ? 2
         : root.mark_read == "afterTwoSeconds" ? 1 : 0;
+    private property <[string]> message-view-options: [
+        @tr("message view" => "Original"),
+        @tr("Reader mode"),
+        @tr("Plain text"),
+    ];
+    private property <[string]> message-view-values: ["original", "reader", "plainText"];
+    private property <int> message-view-index: root.message_view == "plainText" ? 2
+        : root.message_view == "reader" ? 1 : 0;
     private property <[string]> read-receipt-options: [
         @tr("Never send"),
         @tr("Ask each time"),
@@ -1840,6 +1852,33 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => {
                                             root.mark_read = root.mark-read-values[index];
                                             root.save_mark_read(root.mark_read);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Show messages as");
+                                        description: @tr("How messages show when you open them. Each one can switch to plain text or back in its menu.");
+                                        choices: root.message-view-options;
+                                        selected-index: root.message-view-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            root.message_view = root.message-view-values[index];
+                                            root.save_message_view(root.message_view);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Plain text in a fixed-width font");
+                                        description: @tr("Plain-text messages keep the columns their senders lined up. Each device keeps its own choice.");
+                                        checked: root.plain_text_fixed_width;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.plain_text_fixed_width = checked;
+                                            root.save_plain_text_fixed_width(checked);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

@@ -148,6 +148,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             is_outgoing: false,
             labels: message.labels,
             html: None,
+            html_part: false,
             text: None,
             attachments: Vec::new(),
             body_pending: true,
@@ -980,9 +981,17 @@ pub(crate) fn refresh_oauth_availability(app: &AppWindow) {
     app.set_microsoft_oauth_available(resolve_credentials(Provider::Microsoft).is_ok());
 }
 
+/// How messages show when they open, and how plain text looks (#544).
+pub(crate) fn apply_reading(app: &AppWindow, settings: &Settings) {
+    app.set_message_view(settings.message_view.as_str().into());
+    app.set_plain_text_fixed_width(settings.plain_text_fixed_width);
+    crate::plain_text_view::apply_settings(settings.message_view, settings.plain_text_fixed_width);
+}
+
 pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
+    apply_reading(app, settings);
     app.global::<SyncUi>()
         .set_sync_sign_ins(settings.sync_sign_ins);
     crate::mail_rules::apply_cleanup(
@@ -1450,6 +1459,7 @@ mod warm_start_tests {
             is_outgoing: false,
             labels: Vec::new(),
             html: Some("<p>body must not enter warm cache</p>".into()),
+            html_part: true,
             text: Some("Plain body must not enter warm cache".into()),
             attachments: Vec::new(),
             body_pending: false,

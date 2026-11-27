@@ -95,6 +95,7 @@ mod oauth_browser;
 mod open_messages;
 pub mod pdf_preview;
 mod photo_shrink;
+mod plain_text_view;
 pub mod platform;
 mod preview_controls;
 pub mod qr_scanner;
@@ -6797,6 +6798,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     message_source::install(&app, &state, &runtime, platform.documents.clone());
     folder_visibility::install(&app, &state, &runtime);
     translation::install(&app, &state, &runtime);
+    plain_text_view::install(&app, &state, &runtime);
     ai_features::install(&app, &state, &runtime);
     network::install(&app, &state, &runtime);
     block_sender::install(&app, &state, &runtime);

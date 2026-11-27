@@ -1048,10 +1048,13 @@ impl Composers {
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| account.email.clone())
             });
-        // What the reader shows of the message, which a reply quotes.
+        // What the reader shows of the message, which a reply quotes. Plain
+        // text shows its quotes as bars without their quote marks, so a reply
+        // quotes the text as it was written instead, marks and all (#544).
         let shown_text = reader
             .host(&self.app)
             .and_then(|host| host.upgrade())
+            .filter(|host| !(host.email().get_plain_text() && !source.text_body.trim().is_empty()))
             .map(|host| host.ui().get_selected_plain_text())
             .unwrap_or_default();
         let prepared =

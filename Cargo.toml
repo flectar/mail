@@ -107,6 +107,8 @@ css-inline = { version = "0.23", default-features = false }
 style = { package = "stylo", version = "=0.22.0" }
 style_traits = { package = "stylo_traits", version = "=0.22.0" }
 unicode-segmentation = "1.13"
+# Web and email addresses in plain-text mail link (#544).
+linkify = "0.12"
 # Parley 0.12 includes the upstream emoji presentation fix.
 parley = "=0.12.0"
 pulldown-cmark = "0.13.6"

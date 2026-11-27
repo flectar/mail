@@ -702,7 +702,11 @@ export global EmailReader {
     in-out property <bool> caret-mode: false;
     in-out property <[ReaderItem]> items;
     in-out property <string> authored-text;
-    in-out property <bool> use-authored-text: false;
+    // The message shows as plain text, and it has HTML to switch to (#544).
+    in-out property <bool> plain-text: false;
+    in-out property <bool> html-part: false;
+    // The message opened the way messages show, as set in Settings.
+    in-out property <bool> default-view-applied: false;
 }
 
 export struct MailAttachment {

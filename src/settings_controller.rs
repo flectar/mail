@@ -281,6 +281,54 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_view = Rc::clone(state);
+    let runtime_for_view = runtime.clone();
+    app.on_save_message_view(move |choice| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(view) = flectar_mail_core::models::MessageView::parse(&choice) else {
+            return;
+        };
+        crate::plain_text_view::apply_settings(view, app.get_plain_text_fixed_width());
+        let Some(core) = state_for_view.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Message-opening preference updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_view.block_on(core.set_message_view(view)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Message-opening preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save message-opening preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_fixed_width = Rc::clone(state);
+    let runtime_for_fixed_width = runtime.clone();
+    app.on_save_plain_text_fixed_width(move |fixed_width| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let view = flectar_mail_core::models::MessageView::parse(&app.get_message_view())
+            .unwrap_or_default();
+        crate::plain_text_view::apply_settings(view, fixed_width);
+        let Some(core) = state_for_fixed_width.borrow().core.clone() else {
+            return;
+        };
+        match runtime_for_fixed_width.block_on(core.set_plain_text_fixed_width(fixed_width)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Text style preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save the text style preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_contacts = Rc::clone(state);
     let runtime_for_contacts = runtime.clone();
     app.on_save_contact_discovery_settings(move |outgoing, incoming, all_accounts, suggest| {

@@ -1179,6 +1179,8 @@ export component AppWindow inherits Window {
     callback save_compose_text_style(string, string);
     callback save_compose_in_window(bool);
     callback save_mark_read(string);
+    callback save_message_view(string);
+    callback save_plain_text_fixed_width(bool);
     callback save_list_rows();
     callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
@@ -1557,6 +1559,8 @@ export component AppWindow inherits Window {
     in-out property <bool> compose_in_window: false;
     in-out property <string> compose_text_size: "normal";
     in-out property <string> mark_read: "immediately";
+    in-out property <string> message_view: "original";
+    in-out property <bool> plain_text_fixed_width: false;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
     in-out property <bool> contact_suggest_all_accounts: false;
@@ -2487,6 +2491,8 @@ export component AppWindow inherits Window {
             compose_in_window <=> root.compose_in_window;
             compose_text_size <=> root.compose_text_size;
             mark_read <=> root.mark_read;
+            message_view <=> root.message_view;
+            plain_text_fixed_width <=> root.plain_text_fixed_width;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
             contact_suggest_all_accounts <=> root.contact_suggest_all_accounts;
@@ -2602,6 +2608,8 @@ export component AppWindow inherits Window {
             save_compose_text_style(font, size) => { root.save_compose_text_style(font, size); }
             save_compose_in_window(enabled) => { root.save_compose_in_window(enabled); }
             save_mark_read(choice) => { root.save_mark_read(choice); }
+            save_message_view(choice) => { root.save_message_view(choice); }
+            save_plain_text_fixed_width(on) => { root.save_plain_text_fixed_width(on); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
             save_keep_messages_open(enabled) => { root.save_keep_messages_open(enabled); }
