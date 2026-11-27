@@ -581,6 +581,9 @@ export global I18n {
         if (key == "Could not remove calendar: {}") { return @tr("Could not remove calendar: {}", argument); }
         if (key == "CardDAV connected and initial sync started.") { return @tr("CardDAV connected and initial sync started."); }
         if (key == "Could not connect CardDAV: {}") { return @tr("Could not connect CardDAV: {}", argument); }
+        if (key == "Authorize contacts access in your browser.") { return @tr("Authorize contacts access in your browser."); }
+        if (key == "Google Contacts connected and initial sync started.") { return @tr("Google Contacts connected and initial sync started."); }
+        if (key == "Could not connect Google Contacts: {}") { return @tr("Could not connect Google Contacts: {}", argument); }
         if (key == "CardDAV sync enabled.") { return @tr("CardDAV sync enabled."); }
         if (key == "CardDAV sync paused.") { return @tr("CardDAV sync paused."); }
         if (key == "Could not update CardDAV sync: {}") { return @tr("Could not update CardDAV sync: {}", argument); }
@@ -1209,6 +1212,7 @@ export component AppWindow inherits Window {
     callback set_calendar_connection_enabled(int, bool);
     callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
+    callback connect_google_contacts(int);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
     callback export_account_backup();
@@ -1588,6 +1592,9 @@ export component AppWindow inherits Window {
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
     in property <bool> carddav_connecting: false;
+    // The account whose Google Contacts last failed to connect, and why.
+    in property <int> contacts_connect_error_account: -1;
+    in property <string> contacts_connect_error: "";
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
@@ -2507,6 +2514,8 @@ export component AppWindow inherits Window {
             carddav_password <=> root.carddav_password;
             carddav_manage_existing <=> root.carddav_manage_existing;
             carddav_connecting: root.carddav_connecting;
+            contacts_connect_error_account: root.contacts_connect_error_account;
+            contacts_connect_error: root.contacts_connect_error;
             incoming_security <=> root.incoming_security;
             smtp_security <=> root.smtp_security;
             trusted_certificate_pem <=> root.trusted_certificate_pem;
@@ -2639,6 +2648,7 @@ export component AppWindow inherits Window {
             set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
             remove_calendar_connection(connection-id) => { root.remove_calendar_connection(connection-id); }
             connect_carddav(account-id, url, username, password) => { root.connect_carddav(account-id, url, username, password); }
+            connect_google_contacts(account-id) => { root.connect_google_contacts(account-id); }
             set_account_carddav_enabled(account-id, enabled) => { root.set_account_carddav_enabled(account-id, enabled); }
             disconnect_carddav(account-id) => { root.disconnect_carddav(account-id); }
             export_account_backup => { root.export_account_backup(); }

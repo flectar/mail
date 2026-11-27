@@ -1,6 +1,7 @@
 //! Standards-based CardDAV discovery and two-way contact synchronization.
 
 pub mod discovery;
+pub mod google;
 pub mod http;
 pub mod import;
 pub mod sync;

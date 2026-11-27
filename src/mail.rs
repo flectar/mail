@@ -2717,6 +2717,23 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Sync the Gmail account's Google Contacts, after Google asks in the
+    /// browser that `open_url` opens.
+    pub async fn connect_google_contacts<F>(
+        &self,
+        account_id: i64,
+        open_url: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(String) -> Result<(), String> + Send + 'static,
+    {
+        self.core
+            .connect_google_contacts(account_id, open_url)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Act on mail, returning the actions queued for it, which
     /// [`Self::undo_actions`] can take back.
     pub async fn perform_message_action(

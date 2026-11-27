@@ -1,14 +1,16 @@
 //! CardDAV connection, address-book, and remote-object persistence.
 
 use super::contact_entries;
+use crate::carddav::discovery::DiscoveredAddressBook;
 use crate::carddav::vcard::{self, Card};
 use crate::error::{CoreError, Result};
-use crate::models::{AddressBook, CardDavConnection};
+use crate::models::{AddressBook, CardDavConnection, CardDavKind};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardDavConfig {
     pub account_id: i64,
+    pub kind: CardDavKind,
     pub base_url: String,
     pub username: String,
     pub principal_url: Option<String>,
@@ -30,6 +32,18 @@ pub struct PendingUpload {
     pub document: Option<String>,
 }
 
+/// The connection kind stored in column `index`.
+fn kind_column(row: &Row<'_>, index: usize) -> rusqlite::Result<CardDavKind> {
+    let value = row.get::<_, String>(index)?;
+    CardDavKind::parse(&value).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            format!("unknown CardDAV connection kind {value}").into(),
+        )
+    })
+}
+
 fn config_row(row: &Row<'_>) -> rusqlite::Result<CardDavConfig> {
     Ok(CardDavConfig {
         account_id: row.get(0)?,
@@ -39,6 +53,7 @@ fn config_row(row: &Row<'_>) -> rusqlite::Result<CardDavConfig> {
         home_set_url: row.get(4)?,
         enabled: row.get::<_, i64>(5)? != 0,
         last_error: row.get(6)?,
+        kind: kind_column(row, 7)?,
     })
 }
 
@@ -71,18 +86,20 @@ fn pending_upload_row(row: &Row<'_>) -> rusqlite::Result<PendingUpload> {
 pub fn upsert_config(conn: &Connection, cfg: &CardDavConfig) -> Result<()> {
     conn.execute(
         "INSERT INTO carddav_config
-           (account_id,base_url,username,principal_url,home_set_url,enabled,last_error)
-         VALUES (?1,?2,?3,?4,?5,?6,NULL)
+           (account_id,base_url,username,principal_url,home_set_url,enabled,last_error,kind)
+         VALUES (?1,?2,?3,?4,?5,?6,NULL,?7)
          ON CONFLICT(account_id) DO UPDATE SET base_url=excluded.base_url,
            username=excluded.username, principal_url=excluded.principal_url,
-           home_set_url=excluded.home_set_url, enabled=excluded.enabled, last_error=NULL",
+           home_set_url=excluded.home_set_url, enabled=excluded.enabled, last_error=NULL,
+           kind=excluded.kind",
         params![
             cfg.account_id,
             cfg.base_url,
             cfg.username,
             cfg.principal_url,
             cfg.home_set_url,
-            cfg.enabled as i64
+            cfg.enabled as i64,
+            cfg.kind.as_str()
         ],
     )?;
     Ok(())
@@ -90,7 +107,7 @@ pub fn upsert_config(conn: &Connection, cfg: &CardDavConfig) -> Result<()> {
 
 pub fn get_config(conn: &Connection, account_id: i64) -> Result<Option<CardDavConfig>> {
     conn.query_row(
-        "SELECT account_id,base_url,username,principal_url,home_set_url,enabled,last_error
+        "SELECT account_id,base_url,username,principal_url,home_set_url,enabled,last_error,kind
          FROM carddav_config WHERE account_id=?1",
         [account_id],
         config_row,
@@ -101,7 +118,7 @@ pub fn get_config(conn: &Connection, account_id: i64) -> Result<Option<CardDavCo
 
 pub fn enabled_configs(conn: &Connection) -> Result<Vec<CardDavConfig>> {
     let mut stmt = conn.prepare(
-        "SELECT account_id,base_url,username,principal_url,home_set_url,enabled,last_error
+        "SELECT account_id,base_url,username,principal_url,home_set_url,enabled,last_error,kind
          FROM carddav_config WHERE enabled=1 ORDER BY account_id",
     )?;
     Ok(stmt
@@ -111,13 +128,14 @@ pub fn enabled_configs(conn: &Connection) -> Result<Vec<CardDavConfig>> {
 
 pub fn list_connections(conn: &Connection) -> Result<Vec<CardDavConnection>> {
     let mut stmt = conn.prepare(
-        "SELECT account_id,base_url,username,enabled,last_error
+        "SELECT account_id,base_url,username,enabled,last_error,kind
          FROM carddav_config ORDER BY account_id",
     )?;
     Ok(stmt
         .query_map([], |row| {
             Ok(CardDavConnection {
                 account_id: row.get(0)?,
+                kind: kind_column(row, 5)?,
                 base_url: row.get(1)?,
                 username: row.get(2)?,
                 enabled: row.get::<_, i64>(3)? != 0,
@@ -214,6 +232,38 @@ pub fn ensure_default(conn: &Connection, account_id: i64, addressbook_id: i64) -
             "UPDATE carddav_addressbooks SET is_default=(id=?2) WHERE account_id=?1",
             params![account_id, addressbook_id],
         )?;
+    }
+    Ok(())
+}
+
+/// Save an account's connection with the address books just discovered on
+/// it. Books the server no longer lists keep their contacts but stop being
+/// available, and the first discovered book becomes the default when no
+/// writable one is.
+pub fn save_discovery(
+    conn: &Connection,
+    config: &CardDavConfig,
+    books: &[DiscoveredAddressBook],
+) -> Result<()> {
+    upsert_config(conn, config)?;
+    let mut first = None;
+    for book in books {
+        let id = upsert_addressbook(
+            conn,
+            config.account_id,
+            &book.url,
+            book.display_name.as_deref(),
+            book.read_only,
+        )?;
+        first.get_or_insert(id);
+    }
+    let urls = books
+        .iter()
+        .map(|book| book.url.clone())
+        .collect::<std::collections::HashSet<_>>();
+    retain_addressbooks(conn, config.account_id, &urls)?;
+    if let Some(id) = first {
+        ensure_default(conn, config.account_id, id)?;
     }
     Ok(())
 }
@@ -540,6 +590,26 @@ pub fn acknowledge_upload(
     Ok(())
 }
 
+/// File a resource the server just created under the address it gave it.
+pub fn move_object(conn: &Connection, object_id: i64, href: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE carddav_objects SET href=?2 WHERE id=?1",
+        params![object_id, href],
+    )?;
+    Ok(())
+}
+
+/// Stop uploading a resource the server stored where this client can't
+/// tell, so it's never created twice. The error makes the next sync list its
+/// address book in full, which replaces it with the server's copy.
+pub fn stop_upload(conn: &Connection, object_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE carddav_objects SET dirty=0,remote_exists=1,last_error=?2 WHERE id=?1",
+        params![object_id, error],
+    )?;
+    Ok(())
+}
+
 /// Remove a resource and its contact after the server confirmed they are gone.
 pub fn forget_object(conn: &Connection, object_id: i64) -> Result<()> {
     conn.execute(
@@ -676,4 +746,72 @@ pub fn resolve_conflict(
         [id],
     )?;
     apply_remote(conn, book, &href, etag.as_deref(), &Card::parse(card)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::testutil;
+
+    fn google_config() -> CardDavConfig {
+        CardDavConfig {
+            account_id: 1,
+            kind: CardDavKind::Google,
+            base_url: "https://www.googleapis.com/.well-known/carddav".into(),
+            username: "me@test.dev".into(),
+            principal_url: Some(
+                "https://www.googleapis.com/carddav/v1/principals/me@test.dev/".into(),
+            ),
+            home_set_url: "https://www.googleapis.com/carddav/v1/principals/me@test.dev/lists/"
+                .into(),
+            enabled: true,
+            last_error: None,
+        }
+    }
+
+    #[test]
+    fn connections_saved_before_google_contacts_sign_in_with_a_password() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO carddav_config (account_id,base_url,username,home_set_url)
+             VALUES (1,'https://dav.test/','me','https://dav.test/books/')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            get_config(&conn, 1).unwrap().unwrap().kind,
+            CardDavKind::Generic
+        );
+        assert_eq!(
+            list_connections(&conn).unwrap()[0].kind,
+            CardDavKind::Generic
+        );
+    }
+
+    #[test]
+    fn a_google_contacts_connection_keeps_its_kind() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        upsert_config(&conn, &google_config()).unwrap();
+        assert_eq!(get_config(&conn, 1).unwrap(), Some(google_config()));
+        assert_eq!(enabled_configs(&conn).unwrap(), [google_config()]);
+        assert_eq!(
+            list_connections(&conn).unwrap()[0].kind,
+            CardDavKind::Google
+        );
+
+        // Connecting a CardDAV server instead replaces the connection.
+        let server = CardDavConfig {
+            kind: CardDavKind::Generic,
+            base_url: "https://dav.test/".into(),
+            ..google_config()
+        };
+        upsert_config(&conn, &server).unwrap();
+        assert_eq!(get_config(&conn, 1).unwrap(), Some(server));
+        assert!(
+            conn.execute("UPDATE carddav_config SET kind='icloud'", [])
+                .is_err()
+        );
+    }
 }

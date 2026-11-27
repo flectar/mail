@@ -1052,3 +1052,45 @@ async fn a_onedrive_link_the_organization_refuses_leaves_nothing_behind() {
         "DELETE /me/drive/items/folder2 HTTP/1.1"
     );
 }
+
+#[tokio::test]
+async fn signing_in_again_keeps_google_contacts_while_they_sync() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = core(&directory).await;
+    let gmail = mail_account(&core, Provider::Gmail, "ana@gmail.com").await;
+    let connect = |kind: CardDavKind, enabled: bool| {
+        let core = &core;
+        async move {
+            core.db
+                .write(move |conn| {
+                    repo::carddav::upsert_config(
+                        conn,
+                        &repo::carddav::CardDavConfig {
+                            account_id: gmail,
+                            kind,
+                            base_url: "https://contacts.example.test/".into(),
+                            username: "ana@gmail.com".into(),
+                            principal_url: None,
+                            home_set_url: "https://contacts.example.test/books/".into(),
+                            enabled,
+                            last_error: None,
+                        },
+                    )
+                })
+                .await
+                .unwrap();
+        }
+    };
+
+    // Contacts from another CardDAV server need no Google permission.
+    connect(CardDavKind::Generic, true).await;
+    assert!(core.google_scopes_in_use(gmail).await.unwrap().is_empty());
+    connect(CardDavKind::Google, true).await;
+    assert_eq!(
+        core.google_scopes_in_use(gmail).await.unwrap(),
+        [oauth::providers::GOOGLE_CONTACTS_SCOPE]
+    );
+    // Paused contacts, like a paused calendar, aren't asked for again.
+    connect(CardDavKind::Google, false).await;
+    assert!(core.google_scopes_in_use(gmail).await.unwrap().is_empty());
+}

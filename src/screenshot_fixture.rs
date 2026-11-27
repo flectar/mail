@@ -278,6 +278,7 @@ fixture_row!(AccountRow {
     provider_calendar_connected,
     provider_calendar_error,
     carddav_connected,
+    carddav_google,
     carddav_enabled,
     carddav_status,
     carddav_url,

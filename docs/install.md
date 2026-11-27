@@ -27,8 +27,9 @@ Microsoft app registration, or connect an IMAP, POP3, or JMAP account. Custom
 keys are shared with Settings and take precedence over bundled keys; clearing a
 custom client ID restores the defaults when available. Each provider enables
 separately once its configuration is saved. A Google app needs the Gmail API
-turned on in its Google Cloud project, and the Google Drive API as well for
-sending large files from Google Drive.
+turned on in its Google Cloud project. Google Calendar also needs the CalDAV
+API and the Google Calendar API, Google Contacts the Google Contacts CardDAV
+API, and sending large files from Google Drive the Google Drive API.
 
 ## Windows and macOS
 

@@ -12,7 +12,7 @@ use crate::Core;
 use crate::accounts::credentials::{self, Slot};
 use crate::db::repo;
 use crate::error::{CoreError, Result};
-use crate::models::{Account, CalendarConnectionKind, Provider, Settings};
+use crate::models::{Account, CalendarConnectionKind, CardDavKind, Provider, Settings};
 use crate::net::proxy::Owner;
 use crate::oauth;
 use rusqlite::{OptionalExtension, params};
@@ -392,9 +392,9 @@ impl Core {
 
     /// The Google permissions past mail that the Gmail account with id `account_id` uses,
     /// which a sign-in asks for again so that it keeps them: Calendar while its calendars
-    /// are connected, Drive while files go by link from it, and Gmail settings once the
-    /// app saved its automatic replies. Google keeps earlier grants
-    /// on the web, but Android asks for what the sign-in lists, each time.
+    /// are connected, Contacts while its contacts sync, Drive while files go by link from
+    /// it, and Gmail settings once the app saved its automatic replies. Google keeps
+    /// earlier grants on the web, but Android asks for what the sign-in lists, each time.
     pub(crate) async fn google_scopes_in_use(&self, account_id: i64) -> Result<Vec<&'static str>> {
         let calendar = self
             .calendar_db
@@ -421,9 +421,19 @@ impl Core {
             .db
             .read(move |conn| repo::auto_replies::uses_settings(conn, account_id))
             .await?;
+        let contacts = self
+            .db
+            .read(move |conn| {
+                Ok(repo::carddav::get_config(conn, account_id)?
+                    .is_some_and(|config| config.enabled && config.kind == CardDavKind::Google))
+            })
+            .await?;
         let mut scopes = Vec::new();
         if calendar {
             scopes.push(oauth::providers::GOOGLE_CALENDAR_SCOPE);
+        }
+        if contacts {
+            scopes.push(oauth::providers::GOOGLE_CONTACTS_SCOPE);
         }
         if drive {
             scopes.push(oauth::providers::GOOGLE_DRIVE_FILE_SCOPE);

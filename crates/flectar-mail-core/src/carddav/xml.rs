@@ -20,6 +20,8 @@ pub struct Item {
     pub can_write: Option<bool>,
     pub ctag: Option<String>,
     pub sync_token: Option<String>,
+    /// Where new members go by POST (RFC 5995), when the server says.
+    pub add_member: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +72,9 @@ fn merge_props(item: &mut Item, props: Item) {
     if props.sync_token.is_some() {
         item.sync_token = props.sync_token;
     }
+    if props.add_member.is_some() {
+        item.add_member = props.add_member;
+    }
 }
 
 pub fn parse(body: &str) -> Result<Multistatus> {
@@ -110,6 +115,7 @@ pub fn parse(body: &str) -> Result<Multistatus> {
                     }
                     "current-user-principal" => href_target = Some("principal"),
                     "addressbook-home-set" => href_target = Some("home"),
+                    "add-member" => href_target = Some("add-member"),
                     "current-user-privilege-set" => {
                         if let Some(item) = props.as_mut().or(current.as_mut()) {
                             item.can_write = Some(false);
@@ -210,6 +216,7 @@ pub fn parse(body: &str) -> Result<Multistatus> {
                             match href_target {
                                 Some("principal") => item.principal = Some(value.to_owned()),
                                 Some("home") => item.home_set = Some(value.to_owned()),
+                                Some("add-member") => item.add_member = Some(value.to_owned()),
                                 _ if !in_propstat && item.href.is_empty() => {
                                     item.href = value.to_owned()
                                 }
@@ -217,7 +224,9 @@ pub fn parse(body: &str) -> Result<Multistatus> {
                             }
                         }
                     }
-                    "current-user-principal" | "addressbook-home-set" => href_target = None,
+                    "current-user-principal" | "addressbook-home-set" | "add-member" => {
+                        href_target = None
+                    }
                     "status" => {
                         let code = status(value);
                         if path.last().is_some_and(|v| v == "response") {
@@ -303,6 +312,15 @@ pub fn collections() -> String {
 pub fn state() -> String {
     r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/><d:sync-token/></d:prop></d:propfind>"#.into()
 }
+/// The ETag of every member, for a PROPFIND with Depth 1.
+pub fn etags() -> String {
+    r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>"#
+        .into()
+}
+/// Where the collection takes new members by POST (RFC 5995).
+pub fn add_member() -> String {
+    r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:add-member/></d:prop></d:propfind>"#.into()
+}
 pub fn sync_collection(token: &str) -> String {
     const PREFIX: &str = r#"<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:"><d:sync-token>"#;
     const SUFFIX: &str = r#"</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>"#;
@@ -361,5 +379,15 @@ mod tests {
         let body = multiget(&["/book/a.vcf".into()]);
         assert!(body.contains("<c:address-data/>"));
         assert!(!body.contains("version=\"4.0\""));
+    }
+
+    #[test]
+    fn reads_where_a_collection_takes_new_members() {
+        let response = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/book/</d:href>
+            <d:propstat><d:prop><d:add-member><d:href>/book/?add-member</d:href></d:add-member></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+          </d:response></d:multistatus>"#;
+        let item = parse(response).unwrap().items.remove(0);
+        assert_eq!(item.href, "/book/");
+        assert_eq!(item.add_member.as_deref(), Some("/book/?add-member"));
     }
 }

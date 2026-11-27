@@ -64,6 +64,52 @@ kept contact is linked to it again instead of being added twice. If the kept
 contact changed in the meantime, both versions wait for the user's choice, as
 in any other conflict. Nothing is uploaded until then.
 
+## Google Contacts
+
+A Gmail account that signs in with Google can sync its Google Contacts.
+Google's CardDAV interface accepts only OAuth, with the undocumented scope
+`https://www.googleapis.com/auth/carddav` that every peer client uses.
+Connecting asks Google for it in the browser along with the other permissions
+the account uses, since Android grants only what each sign-in lists, and the
+connection's `kind` (migration 77) becomes `google`. Every sync takes the
+account's current access token, and signing in again keeps asking for the
+scope while contacts sync.
+
+Google documents one address book, `/carddav/v1/principals/{email}/lists/default/`
+on `www.googleapis.com`. Its well-known address answers with a 301 there,
+which an HTTP client follows as a GET, so the connection names the book
+directly. Google has left out `resourcetype`, so any successful PROPFIND
+answer counts.
+
+Google's sync departs from the RFCs, so address books on Google's servers
+take their own path, as peer clients' do, whichever way they sign in.
+
+- A first sync reads the sync token with a PROPFIND, lists the book with a
+  PROPFIND at Depth 1, and downloads cards with addressbook-multiget. Google
+  answers an empty sync token with a 400 and doesn't implement
+  addressbook-query.
+- Later syncs send sync-collection with the stored token at Depth 1. RFC 6578
+  requires Depth 0, but Google answers that as though nothing changed. Polling
+  getctag is throttled, so the state is read only to start over.
+- An expired token, a 400 with `DAV:valid-sync-token`, starts over from a fresh
+  one. Google's tokens last 29 days.
+- New contacts go in by POST to the book's `DAV:add-member` address
+  (RFC 5995), since Google files a PUT under another address and UID, which
+  the next sync would bring back as a second contact. The answer's `Location`
+  becomes the contact's href, and a multiget brings Google's version, whose UID
+  replaces the local one. If the answer names no address, the contact is never
+  posted again, and the next sync lists the book in full, which replaces it
+  with Google's copy.
+- Google refuses some requests with JSON instead of WebDAV. A missing contacts
+  scope asks the account to sign in again, a turned-off Google Contacts CardDAV
+  API asks for it to be turned on in the app's Google Cloud project, and a rate
+  limit waits for the next sync.
+
+Google ignores CATEGORIES over CardDAV, so tags on its contacts don't sync and
+can disappear when Google's version comes back. An account syncs one contacts
+server, so a Gmail account syncs either Google Contacts or another CardDAV
+server.
+
 ## Upgrading from earlier versions
 
 Migration 13 converts the old email-keyed directory in one transaction:
@@ -103,3 +149,8 @@ Before release, test against a disposable Nextcloud address book:
 6. Disconnect, or remove the account, while offline changes are pending.
    Check that the contacts stay on this device and deleted contacts stay
    deleted.
+7. With a Gmail account, app keys of your own and the Google Contacts CardDAV
+   API turned on, choose **Connect Google Contacts**. Check that a contact made
+   in Google Contacts appears, that one added here shows up in Google once and
+   stays one contact here after two syncs, that edits go both ways, and that a
+   deletion here removes it from Google.

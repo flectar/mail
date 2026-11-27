@@ -465,6 +465,9 @@ pub(super) fn apply_connected_accounts(
                     .unwrap_or_default()
                     .into(),
                 carddav_connected: carddav.is_some(),
+                carddav_google: carddav.is_some_and(|connection| {
+                    connection.kind == flectar_mail_core::models::CardDavKind::Google
+                }),
                 carddav_enabled: carddav.is_some_and(|connection| connection.enabled),
                 carddav_status: carddav
                     .and_then(|connection| connection.last_error.clone())

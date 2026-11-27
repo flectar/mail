@@ -92,6 +92,7 @@ def event_defaults:
     | .provider_calendar_connected = (.provider_calendar_connected // false)
     | .provider_calendar_error = (.provider_calendar_error // "")
     | .carddav_connected = (.carddav_connected // false)
+    | .carddav_google = (.carddav_google // false)
     | .carddav_enabled = (.carddav_enabled // false)
     | .carddav_status = (.carddav_status // "")
     | .carddav_url = (.carddav_url // "")
