@@ -61,6 +61,8 @@ hf-hub = { version = "1", default-features = false, features = ["rustls-tls"], o
 # auth
 base64 = "0.23"
 sha2 = "0.10"
+# Display columns of wide characters, for lines written as format=flowed.
+unicode-width = "0.2"
 url = "2"
 percent-encoding = "2"
 

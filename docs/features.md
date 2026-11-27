@@ -670,6 +670,12 @@ in Settings → Accounts, under its sender identities and signatures, and replie
 and forwards to plain-text messages start as plain text unless that's turned
 off there. A draft opens again as it was saved.
 
+The plain text of every message, on its own or beside the formatted one, goes
+out as format=flowed (RFC 3676). Lines wrap at 72 characters, quotes are
+marked `>` once per level, and mail apps that read the format join each
+paragraph back together to fit their window. Text beyond ASCII goes as 8-bit
+text.
+
 **Forward as attachment**, in a message's **More** menu or in the **More** menu
 for messages chosen in the list, attaches them to a new message, each as it
 arrived, which mail apps open as a message. A conversation chosen in the list

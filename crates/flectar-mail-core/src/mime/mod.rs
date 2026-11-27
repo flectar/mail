@@ -3746,7 +3746,7 @@ fn imip_body<'a>(
     let method = imip_method(&calendar.mime_type)
         .unwrap_or_default()
         .to_ascii_uppercase();
-    let mut alternatives = vec![MimePart::new("text/plain", out.body_text)];
+    let mut alternatives = vec![plain_text_part(out.body_text)];
     if let Some(html) = out.body_html.filter(|html| !html.trim().is_empty()) {
         alternatives.push(MimePart::new("text/html", html));
     }
@@ -3766,6 +3766,36 @@ fn imip_body<'a>(
     );
     parts.extend(attachments.into_iter().map(attachment_part));
     MimePart::new("multipart/mixed", parts)
+}
+
+/// The message's text as a text/plain part in format=flowed (RFC 3676), which
+/// mail apps that read it show at any width, and the rest as lines that fit
+/// 78 columns. It goes as it is, in 7bit or 8bit: section 4.2 asks not to
+/// use quoted-printable only to keep the trailing spaces that say a line
+/// goes on. Only a line SMTP can't carry makes it base64.
+fn plain_text_part(text: &str) -> mail_builder::mime::MimePart<'static> {
+    use mail_builder::headers::content_type::ContentType;
+    use mail_builder::mime::MimePart;
+
+    let flowed = flowed::encode(text);
+    let encoding = flowed::transfer_encoding(&flowed);
+    let body = match encoding {
+        flowed::TransferEncoding::Base64 => base64_lines(flowed.as_bytes()),
+        flowed::TransferEncoding::SevenBit | flowed::TransferEncoding::EightBit => flowed,
+    };
+    let content_type = ContentType::new("text/plain")
+        .attribute("charset", "utf-8")
+        .attribute("format", "flowed")
+        .attribute("delsp", "no");
+    MimePart::new(content_type, body).transfer_encoding(encoding.as_str())
+}
+
+/// `bytes` in base64, in lines of 76 characters.
+pub(crate) fn base64_lines(bytes: &[u8]) -> String {
+    let mut encoded = Vec::with_capacity(bytes.len() / 3 * 4 + bytes.len() / 57 * 2 + 4);
+    mail_builder::encoders::base64::base64_encode_mime(bytes, &mut encoded, false)
+        .expect("writing to a Vec doesn't fail");
+    String::from_utf8(encoded).expect("base64 is ASCII")
 }
 
 /// An attachment's part, as mail-builder writes those it adds itself.
@@ -4064,8 +4094,8 @@ fn build_message_with_attachments<'a>(
             out.from.name.as_deref().unwrap_or_default(),
             out.from.email.as_str(),
         ))
-        .subject(header_text(out.subject).into_owned())
-        .text_body(out.body_text);
+        .subject(header_text(out.subject).into_owned());
+    builder.text_body = Some(plain_text_part(out.body_text));
     if let Some(reply_to) = &out.reply_to {
         builder = builder.reply_to(mail_builder::headers::address::Address::new_address(
             reply_to
@@ -4156,7 +4186,7 @@ fn build_message_with_attachments<'a>(
         use mail_builder::mime::MimePart;
         let alternative = MimePart::new(
             "multipart/alternative",
-            vec![MimePart::new("text/plain", out.body_text), html],
+            vec![plain_text_part(out.body_text), html],
         );
         builder = builder.body(if attachments.is_empty() {
             alternative
@@ -5273,6 +5303,43 @@ mod tests {
             parsed.text.as_deref(),
             Some("A paragraph that wraps mid word and goes on.\r\n> Quoted text that flows\r\n")
         );
+    }
+
+    #[test]
+    fn text_goes_out_flowed() {
+        let text = "word ".repeat(40);
+        let text = text.trim_end();
+        let (_, raw) = build_message(&outgoing(text, None)).unwrap();
+        let message = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let content_type = message.text_part(0).unwrap().content_type().unwrap();
+        assert_eq!(content_type.attribute("charset"), Some("utf-8"));
+        assert_eq!(content_type.attribute("format"), Some("flowed"));
+        assert_eq!(content_type.attribute("delsp"), Some("no"));
+        let written = String::from_utf8(raw.clone()).unwrap();
+        let (_, body) = written.split_once("\r\n\r\n").unwrap();
+        assert!(
+            written.contains("Content-Transfer-Encoding: 7bit\r\n"),
+            "{written}"
+        );
+        assert!(body.split("\r\n").all(|line| line.len() <= 72), "{body}");
+        assert_eq!(parse_message(&raw).unwrap().text.as_deref(), Some(text));
+
+        // Beyond ASCII it goes as 8bit, not quoted-printable (RFC 3676
+        // section 4.2).
+        let (_, raw) = build_message(&outgoing("Grüße aus Berlin", None)).unwrap();
+        let written = String::from_utf8(raw).unwrap();
+        assert!(
+            written.contains("Content-Transfer-Encoding: 8bit\r\n\r\nGrüße aus Berlin"),
+            "{written}"
+        );
+
+        // So does the text beside HTML.
+        let (_, raw) = build_message(&outgoing(text, Some("<p>rich</p>"))).unwrap();
+        let message = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let content_type = message.text_part(0).unwrap().content_type().unwrap();
+        assert_eq!(content_type.attribute("format"), Some("flowed"));
+        let parsed = parse_message(&raw).unwrap();
+        assert_eq!(parsed.text.as_deref().map(str::trim_end), Some(text));
     }
 
     #[test]
