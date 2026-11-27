@@ -144,6 +144,8 @@ export component MailView inherits FocusScope {
     callback request_folder_rename(int, string);
     callback request_folder_delete(int, string);
     callback request_folder_hide(int);
+    // Gmail's label list shows a Gmail label, or not (#253).
+    callback request_label_listed(int, bool);
     callback request_label_rename(int, string, color, string, bool);
     callback request_label_delete(int, string, string, bool, bool);
     callback load_more();
@@ -364,6 +366,7 @@ export component MailView inherits FocusScope {
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
                 request-hide-folder(id) => { root.request_folder_hide(id); }
+                request-set-label-listed(id, listed) => { root.request_label_listed(id, listed); }
                 request-empty-trash(account-id) => { root.request_empty_trash(account-id); }
                 request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
                 request-delete-label(id, name, account, global, has-children) => {
@@ -557,6 +560,7 @@ export component MailView inherits FocusScope {
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
                 request-hide-folder(id) => { root.request_folder_hide(id); }
+                request-set-label-listed(id, listed) => { root.request_label_listed(id, listed); }
                 request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);
@@ -791,6 +795,7 @@ export component MailView inherits FocusScope {
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
                 request-hide-folder(id) => { root.request_folder_hide(id); }
+                request-set-label-listed(id, listed) => { root.request_label_listed(id, listed); }
                 request-empty-trash(account-id) => { root.request_empty_trash(account-id); }
                 request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
                 request-delete-label(id, name, account, global, has-children) => {

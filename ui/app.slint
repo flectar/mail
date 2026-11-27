@@ -849,6 +849,10 @@ export global I18n {
         if (key == "Could not delete folder: {}") { return @tr("Could not delete folder: {}", argument); }
         if (key == "Folder hidden. Show it again in Settings → Accounts.") { return @tr("Folder hidden. Show it again in Settings → Accounts."); }
         if (key == "Could not hide folder: {}") { return @tr("Could not hide folder: {}", argument); }
+        if (key == "Label shown.") { return @tr("Label shown."); }
+        if (key == "Label hidden. It's under More.") { return @tr("Label hidden. It's under More."); }
+        if (key == "Could not show label: {}") { return @tr("Could not show label: {}", argument); }
+        if (key == "Could not hide label: {}") { return @tr("Could not hide label: {}", argument); }
         if (key == "Could not change the folder: {}") { return @tr("Could not change the folder: {}", argument); }
         if (key == "Could not close preview: {}") { return @tr("Could not close preview: {}", argument); }
         if (key == "Opened the system print view.") { return @tr("Opened the system print view."); }
@@ -1118,6 +1122,8 @@ export component AppWindow inherits Window {
     callback delete_folder(int);
     // Hide a folder from the sidebar and the Move to list (#253).
     callback hide_folder(int);
+    // Show a Gmail label in Gmail's label list, or move it under More (#253).
+    callback set_label_listed(int, bool);
     callback load_more();
     callback load_earlier_mail();
     callback sync_mail();
@@ -2163,6 +2169,7 @@ export component AppWindow inherits Window {
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
             request_folder_hide(id) => { root.hide_folder(id); }
+            request_label_listed(id, listed) => { root.set_label_listed(id, listed); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
             request_label_delete(id, name, account, global, has-descendants) => {
                 root.open-label-delete(id, name, account, global, has-descendants);

@@ -346,7 +346,14 @@ also leaves the **Move to** list, and its mail still downloads and turns up in
 searches. The Inbox and the folders for sent mail, drafts and the like always
 show. A hidden folder renamed in Flectar Mail stays hidden, and Flectar Mail
 Sync hides it on your other devices too. This works for IMAP, JMAP and POP3
-accounts. Gmail keeps its labels.
+accounts.
+
+A Gmail account's labels show as Gmail's own label list shows them, which
+**Show in label list** in Gmail's settings sets. A label Gmail hides waits under
+**More** below the account's other labels, and one Gmail shows only while it
+has unread mail waits there while it has none. **Hide label** and **Show label**
+in a label's menu change it in Gmail too, so Gmail on the web and your other
+devices follow.
 
 An IMAP account can also leave folders out of what this device syncs, such as a
 large archive. Turn off a folder's **Sync** switch in **Folders**, and its mail

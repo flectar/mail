@@ -137,6 +137,10 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> can-mark-all-read: false;
     in property <bool> label-manageable: false;
     in property <bool> label-can-create-child: false;
+    // A Gmail label Gmail's label list shows, which can go under More, or
+    // one it doesn't always show, which can show again (#253).
+    in property <bool> label-can-hide: false;
+    in property <bool> label-can-show: false;
     in property <bool> label-is-global: false;
     in property <string> label-account-name: "";
     in property <bool> mail-drop-enabled: false;
@@ -163,6 +167,8 @@ export component SidebarItem inherits SidebarRowSurface {
     callback new-child-label(int, int, string, string);
     callback rename-label(int, string, color, string, bool);
     callback delete-label(int, string, string, bool, bool);
+    // Gmail's label list shows the label, or not (#253).
+    callback set-label-listed(int, bool);
 
     height: root.visible ? root.row-height : 0px;
     idle-background: root.sidebar-background;
@@ -257,6 +263,14 @@ export component SidebarItem inherits SidebarRowSurface {
             if root.label-manageable: MenuItem {
                 title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
                 activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
+            }
+            if root.label-can-show: MenuItem {
+                title: @tr("Show label");
+                activated => { root.set-label-listed(root.label-id, true); }
+            }
+            if root.label-can-hide: MenuItem {
+                title: @tr("Hide label");
+                activated => { root.set-label-listed(root.label-id, false); }
             }
             if root.label-manageable: MenuItem {
                 title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);

@@ -17,8 +17,8 @@ use crate::error::{CoreError, LimitKind, Result};
 use crate::events::{CoreEvent, SyncProgress};
 use crate::http_body;
 use crate::models::{
-    AccountConfig, AccountSettings, Address, AuthKind, AutoReply, MailHistory, Provider,
-    ServerSearchCursor, now_ms, roles,
+    AccountConfig, AccountSettings, Address, AuthKind, AutoReply, LabelListVisibility, MailHistory,
+    Provider, ServerSearchCursor, now_ms, roles,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::{StreamExt, stream};
@@ -168,6 +168,8 @@ struct GmailLabel {
     kind: String,
     background_color: Option<String>,
     text_color: Option<String>,
+    /// How Gmail's label list shows it (#253).
+    list_visibility: LabelListVisibility,
 }
 
 #[derive(Debug)]
@@ -366,8 +368,13 @@ impl GmailApi {
     }
 
     async fn labels(&self) -> Result<Vec<GmailLabel>> {
+        self.labels_at(GMAIL_API).await
+    }
+
+    /// The account's labels, from the mailbox API at `base`.
+    async fn labels_at(&self, base: &str) -> Result<Vec<GmailLabel>> {
         let value = self
-            .get_json(&format!("{GMAIL_API}/labels"), cost::LABELS_LIST)
+            .get_json(&format!("{base}/labels"), cost::LABELS_LIST)
             .await?;
         let labels = value
             .get("labels")
@@ -398,6 +405,9 @@ impl GmailApi {
                         .pointer("/color/textColor")
                         .and_then(Value::as_str)
                         .map(str::to_owned),
+                    list_visibility: LabelListVisibility::from_gmail(
+                        label.get("labelListVisibility").and_then(Value::as_str),
+                    ),
                 })
             })
             .collect())
@@ -886,6 +896,9 @@ impl GmailApi {
                 .pointer("/color/textColor")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            list_visibility: LabelListVisibility::from_gmail(
+                value.get("labelListVisibility").and_then(Value::as_str),
+            ),
         })
     }
 
@@ -918,6 +931,33 @@ impl GmailApi {
         )
         .await?;
         Ok(())
+    }
+
+    async fn set_label_list_visibility(
+        &self,
+        provider_id: &str,
+        visibility: LabelListVisibility,
+    ) -> Result<()> {
+        self.set_label_list_visibility_at(GMAIL_API, provider_id, visibility)
+            .await
+    }
+
+    /// Sets how Gmail's label list shows a label (#253), with labels.patch
+    /// as a rename. A label deleted in the meantime has nothing left to show.
+    async fn set_label_list_visibility_at(
+        &self,
+        base: &str,
+        provider_id: &str,
+        visibility: LabelListVisibility,
+    ) -> Result<()> {
+        ignore_not_found(
+            self.patch_json(
+                &format!("{base}/labels/{}", urlencode(provider_id)),
+                &json!({ "labelListVisibility": visibility.as_gmail() }),
+                cost::LABELS_PATCH,
+            )
+            .await,
+        )
     }
 
     async fn delete_label(&self, provider_id: &str) -> Result<()> {
@@ -1468,10 +1508,17 @@ fn system_role(label_id: &str) -> Option<&'static str> {
 
 async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> Result<()> {
     let labels = api.labels().await?;
-    let account_id = config.id;
+    store_labels(ctx, config.id, labels).await
+}
+
+/// Keeps the account's labels as labels.list gave them.
+async fn store_labels(ctx: &SyncCtx, account_id: i64, labels: Vec<GmailLabel>) -> Result<()> {
     ctx.db
         .write(move |conn| {
             let tx = conn.transaction()?;
+            // An edit made here that hasn't reached Gmail yet wins over what
+            // Gmail lists until it has, as labels list on every pass (#253).
+            let pending = repo::gmail::pending_label_edits(&tx, account_id)?;
 
             // Archive is a Gmail state (absence of INBOX), not a provider
             // label. All Mail is similarly synthetic for the existing folder
@@ -1493,6 +1540,8 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
 
             for (position, label) in labels.iter().enumerate() {
                 let role = system_role(&label.id);
+                // Renamed or recolored here, and not in Gmail yet.
+                let renamed = pending.renamed.contains(&label.id);
                 let folder_id = if role.is_some() || label.kind == "user" {
                     let existing: Option<i64> = tx
                         .query_row(
@@ -1511,9 +1560,11 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                     Some(match existing {
                         Some(folder_id) => {
                             tx.execute(
-                                "UPDATE folders SET path = ?2, delimiter = '/', role = ?3
-                                 WHERE id = ?1",
-                                params![folder_id, folder_name, role],
+                                "UPDATE folders
+                                    SET path = CASE WHEN ?4 THEN path ELSE ?2 END,
+                                        delimiter = '/', role = ?3
+                                  WHERE id = ?1",
+                                params![folder_id, folder_name, role, renamed],
                             )?;
                             folder_id
                         }
@@ -1551,12 +1602,15 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                         Some(id) => {
                             tx.execute(
                                 "UPDATE labels
-                                    SET name = ?2, color = ?3, origin = 'provider'
+                                    SET name = CASE WHEN ?4 THEN name ELSE ?2 END,
+                                        color = CASE WHEN ?4 THEN color ELSE ?3 END,
+                                        origin = 'provider'
                                   WHERE id = ?1",
                                 params![
                                     id,
                                     label.name,
-                                    label.background_color.as_deref().unwrap_or("#6b7280")
+                                    label.background_color.as_deref().unwrap_or("#6b7280"),
+                                    renamed,
                                 ],
                             )?;
                             id
@@ -1607,15 +1661,19 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                 tx.execute(
                     "INSERT INTO gmail_labels (
                          account_id, provider_id, name, kind, folder_id,
-                         local_label_id, background_color, text_color
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                         local_label_id, background_color, text_color, list_visibility
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                      ON CONFLICT(account_id, provider_id) DO UPDATE SET
-                         name = excluded.name,
+                         name = CASE WHEN ?10 THEN gmail_labels.name ELSE excluded.name END,
                          kind = excluded.kind,
                          folder_id = excluded.folder_id,
                          local_label_id = excluded.local_label_id,
-                         background_color = excluded.background_color,
-                         text_color = excluded.text_color",
+                         background_color = CASE WHEN ?10 THEN gmail_labels.background_color
+                                                 ELSE excluded.background_color END,
+                         text_color = CASE WHEN ?10 THEN gmail_labels.text_color
+                                           ELSE excluded.text_color END,
+                         list_visibility = CASE WHEN ?11 THEN gmail_labels.list_visibility
+                                                ELSE excluded.list_visibility END",
                     params![
                         account_id,
                         label.id,
@@ -1625,6 +1683,9 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                         local_label_id,
                         label.background_color,
                         label.text_color,
+                        label.list_visibility.as_gmail(),
+                        renamed,
+                        pending.list_visibility.contains(&label.id),
                     ],
                 )?;
             }
@@ -4567,6 +4628,21 @@ async fn apply_action(
             }
             return Ok(());
         }
+        "gmail_label_list_visibility" => {
+            let provider_id = action.payload["providerId"].as_str().ok_or_else(|| {
+                CoreError::Other("label list visibility omitted providerId".into())
+            })?;
+            let visibility = action.payload["listVisibility"].as_str().ok_or_else(|| {
+                CoreError::Other("label list visibility omitted its value".into())
+            })?;
+            // Stored here when it was chosen; Gmail takes it now.
+            api.set_label_list_visibility(
+                provider_id,
+                LabelListVisibility::from_gmail(Some(visibility)),
+            )
+            .await?;
+            return Ok(());
+        }
         "gmail_label_update" => {
             let provider_id = action.payload["providerId"]
                 .as_str()
@@ -4968,7 +5044,7 @@ async fn run_actor(
         }
     };
     let mut waiters = Vec::<oneshot::Sender<std::result::Result<(), String>>>::new();
-    let mut refresh_labels = true;
+    let mut refresh_settings = true;
     // Waits after failures other than Gmail asking to wait. Those the
     // account's pace keeps.
     let mut backoff = pacing::Backoff::default();
@@ -4984,13 +5060,13 @@ async fn run_actor(
         // Keep a wait Gmail asked for.
         match wait_out_pause(&ctx, account_id, &mut rx, &mut waiters).await {
             PauseEnd::Shutdown => return,
-            PauseEnd::Asked => refresh_labels = true,
+            PauseEnd::Asked => refresh_settings = true,
             PauseEnd::Over => {}
         }
         while let Ok(command) = rx.try_recv() {
             match command {
                 SyncCmd::SyncNow { complete } => {
-                    refresh_labels = true;
+                    refresh_settings = true;
                     if let Some(complete) = complete {
                         waiters.push(complete);
                     }
@@ -5007,14 +5083,17 @@ async fn run_actor(
             // Provider definitions must exist before replaying actions. This is
             // important on a new account where the user can compose before the
             // first metadata page creates Sent, Drafts and All Mail locally.
-            if refresh_labels {
+            if refresh_settings {
                 sync_sender_identities(&ctx, &config, &api).await?;
-                sync_labels(&ctx, &config, &api).await?;
                 // Replies set in webmail show too. Reading them never fails a sync.
                 if let Err(error) = sync_auto_reply(&ctx, &config, &api).await {
                     tracing::warn!(account_id, %error, "Gmail automatic replies failed");
                 }
             }
+            // Labels list again on every pass, for a quota unit: Gmail's
+            // history tells of no change to a label itself, such as a rename
+            // or how its label list shows it (#253).
+            sync_labels(&ctx, &config, &api).await?;
             let mut actions_remaining = execute_actions(&ctx, &config, &api).await?;
             // New mail's metadata brings the headers rules test.
             api.set_rule_headers(
@@ -5037,15 +5116,15 @@ async fn run_actor(
             Ok::<_, CoreError>((actions_remaining, backfill_done))
         }
         .await;
-        // Labels and sender identities refresh on the first pass and on each
-        // explicit sync. A pass that could not reach Google, or that Google
-        // asked to wait, leaves that refresh to its retry, so starting
-        // offline does not skip it.
+        // Sender identities and automatic replies refresh on the first pass
+        // and on each explicit sync. A pass that could not reach Google, or
+        // that Google asked to wait, leaves that refresh to its retry, so
+        // starting offline does not skip it.
         if !matches!(
             result,
             Err(CoreError::Offline | CoreError::RateLimited { .. })
         ) {
-            refresh_labels = false;
+            refresh_settings = false;
         }
 
         let (delay, rerun) = match result {
@@ -5097,7 +5176,7 @@ async fn run_actor(
                 match rx.recv().await {
                     None | Some(SyncCmd::Shutdown) => return,
                     Some(SyncCmd::SyncNow { complete }) => {
-                        refresh_labels = true;
+                        refresh_settings = true;
                         if let Some(complete) = complete {
                             waiters.push(complete);
                         }
@@ -5144,7 +5223,7 @@ async fn run_actor(
         match next.await {
             Ok(None) | Ok(Some(SyncCmd::Shutdown)) => return,
             Ok(Some(SyncCmd::SyncNow { complete })) => {
-                refresh_labels = true;
+                refresh_settings = true;
                 if let Some(complete) = complete {
                     waiters.push(complete);
                 }
@@ -6927,5 +7006,220 @@ mod forwarded_message_tests {
                 Some("message/rfc822".to_owned())
             )]
         );
+    }
+}
+
+#[cfg(test)]
+mod label_list_tests {
+    use super::search_tests::stand_in_answering;
+    use super::tests::gmail_account;
+    use super::*;
+
+    /// A Gmail account signed in, as the stand-in needs no more.
+    async fn signed_in() -> (tempfile::TempDir, SyncCtx, AccountConfig) {
+        let (dir, ctx, config) = gmail_account().await;
+        ctx.tokens
+            .store_initial(
+                config.id,
+                "access".into(),
+                Some(3600),
+                Some("refresh".into()),
+                "client".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        (dir, ctx, config)
+    }
+
+    /// labels.list as Gmail answers it, with how its label list shows each.
+    fn listed_by_gmail(work: &str) -> String {
+        json!({"labels": [
+            {"id": "INBOX", "name": "INBOX", "type": "system",
+             "labelListVisibility": "labelShow", "messageListVisibility": "hide"},
+            {"id": "Label_1", "name": "Work", "type": "user",
+             "labelListVisibility": work, "messageListVisibility": "show"},
+            {"id": "Label_2", "name": "Receipts", "type": "user",
+             "labelListVisibility": "labelShowIfUnread", "messageListVisibility": "show"},
+            {"id": "Label_3", "name": "Old", "type": "user",
+             "labelListVisibility": "labelHide", "messageListVisibility": "show"},
+            {"id": "Label_4", "name": "Notes", "type": "user"},
+        ]})
+        .to_string()
+    }
+
+    /// Keeps the labels Gmail lists, from a stand-in answering `answer`.
+    async fn store_listed(ctx: &SyncCtx, config: &AccountConfig, answer: String) {
+        let (origin, _) =
+            stand_in_answering(move |_| (200, "application/json".into(), answer.clone())).await;
+        let api = GmailApi::new(ctx.clone(), config.clone()).unwrap();
+        let labels = api
+            .labels_at(&format!("{origin}/gmail/v1/users/me"))
+            .await
+            .unwrap();
+        store_labels(ctx, config.id, labels).await.unwrap();
+    }
+
+    /// The account's labels by name, with how they show.
+    async fn shown(ctx: &SyncCtx) -> Vec<(String, LabelListVisibility)> {
+        let mut labels = ctx
+            .db
+            .read(|conn| repo::labels::list(conn))
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|label| label.owner_account_id == Some(1))
+            .map(|label| (label.name, label.list_visibility))
+            .collect::<Vec<_>>();
+        labels.sort_by(|a, b| a.0.cmp(&b.0));
+        labels
+    }
+
+    #[tokio::test]
+    async fn labels_show_as_gmails_label_list_shows_them() {
+        let (_dir, ctx, config) = signed_in().await;
+        store_listed(&ctx, &config, listed_by_gmail("labelShow")).await;
+        assert_eq!(
+            shown(&ctx).await,
+            [
+                ("Notes".to_owned(), LabelListVisibility::Show),
+                ("Old".to_owned(), LabelListVisibility::Hide),
+                ("Receipts".to_owned(), LabelListVisibility::ShowIfUnread),
+                ("Work".to_owned(), LabelListVisibility::Show),
+            ]
+        );
+        // Hidden in Gmail later, it hides here at the next listing.
+        store_listed(&ctx, &config, listed_by_gmail("labelHide")).await;
+        assert!(
+            shown(&ctx)
+                .await
+                .contains(&("Work".to_owned(), LabelListVisibility::Hide))
+        );
+    }
+
+    #[tokio::test]
+    async fn edits_made_here_hold_until_they_reach_gmail() {
+        let (_dir, ctx, config) = signed_in().await;
+        store_listed(&ctx, &config, listed_by_gmail("labelShow")).await;
+        // Work hidden here, and Old renamed here, neither in Gmail yet.
+        let actions = ctx
+            .db
+            .write(|conn| {
+                conn.execute(
+                    "UPDATE gmail_labels SET list_visibility = 'labelHide'
+                     WHERE account_id = 1 AND provider_id = 'Label_1'",
+                    [],
+                )?;
+                conn.execute(
+                    "UPDATE labels SET name = 'Archive 2024' WHERE id =
+                       (SELECT local_label_id FROM gmail_labels
+                         WHERE account_id = 1 AND provider_id = 'Label_3')",
+                    [],
+                )?;
+                let hide = repo::actions::enqueue(
+                    conn,
+                    1,
+                    "gmail_label_list_visibility",
+                    None,
+                    None,
+                    &json!({"providerId": "Label_1", "listVisibility": "labelHide"}),
+                    None,
+                )?;
+                let rename = repo::actions::enqueue(
+                    conn,
+                    1,
+                    "gmail_label_update",
+                    None,
+                    None,
+                    &json!({"providerId": "Label_3", "name": "Archive 2024", "color": "#6b7280"}),
+                    None,
+                )?;
+                Ok([hide, rename])
+            })
+            .await
+            .unwrap();
+        store_listed(&ctx, &config, listed_by_gmail("labelShow")).await;
+        let held = shown(&ctx).await;
+        assert!(held.contains(&("Work".to_owned(), LabelListVisibility::Hide)));
+        assert!(held.contains(&("Archive 2024".to_owned(), LabelListVisibility::Hide)));
+        // Once Gmail has them, what it lists counts again.
+        ctx.db
+            .write(move |conn| {
+                for id in actions {
+                    conn.execute(
+                        "UPDATE pending_actions SET state = 'done' WHERE id = ?1",
+                        [id],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store_listed(&ctx, &config, listed_by_gmail("labelShow")).await;
+        let listed = shown(&ctx).await;
+        assert!(listed.contains(&("Work".to_owned(), LabelListVisibility::Show)));
+        assert!(listed.contains(&("Old".to_owned(), LabelListVisibility::Hide)));
+    }
+
+    #[tokio::test]
+    async fn label_edits_patch_only_what_they_change() {
+        let (_dir, ctx, config) = signed_in().await;
+        let (origin, requests) =
+            stand_in_answering(|_| (200, "application/json".into(), "{}".into())).await;
+        let base = format!("{origin}/gmail/v1/users/me");
+        let api = GmailApi::new(ctx, config).unwrap();
+        api.set_label_list_visibility_at(&base, "Label_1", LabelListVisibility::Hide)
+            .await
+            .unwrap();
+        api.update_label_at(&base, "Label_1", "Projects", None)
+            .await
+            .unwrap();
+        let requests = requests.lock().unwrap().clone();
+        let sent = requests
+            .iter()
+            .map(|(method, target, body)| {
+                (
+                    method.as_str(),
+                    target.as_str(),
+                    serde_json::from_str::<Value>(body).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sent,
+            [
+                (
+                    "PATCH",
+                    "/gmail/v1/users/me/labels/Label_1",
+                    json!({"labelListVisibility": "labelHide"})
+                ),
+                (
+                    "PATCH",
+                    "/gmail/v1/users/me/labels/Label_1",
+                    json!({"name": "Projects"})
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_label_gmail_no_longer_has_has_nothing_to_hide() {
+        let (_dir, ctx, config) = signed_in().await;
+        let (origin, _) = stand_in_answering(|_| {
+            (
+                404,
+                "application/json".into(),
+                json!({"error": {"code": 404, "message": "Not Found"}}).to_string(),
+            )
+        })
+        .await;
+        let api = GmailApi::new(ctx, config).unwrap();
+        api.set_label_list_visibility_at(
+            &format!("{origin}/gmail/v1/users/me"),
+            "Label_9",
+            LabelListVisibility::Hide,
+        )
+        .await
+        .unwrap();
     }
 }

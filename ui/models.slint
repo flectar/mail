@@ -109,6 +109,10 @@ export struct MailboxRow {
     status: AccountStatus,
 }
 
+// How Gmail's label list shows a Gmail label, Gmail's "Show in label list"
+// (#253). The sidebar lists it under More when it doesn't show.
+export enum LabelListing { shown, shown-if-unread, hidden }
+
 // Provider labels and local auto-categories share one presentation model.
 // `applied` is projected for the currently selected thread so menus and chips
 // update from the same source of truth after every action.
@@ -133,6 +137,9 @@ export struct MailLabelRow {
     role: MailboxRole,
     // Unread mail the label's list shows, as the sidebar badge shows it.
     count: string,
+    // A Gmail label, which shows or hides as Gmail's label list does.
+    gmail: bool,
+    listing: LabelListing,
 }
 
 // One visible navigation entry per list row; stable keys also identify sections.
@@ -142,6 +149,9 @@ export enum SidebarRowKind {
     global-labels-section, global-label,
     saved-searches-section, saved-search,
     accounts-heading, account, folder, account-labels-section, account-label,
+    // Shows a Gmail account's labels that its label list hides, or hides
+    // them again.
+    account-labels-more,
     new-folder, new-label,
 }
 

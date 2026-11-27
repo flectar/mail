@@ -1,6 +1,6 @@
 import { ScrollFade } from "scroll-fade.slint";
 import { ListView, VerticalBox } from "std-widgets.slint";
-import { MailboxRole, MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
+import { LabelListing, MailboxRole, MailProfileRow, SidebarRow, SidebarRowKind } from "../models.slint";
 import { MailboxWords } from "../mailbox-words.slint";
 import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
 import { SidebarStyle } from "sidebar-row.slint";
@@ -155,6 +155,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback request-mark-all-read(string, string);
     callback request-rename-label(int, string, color, string, bool);
     callback request-delete-label(int, string, string, bool, bool);
+    // Gmail's label list shows a Gmail label, or not (#253).
+    callback request-set-label-listed(int, bool);
 
     surface-color: root.background-color;
     clip: true;
@@ -827,6 +829,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         account-id: entry.label.account_id;
                         label-manageable: true;
                         label-can-create-child: entry.label.can_create_children;
+                        label-can-hide: entry.label.gmail && entry.label.listing != LabelListing.hidden;
+                        label-can-show: entry.label.gmail && entry.label.listing != LabelListing.shown;
                         label-account-name: entry.label.account_name;
                         mail-drop-enabled: true;
                         mail-drop-copies: true;
@@ -850,6 +854,28 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         delete-label(id, name, account, global, has-children) => {
                             root.request-delete-label(id, name, account, global, has-children);
                         }
+                        set-label-listed(id, listed) => { root.request-set-label-listed(id, listed); }
+                    }
+
+                    // The labels Gmail's label list doesn't show open between
+                    // More and Less, as in Gmail (#253).
+                    if entry.kind == SidebarRowKind.account-labels-more: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: entry.open ? @tr("Less") : @tr("More");
+                        accessible-name: entry.open ? @tr("Show fewer labels") : @tr("Show more labels");
+                        scope: "";
+                        left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
+                        icon: entry.open ? @image-url("../icons/lucide/outline/chevron-up.svg") : @image-url("../icons/lucide/outline/chevron-down.svg");
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.muted-color;
+                        clicked(scope) => { root.toggle-section(entry.key, !entry.open); }
                     }
 
                     if entry.kind == SidebarRowKind.new-folder: SidebarItem {
