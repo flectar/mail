@@ -7531,6 +7531,77 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
+    let app_for_google_contacts = app.as_weak();
+    let state_for_google_contacts = Rc::clone(&state);
+    let runtime_for_google_contacts = runtime.clone();
+    let updates_for_google_contacts = ui_task_tx.clone();
+    let opener_for_google_contacts = platform.external_urls.clone();
+    app.on_connect_google_contacts(move |account_id| {
+        let Some(app) = app_for_google_contacts.upgrade() else {
+            return;
+        };
+        if app.get_oauth_settings_saving() {
+            return;
+        }
+        if app.get_oauth_in_progress() {
+            app.set_sync_status(UiMessage::plain(
+                "Another browser authorization is already in progress; finish it or choose Cancel.",
+            ));
+            return;
+        }
+        let Some(core) = state_for_google_contacts.borrow().core.clone() else {
+            return;
+        };
+        app.set_contacts_connect_error_account(-1);
+        app.set_contacts_connect_error("".into());
+        app.set_oauth_authorization_url("".into());
+        app.set_oauth_browser_error(false);
+        app.set_oauth_in_progress(true);
+        app.set_sync_status(UiMessage::plain(
+            "Authorize contacts access in your browser.",
+        ));
+        let updates = updates_for_google_contacts.clone();
+        let browser_app = app.as_weak();
+        let error_app = app.as_weak();
+        let opener = opener_for_google_contacts.clone();
+        runtime_for_google_contacts.spawn(async move {
+            let result = core
+                .connect_google_contacts(i64::from(account_id), move |url| {
+                    oauth_browser::begin(browser_app.clone(), url, opener.clone())
+                })
+                .await;
+            let message = match &result {
+                Ok(()) => UiMessage::plain("Google Contacts connected and initial sync started."),
+                Err(error) => UiMessage::detail("Could not connect Google Contacts: {}", error),
+            };
+            // Shown under the account's Contacts row until the next attempt,
+            // unless the person cancelled the browser sign-in.
+            if let Err(error) = result
+                && !error.ends_with("sign-in cancelled")
+            {
+                let _ = error_app.upgrade_in_event_loop(move |app| {
+                    app.set_contacts_connect_error_account(account_id);
+                    app.set_contacts_connect_error(error.into());
+                });
+            }
+            let connections = core.load_carddav_connections().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts: None,
+                    calendar_connections: None,
+                    carddav_connections: connections,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: true,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
     settings_controller::register_oauth_settings_callbacks(&app, &state, &runtime);
 
     register_data_management_callbacks(

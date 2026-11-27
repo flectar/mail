@@ -5,6 +5,7 @@ use super::{
     xml,
 };
 use crate::error::{CoreError, Result};
+use crate::models::CardDavKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredAddressBook {
@@ -57,6 +58,18 @@ async fn propfind(
         )));
     }
     xml::parse(&response.body)
+}
+
+/// The address books of a connection of `kind` at `base_url`.
+pub async fn discover_for(
+    kind: CardDavKind,
+    t: &dyn Transport,
+    base_url: &str,
+) -> Result<Discovery> {
+    match kind {
+        CardDavKind::Generic => discover(t, base_url).await,
+        CardDavKind::Google => super::google::discover(t, base_url).await,
+    }
 }
 
 pub async fn discover(t: &dyn Transport, base_url: &str) -> Result<Discovery> {
@@ -132,6 +145,7 @@ mod tests {
             status: 207,
             body: body.into(),
             etag: None,
+            location: None,
         }
     }
 

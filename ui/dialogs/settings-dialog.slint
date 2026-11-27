@@ -579,6 +579,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
     in property <bool> carddav_connecting: false;
+    // The account whose Google Contacts last failed to connect, and why.
+    in property <int> contacts_connect_error_account: -1;
+    in property <string> contacts_connect_error: "";
     in-out property <string> incoming_security: "tls";
     in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
@@ -758,6 +761,7 @@ export component SettingsDialog inherits Rectangle {
     callback set_calendar_connection_enabled(int, bool);
     callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
+    callback connect_google_contacts(int);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
     callback export_account_backup();
@@ -3089,7 +3093,7 @@ export component SettingsDialog inherits Rectangle {
                                         ? server-copies-note.y + server-copies-note.height
                                         : self.timeout-end;
                                 private property <length> shown-end: self.has-shown-folders ? shown-row.y + shown-row.height - self.plain-end : self.kind-end;
-                                private property <length> contacts-end: root.compact ? self.shown-end : contacts-row.y + contacts-row.height - self.plain-end;
+                                private property <length> contacts-end: contacts-row.y + contacts-row.height - self.plain-end;
                                 private property <length> expanded-height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 height: self.expanded ? self.expanded-height : self.collapsed-height;
                                 animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.movement; }
@@ -3491,13 +3495,32 @@ export component SettingsDialog inherits Rectangle {
                                                 clicked => { root.open-folders(account, account-index); }
                                             }
                                         }
-                                        // Contacts from the account's CardDAV server.
+                                        // Contacts from the account's CardDAV server, or a Gmail
+                                        // account's Google Contacts (#423).
                                         contacts-row := Rectangle {
-                                            visible: !root.compact;
+                                            // Gmail accounts offer their Google Contacts first. An
+                                            // account syncs one contacts server, so a connected one
+                                            // decides.
+                                            property <bool> offers-google: !account.carddav_connected && account.provider == "gmail";
+                                            property <bool> google: account.carddav_connected && account.carddav_google;
+                                            property <bool> needs-sign-in: account.carddav_connected && account.carddav_status == "needs_reauth";
+                                            // The button that asks Google: to connect, or to sign in again.
+                                            property <bool> asks-google: self.offers-google || (self.google && self.needs-sign-in);
+                                            // Browser sign-ins run one at a time.
+                                            property <bool> sign-in-free: !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            property <string> connect-error: root.contacts_connect_error_account == account.id ? root.contacts_connect_error : "";
+                                            // A server error has no explanation of its own; it is shown
+                                            // as is, as the calendars show theirs.
+                                            property <string> sync-error: account.carddav_connected && account.carddav_status != "needs_reauth" && account.carddav_status != "offline"
+                                                ? account.carddav_status : "";
+                                            property <bool> shows-error: self.connect-error != "" || self.sync-error != "";
+                                            // Below the texts: an error, then, on phones, the buttons.
+                                            property <length> texts-end: contacts-description.y + contacts-description.height;
+                                            property <length> error-end: self.shows-error ? contacts-error.y + contacts-error.height : self.texts-end;
                                             x: drop-target.content-x;
                                             y: drop-target.shown-end + drop-target.gap - drop-target.plain-lead;
                                             width: parent.width - self.x - 16px;
-                                            height: 12px + contacts-label.height + contacts-description.height;
+                                            height: (root.compact ? contacts-actions.y + contacts-actions.height : self.error-end) + drop-target.plain-end;
                                             contacts-label := Text {
                                                 x: 0px; y: drop-target.plain-top;
                                                 width: parent.width - contacts-controls.width - 16px; height: max(20px, self.preferred-height);
@@ -3509,15 +3532,21 @@ export component SettingsDialog inherits Rectangle {
                                             }
                                             contacts-description := Text {
                                                 x: 0px; y: contacts-label.y + contacts-label.height + 1px;
-                                                width: contacts-label.width; height: max(18px, self.preferred-height);
-                                                text: !account.carddav_connected ? @tr("Sync contacts with a standards-compliant CardDAV server.")
-                                                    : account.carddav_status != "" ? account.carddav_status
+                                                width: root.compact ? parent.width : contacts-label.width; height: max(18px, self.preferred-height);
+                                                text: contacts-row.offers-google ? @tr("Sync contacts with your Google account.")
+                                                    : !account.carddav_connected ? @tr("Sync contacts with a standards-compliant CardDAV server.")
+                                                    : contacts-row.needs-sign-in
+                                                        ? (contacts-row.google ? @tr("Sign-in required") : @tr("The server did not accept the username or app password."))
+                                                    : account.carddav_status == "offline" ? @tr("Offline · retrying automatically")
+                                                    : contacts-row.google ? @tr("Google Contacts")
                                                     : account.carddav_url;
-                                                color: account.carddav_connected && account.carddav_status != "" ? AppTheme.destructive : root.faint-text;
+                                                color: contacts-row.needs-sign-in ? AppTheme.destructive : root.faint-text;
                                                 font-size: TypeScale.caption;
                                                 overflow: elide;
                                                 vertical-alignment: center;
                                             }
+                                            // On the title's line: the switch, and the buttons beside
+                                            // it where they fit.
                                             contacts-controls := HorizontalLayout {
                                                 x: parent.width - self.width;
                                                 y: drop-target.plain-control-y;
@@ -3530,10 +3559,60 @@ export component SettingsDialog inherits Rectangle {
                                                     control-label: @tr("Contacts");
                                                     toggled => { root.set_account_carddav_enabled(account.id, self.checked); }
                                                 }
-                                                Button {
+                                                if !root.compact && contacts-row.asks-google : Button {
                                                     width: max(136px, self.content-width);
                                                     height: 34px;
-                                                    text: !account.carddav_connected ? @tr("Connect")
+                                                    text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
+                                                    enabled: contacts-row.sign-in-free;
+                                                    clicked => { root.connect_google_contacts(account.id); }
+                                                }
+                                                if !root.compact && contacts-row.google && !contacts-row.needs-sign-in : Button {
+                                                    width: max(136px, self.content-width);
+                                                    height: 34px;
+                                                    text: @tr("Disconnect");
+                                                    clicked => { root.disconnect_carddav(account.id); }
+                                                }
+                                                if !root.compact && !contacts-row.google : Button {
+                                                    width: max(136px, self.content-width);
+                                                    height: 34px;
+                                                    text: contacts-row.offers-google ? @tr("Connect CardDAV")
+                                                        : !account.carddav_connected ? @tr("Connect")
+                                                        : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
+                                                    clicked => { root.open-carddav-settings(account); }
+                                                }
+                                            }
+                                            contacts-error := CopyableDiagnostic {
+                                                visible: contacts-row.shows-error;
+                                                x: 0px; y: contacts-row.texts-end + 6px;
+                                                width: parent.width;
+                                                text: contacts-row.connect-error != "" ? @tr("Could not connect Google Contacts: {}", contacts-row.connect-error)
+                                                    : @tr("Contacts sync error: {}", contacts-row.sync-error);
+                                                text-color: AppTheme.destructive;
+                                                font-size: TypeScale.caption;
+                                            }
+                                            // Phones stack the buttons below the texts, as the
+                                            // calendars do.
+                                            contacts-actions := VerticalLayout {
+                                                visible: root.compact;
+                                                x: 0px; y: contacts-row.error-end + 10px;
+                                                width: parent.width;
+                                                height: self.preferred-height;
+                                                spacing: 8px;
+                                                if contacts-row.asks-google : Button {
+                                                    height: 44px;
+                                                    text: contacts-row.offers-google ? @tr("Connect Google Contacts") : @tr("Reconnect");
+                                                    enabled: contacts-row.sign-in-free;
+                                                    clicked => { root.connect_google_contacts(account.id); }
+                                                }
+                                                if contacts-row.google && !contacts-row.needs-sign-in : Button {
+                                                    height: 44px;
+                                                    text: @tr("Disconnect");
+                                                    clicked => { root.disconnect_carddav(account.id); }
+                                                }
+                                                if !contacts-row.google : Button {
+                                                    height: 44px;
+                                                    text: contacts-row.offers-google ? @tr("Connect CardDAV")
+                                                        : !account.carddav_connected ? @tr("Connect")
                                                         : account.carddav_status == "" ? @tr("Manage") : @tr("Fix CardDAV");
                                                     clicked => { root.open-carddav-settings(account); }
                                                 }

@@ -93,6 +93,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/074_sign_in_holds.sql")),
     Migration::Plain(include_str!("migrations/075_gmail_text_decoded_twice.sql")),
     Migration::Plain(include_str!("migrations/076_gmail_body_downloads.sql")),
+    Migration::Plain(include_str!("migrations/077_google_contacts.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

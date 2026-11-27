@@ -410,6 +410,9 @@ export struct AccountRow {
     // Why connecting the provider's calendar last failed.
     provider_calendar_error: string,
     carddav_connected: bool,
+    // The connection is the Gmail account's Google Contacts, signed in with
+    // its Google sign-in rather than a CardDAV app password.
+    carddav_google: bool,
     carddav_enabled: bool,
     carddav_status: string,
     carddav_url: string,

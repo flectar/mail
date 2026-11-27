@@ -1,5 +1,6 @@
 //! Bounded HTTP transport for CardDAV's WebDAV methods.
 
+pub use crate::caldav::DavAuth;
 use crate::error::{CoreError, Result};
 use crate::http_body;
 use crate::net::proxy::Owner;
@@ -38,6 +39,8 @@ pub struct DavResponse {
     pub status: u16,
     pub etag: Option<String>,
     pub body: String,
+    /// Where the server put what a POST created (RFC 5995).
+    pub location: Option<String>,
 }
 
 impl DavResponse {
@@ -61,14 +64,14 @@ pub trait Transport: Send + Sync {
 
 pub struct HttpTransport {
     client: reqwest::Client,
-    username: String,
-    password: String,
+    auth: DavAuth,
     origin: url::Origin,
 }
 
 impl HttpTransport {
-    /// Requests go through the proxy of `owner`.
-    pub fn new(owner: Owner, username: String, password: String, base_url: &str) -> Result<Self> {
+    /// Requests go through the proxy of `owner`, and `auth` only ever goes to
+    /// the origin of `base_url`.
+    pub fn new(owner: Owner, auth: DavAuth, base_url: &str) -> Result<Self> {
         let base = validated_url(base_url)?;
         let origin = base.origin();
         let redirect_origin = origin.clone();
@@ -88,8 +91,7 @@ impl HttpTransport {
             .map_err(|e| super::err(format!("HTTP client: {e}")))?;
         Ok(Self {
             client,
-            username,
-            password,
+            auth,
             origin,
         })
     }
@@ -114,10 +116,13 @@ impl Transport for HttpTransport {
                 "CardDAV URL changed origin; refusing to forward credentials",
             ));
         }
-        let mut request = self
-            .client
-            .request(method, url)
-            .basic_auth(&self.username, Some(&self.password));
+        let mut request = match &self.auth {
+            DavAuth::Bearer(token) => self.client.request(method, url).bearer_auth(token),
+            DavAuth::Basic(username, password) => self
+                .client
+                .request(method, url)
+                .basic_auth(username, Some(password)),
+        };
         if let Some(depth) = depth {
             request = request.header("Depth", depth);
         }
@@ -143,13 +148,22 @@ impl Transport for HttpTransport {
         if status == 401 {
             return Err(CoreError::NeedsReauth);
         }
-        let etag = response
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        let etag = header("etag");
+        let location = header("location");
         let body = http_body::text(response, MAX_BODY_BYTES, "CardDAV response body").await?;
-        Ok(DavResponse { status, etag, body })
+        Ok(DavResponse {
+            status,
+            etag,
+            body,
+            location,
+        })
     }
 }
 

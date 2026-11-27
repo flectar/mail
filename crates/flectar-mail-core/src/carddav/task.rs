@@ -1,14 +1,18 @@
 //! Per-account CardDAV polling task.
 
-use super::{http::HttpTransport, sync::sync_account};
+use super::{
+    http::{DavAuth, HttpTransport, Transport},
+    sync::sync_account,
+};
 use crate::{
     accounts::credentials::{self, CredentialStoreHandle, Slot},
     db::{Db, repo},
     error::{CoreError, Result},
     events::EventBus,
+    models::{CardDavKind, Provider},
     net::proxy::Owner,
+    oauth::tokens::TokenProvider,
 };
-use std::collections::HashSet;
 use tokio::sync::mpsc;
 
 const COLLECTION_REFRESH_SECS: i64 = 6 * 60 * 60;
@@ -32,6 +36,7 @@ pub fn spawn(
     db: Db,
     bus: EventBus,
     credentials: CredentialStoreHandle,
+    tokens: TokenProvider,
     account_id: i64,
 ) -> CardDavTaskHandle {
     let (tx, mut rx) = mpsc::channel(1);
@@ -53,6 +58,7 @@ pub fn spawn(
                 &db,
                 &bus,
                 credentials.clone(),
+                &tokens,
                 account_id,
                 refresh_collections,
             )
@@ -79,10 +85,38 @@ pub fn spawn(
     }
 }
 
+/// A transport signed in for one cycle: an app password for a CardDAV
+/// server, or a fresh access token for Google Contacts.
+async fn sign_in(
+    config: &repo::carddav::CardDavConfig,
+    credentials: CredentialStoreHandle,
+    tokens: &TokenProvider,
+) -> Result<Box<dyn Transport>> {
+    let owner = Owner::Account(config.account_id);
+    let auth = match config.kind {
+        CardDavKind::Generic => DavAuth::Basic(
+            config.username.clone(),
+            credentials::load_async(credentials, config.account_id, Slot::CarddavPassword).await?,
+        ),
+        CardDavKind::Google => DavAuth::Bearer(
+            tokens
+                .access_token(config.account_id, Provider::Gmail)
+                .await?,
+        ),
+    };
+    // Google's refusals read the same whichever way the connection signs in.
+    Ok(if super::google::is_google(&config.base_url) {
+        Box::new(super::google::transport(owner, auth, &config.base_url)?)
+    } else {
+        Box::new(HttpTransport::new(owner, auth, &config.base_url)?)
+    })
+}
+
 async fn run_cycle(
     db: &Db,
     bus: &EventBus,
     credentials: CredentialStoreHandle,
+    tokens: &TokenProvider,
     account_id: i64,
     refresh_collections: bool,
 ) -> Result<()> {
@@ -92,20 +126,11 @@ async fn run_cycle(
     let Some(config) = config.filter(|config| config.enabled) else {
         return Ok(());
     };
-    let password = credentials::load_async(credentials, account_id, Slot::CarddavPassword).await?;
-    let transport = HttpTransport::new(
-        Owner::Account(account_id),
-        config.username.clone(),
-        password,
-        &config.base_url,
-    )?;
+    let transport = sign_in(&config, credentials, tokens).await?;
     if refresh_collections {
-        let discovered = super::discovery::discover(&transport, &config.base_url).await?;
-        let urls = discovered
-            .addressbooks
-            .iter()
-            .map(|book| book.url.clone())
-            .collect::<HashSet<_>>();
+        let discovered =
+            super::discovery::discover_for(config.kind, transport.as_ref(), &config.base_url)
+                .await?;
         let books = discovered.addressbooks;
         let refreshed = repo::carddav::CardDavConfig {
             principal_url: discovered.principal_url,
@@ -115,28 +140,13 @@ async fn run_cycle(
         };
         db.write(move |conn| {
             let tx = conn.transaction()?;
-            repo::carddav::upsert_config(&tx, &refreshed)?;
-            let mut first = None;
-            for book in books {
-                let id = repo::carddav::upsert_addressbook(
-                    &tx,
-                    account_id,
-                    &book.url,
-                    book.display_name.as_deref(),
-                    book.read_only,
-                )?;
-                first.get_or_insert(id);
-            }
-            repo::carddav::retain_addressbooks(&tx, account_id, &urls)?;
-            if let Some(id) = first {
-                repo::carddav::ensure_default(&tx, account_id, id)?;
-            }
+            repo::carddav::save_discovery(&tx, &refreshed, &books)?;
             tx.commit()?;
             Ok(())
         })
         .await?;
     }
-    sync_account(db, bus, &transport, account_id)
+    sync_account(db, bus, transport.as_ref(), account_id)
         .await
         .map(|_| ())
 }

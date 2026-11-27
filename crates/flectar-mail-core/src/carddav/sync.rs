@@ -109,11 +109,16 @@ pub async fn sync_account(
     Ok(changed)
 }
 
+/// Upload local changes. Google takes new contacts by POST to the address
+/// book's add-member URL (RFC 5995): a PUT lands at another address under
+/// another UID, which the next sync would bring back as a second contact.
 async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Result<bool> {
     let objects = db
         .read(move |conn| repo::carddav::pending_uploads(conn, account_id))
         .await?;
     let changed = !objects.is_empty();
+    // Where each address book takes new contacts, asked once a run.
+    let mut add_members = HashMap::<i64, Option<String>>::new();
     for object in objects {
         let book_id = object.addressbook_id;
         let book_url = db
@@ -164,6 +169,20 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
             continue;
         };
         vcard::ensure_size(&body)?;
+        if super::google::is_google(&book_url) && !object.remote_exists {
+            let member_url = match add_members.get(&book_id) {
+                Some(url) => url.clone(),
+                None => {
+                    let url = add_member_url(transport, &book_url).await?;
+                    add_members.insert(book_id, url.clone());
+                    url
+                }
+            };
+            if let Some(member_url) = member_url {
+                post_new_contact(db, transport, &object, &book_url, &member_url, body).await?;
+                continue;
+            }
+        }
         let headers = if object.remote_exists {
             let etag = object.etag.as_deref().ok_or_else(|| {
                 super::err(format!(
@@ -226,40 +245,10 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
             saved_body = get.body;
             response.etag = get.etag;
         }
-        let id = object.id;
         let etag = response.etag.filter(|etag| !etag.trim().is_empty());
         let missing_etag = etag.is_none();
-        db.write(move |conn| {
-            let tx = conn.transaction()?;
-            let newer: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM carddav_objects WHERE id=?1 AND revision<>?2)",
-                rusqlite::params![id, object.revision],
-                |r| r.get(0),
-            )?;
-            if newer && etag.is_some() && !vcard::equivalent(&body, &saved_body) {
-                // A normalization or later server edit changed the document
-                // while a newer local edit was pending. Retain both versions.
-                // Without an ETag the resource is downloaded again first.
-                repo::carddav::apply_remote(
-                    &tx,
-                    book_id,
-                    &object.href,
-                    etag.as_deref(),
-                    &Card::parse(saved_body.as_str())?,
-                )?;
-            } else {
-                repo::carddav::acknowledge_upload(
-                    &tx,
-                    id,
-                    object.revision,
-                    etag.as_deref(),
-                    &saved_body,
-                )?;
-            }
-            tx.commit()?;
-            Ok(())
-        })
-        .await?;
+        let href = object.href.clone();
+        record_upload(db, &object, href, body, saved_body, etag).await?;
         if missing_etag {
             return Err(super::err(format!(
                 "server stored {target} but did not return its required ETag"
@@ -269,15 +258,183 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
     Ok(changed)
 }
 
-async fn sync_addressbook(
+/// Record what the server stored for `object`, now at `href`: its own version
+/// when a newer local edit is waiting, or else the upload's acknowledgement.
+async fn record_upload(
+    db: &Db,
+    object: &repo::carddav::PendingUpload,
+    href: String,
+    body: String,
+    saved_body: String,
+    etag: Option<String>,
+) -> Result<()> {
+    let id = object.id;
+    let revision = object.revision;
+    let book_id = object.addressbook_id;
+    let moved = href != object.href;
+    db.write(move |conn| {
+        let tx = conn.transaction()?;
+        if moved {
+            repo::carddav::move_object(&tx, id, &href)?;
+        }
+        let newer: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM carddav_objects WHERE id=?1 AND revision<>?2)",
+            rusqlite::params![id, revision],
+            |r| r.get(0),
+        )?;
+        if newer && etag.is_some() && !vcard::equivalent(&body, &saved_body) {
+            // A normalization or later server edit changed the document
+            // while a newer local edit was pending. Retain both versions.
+            // Without an ETag the resource is downloaded again first.
+            repo::carddav::apply_remote(
+                &tx,
+                book_id,
+                &href,
+                etag.as_deref(),
+                &Card::parse(saved_body.as_str())?,
+            )?;
+        } else {
+            repo::carddav::acknowledge_upload(&tx, id, revision, etag.as_deref(), &saved_body)?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+}
+
+/// Where an address book takes new members by POST, when it says (RFC 5995).
+async fn add_member_url(transport: &dyn Transport, book_url: &str) -> Result<Option<String>> {
+    let response = transport
+        .request(
+            "PROPFIND",
+            book_url,
+            Some("0"),
+            &[],
+            Some("application/xml; charset=utf-8"),
+            Some(xml::add_member()),
+        )
+        .await?;
+    if response.status != 207 {
+        return Ok(None);
+    }
+    xml::parse(&response.body)?
+        .items
+        .into_iter()
+        .find_map(|item| item.add_member)
+        .map(|href| resolve(book_url, &href))
+        .transpose()
+}
+
+/// Create `object` by POST to `member_url`, then file it under the address
+/// the server gave it, with the server's version of it, since Google
+/// replaces the UID with its own.
+async fn post_new_contact(
     db: &Db,
     transport: &dyn Transport,
-    book_id: i64,
+    object: &repo::carddav::PendingUpload,
     book_url: &str,
-) -> Result<bool> {
-    let (stored_ctag, stored_token) = db
-        .read(move |conn| repo::carddav::sync_state(conn, book_id))
+    member_url: &str,
+    body: String,
+) -> Result<()> {
+    let book_id = object.addressbook_id;
+    let response = transport
+        .request(
+            "POST",
+            member_url,
+            None,
+            &[],
+            Some("text/vcard; charset=utf-8"),
+            Some(body.clone()),
+        )
         .await?;
+    if response.status == 403 {
+        db.write(move |conn| repo::carddav::mark_addressbook_read_only(conn, book_id))
+            .await?;
+        tracing::warn!(
+            book_id,
+            "CardDAV address book rejected POST; marking it read-only"
+        );
+        return Ok(());
+    }
+    if !response.ok() {
+        return Err(super::err(format!(
+            "POST {member_url}: HTTP {}",
+            response.status
+        )));
+    }
+    let Some(location) = response
+        .location
+        .as_deref()
+        .map(str::trim)
+        .filter(|location| !location.is_empty())
+    else {
+        // Stored somewhere unsaid, so it must not be posted again. The error
+        // makes the next sync list the address book in full, which replaces
+        // it with the server's copy.
+        let id = object.id;
+        db.write(move |conn| {
+            repo::carddav::stop_upload(
+                conn,
+                id,
+                "Server stored this contact without saying where; waiting to reconcile",
+            )
+        })
+        .await?;
+        return Ok(());
+    };
+    let href = href_key(book_url, location)?;
+    let (saved_body, etag) = match fetch_member(transport, book_url, &href).await? {
+        Some((etag, card)) => (card, Some(etag)),
+        None => (body.clone(), None),
+    };
+    let missing_etag = etag.is_none();
+    record_upload(db, object, href.clone(), body, saved_body, etag).await?;
+    if missing_etag {
+        return Err(super::err(format!(
+            "server stored {href} but did not return its required ETag"
+        )));
+    }
+    Ok(())
+}
+
+/// The ETag and vCard the server holds at `href`, read with a multiget, the
+/// way Google documents reading contacts.
+async fn fetch_member(
+    transport: &dyn Transport,
+    book_url: &str,
+    href: &str,
+) -> Result<Option<(String, String)>> {
+    let response = transport
+        .request(
+            "REPORT",
+            book_url,
+            Some("0"),
+            &[],
+            Some("application/xml; charset=utf-8"),
+            Some(xml::multiget(&[href.to_owned()])),
+        )
+        .await?;
+    if response.status != 207 {
+        return Ok(None);
+    }
+    for item in xml::parse(&response.body)?.items {
+        if href_key(book_url, &item.href)? == href
+            && (200..300).contains(&item.status)
+            && let Some(etag) = item.etag.filter(|etag| !etag.trim().is_empty())
+            && let Some(card) = item.address_data
+            && vcard::parse(&card).is_ok()
+        {
+            return Ok(Some((etag, card)));
+        }
+    }
+    Ok(None)
+}
+
+/// The address book's getctag and sync-token, when the server tells.
+async fn read_state(
+    transport: &dyn Transport,
+    book_url: &str,
+) -> Result<(Option<String>, Option<String>)> {
     let state = transport
         .request(
             "PROPFIND",
@@ -288,24 +445,44 @@ async fn sync_addressbook(
             Some(xml::state()),
         )
         .await?;
-    let (ctag, advertised_token) = if state.status == 207 {
-        let parsed = xml::parse(&state.body)?;
-        (
-            parsed.items.first().and_then(|item| item.ctag.clone()),
-            parsed
-                .items
-                .first()
-                .and_then(|item| item.sync_token.clone()),
-        )
+    if state.status != 207 {
+        return Ok((None, None));
+    }
+    let parsed = xml::parse(&state.body)?;
+    let first = parsed.items.first();
+    Ok((
+        first.and_then(|item| item.ctag.clone()),
+        first.and_then(|item| item.sync_token.clone()),
+    ))
+}
+
+/// Pull one address book's changes. Google departs from the RFCs in four
+/// ways (#423): polling getctag is throttled, so a stored sync token is used
+/// as it is; sync-collection needs Depth 1, since Depth 0 reports no
+/// changes; an empty token is refused, so a first sync lists everything;
+/// and addressbook-query isn't implemented, so the listing is a PROPFIND.
+async fn sync_addressbook(
+    db: &Db,
+    transport: &dyn Transport,
+    book_id: i64,
+    book_url: &str,
+) -> Result<bool> {
+    let google = super::google::is_google(book_url);
+    let (stored_ctag, stored_token) = db
+        .read(move |conn| repo::carddav::sync_state(conn, book_id))
+        .await?;
+    let reads_state = !(google && stored_token.is_some());
+    let (mut ctag, mut advertised_token) = if reads_state {
+        read_state(transport, book_url).await?
     } else {
-        (None, None)
+        (stored_ctag.clone(), None)
     };
     // Resources that failed to import are retried even when the collection is
     // unchanged, which needs a full listing rather than a sync-token delta.
     let retry_resources = db
         .read(move |conn| repo::carddav::has_failed_resources(conn, book_id))
         .await?;
-    if !retry_resources && ctag.is_some() && ctag == stored_ctag {
+    if reads_state && !retry_resources && ctag.is_some() && ctag == stored_ctag {
         return Ok(false);
     }
 
@@ -314,18 +491,26 @@ async fn sync_addressbook(
     let mut remote = Vec::<(String, Option<String>)>::new();
     let mut token = None;
     let mut incremental = false;
-    if !retry_resources && (stored_token.is_some() || advertised_token.is_some()) {
-        // An empty token requests the initial state. RFC 6578 requires Depth
-        // 0; sync-level controls the collection scope.
-        let requested_token = stored_token.as_deref().unwrap_or("");
+    let requested_token = if google {
+        stored_token.clone()
+    } else if stored_token.is_some() || advertised_token.is_some() {
+        // An empty token requests the initial state.
+        Some(stored_token.clone().unwrap_or_default())
+    } else {
+        None
+    };
+    if !retry_resources && let Some(requested_token) = requested_token {
+        // RFC 6578 requires Depth 0; sync-level controls the collection
+        // scope. Google answers Depth 0 as though nothing changed.
+        let depth = if google { "1" } else { "0" };
         let response = transport
             .request(
                 "REPORT",
                 book_url,
-                Some("0"),
+                Some(depth),
                 &[],
                 Some("application/xml; charset=utf-8"),
-                Some(xml::sync_collection(requested_token)),
+                Some(xml::sync_collection(&requested_token)),
             )
             .await?;
         if response.status == 207 && !response.body.contains("valid-sync-token") {
@@ -352,34 +537,52 @@ async fn sync_addressbook(
         }
     }
     if !incremental {
-        let response = transport
-            .request(
-                "REPORT",
-                book_url,
-                Some("1"),
-                &[],
-                Some("application/xml; charset=utf-8"),
-                Some(xml::addressbook_query()),
-            )
-            .await?;
+        let (listing, response) = if google {
+            // A full listing starts from a fresh token, since the stored one
+            // was refused or leaves out the resources to retry.
+            if !reads_state {
+                (ctag, advertised_token) = read_state(transport, book_url).await?;
+            }
+            let response = transport
+                .request(
+                    "PROPFIND",
+                    book_url,
+                    Some("1"),
+                    &[],
+                    Some("application/xml; charset=utf-8"),
+                    Some(xml::etags()),
+                )
+                .await?;
+            ("PROPFIND", response)
+        } else {
+            let response = transport
+                .request(
+                    "REPORT",
+                    book_url,
+                    Some("1"),
+                    &[],
+                    Some("application/xml; charset=utf-8"),
+                    Some(xml::addressbook_query()),
+                )
+                .await?;
+            ("addressbook-query", response)
+        };
         if response.status != 207 {
-            return Err(super::err(format!(
-                "addressbook-query: HTTP {}",
-                response.status
-            )));
+            return Err(super::err(format!("{listing}: HTTP {}", response.status)));
         }
         let parsed = xml::parse(&response.body)?;
         for item in parsed.items {
             if item.href.is_empty() {
-                return Err(super::err("addressbook-query returned an empty href"));
+                return Err(super::err(format!("{listing} returned an empty href")));
             }
             let href = href_key(book_url, &item.href)?;
-            if href == collection_href {
+            // A listing names the collection too, with or without its slash.
+            if href.trim_end_matches('/') == collection_href.trim_end_matches('/') {
                 continue;
             }
             if !(200..300).contains(&item.status) {
                 return Err(super::err(format!(
-                    "addressbook-query {href}: HTTP {}",
+                    "{listing} {href}: HTTP {}",
                     item.status
                 )));
             }
@@ -580,6 +783,7 @@ mod tests {
             status: 207,
             body: body.into(),
             etag: None,
+            location: None,
         }
     }
 
@@ -593,6 +797,7 @@ mod tests {
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -647,6 +852,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -708,6 +914,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -736,6 +943,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
             status: 201,
             etag: Some("\"created\"".into()),
             body: String::new(),
+            location: None,
         }]);
         push_dirty(&db, &transport, 1).await.unwrap();
         let seen = transport.seen.lock().unwrap();
@@ -756,6 +964,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -788,6 +997,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
             status: 204,
             etag: Some("\"new\"".into()),
             body: String::new(),
+            location: None,
         }]);
         assert!(push_dirty(&db, &transport, 1).await.unwrap());
         let seen = transport.seen.lock().unwrap();
@@ -808,6 +1018,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -838,6 +1049,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 status: 200,
                 etag: Some("\"server\"".into()),
                 body: "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:server-id\r\nN:;;;;\r\nFN:Server version\r\nEMAIL:ada@example.test\r\nEND:VCARD\r\n".into(),
+                location: None,
             },
         ]);
         assert!(push_dirty(&db, &transport, 1).await.unwrap());
@@ -865,6 +1077,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 conn,
                 &repo::carddav::CardDavConfig {
                     account_id: 1,
+                    kind: crate::models::CardDavKind::Generic,
                     base_url: "https://dav.test/".into(),
                     username: "me".into(),
                     principal_url: None,
@@ -1014,6 +1227,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 status: 200,
                 etag: Some("accepted".into()),
                 body: card,
+                location: None,
             },
         ]);
         assert!(push_dirty(&db, &transport, 1).await.unwrap());
@@ -1024,5 +1238,281 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
         })
         .await
         .unwrap();
+    }
+
+    const GOOGLE_BOOK: &str =
+        "https://www.googleapis.com/carddav/v1/principals/ana@gmail.com/lists/default/";
+    const GOOGLE_PATH: &str = "/carddav/v1/principals/ana@gmail.com/lists/default/";
+
+    /// A database whose account syncs its Google Contacts.
+    async fn google_db(dir: &tempfile::TempDir) -> Db {
+        let db = Db::open(&dir.path().join("mail.db")).unwrap();
+        db.write(|conn| {
+            crate::db::testutil::seed_account(conn);
+            repo::carddav::upsert_config(
+                conn,
+                &repo::carddav::CardDavConfig {
+                    account_id: 1,
+                    kind: crate::models::CardDavKind::Google,
+                    base_url: GOOGLE_BOOK.into(),
+                    username: "ana@gmail.com".into(),
+                    principal_url: None,
+                    home_set_url: GOOGLE_BOOK.into(),
+                    enabled: true,
+                    last_error: None,
+                },
+            )?;
+            repo::carddav::upsert_addressbook(conn, 1, GOOGLE_BOOK, Some("Address Book"), false)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db
+    }
+
+    /// A contact made on this device for the Google address book.
+    async fn new_google_contact(db: &Db) -> i64 {
+        db.write(|conn| {
+            let record = vcard::parse(
+                "BEGIN:VCARD\nVERSION:3.0\nUID:temporary\nN:;Ada;;;\nFN:Ada\nEMAIL:ada@example.test\nEND:VCARD",
+            )?;
+            let id = repo::contact_entries::save(conn, &record)?;
+            repo::carddav::attach_new_contact(conn, 1, id)?;
+            Ok(id)
+        })
+        .await
+        .unwrap()
+    }
+
+    fn google_card(name: &str, etag: &str, uid: &str) -> String {
+        format!(
+            r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:response><d:href>{GOOGLE_PATH}{uid}</d:href><d:propstat><d:prop><d:getetag>{etag}</d:getetag><c:address-data>BEGIN:VCARD
+VERSION:3.0
+UID:{uid}
+N:;{name};;;
+FN:{name}
+EMAIL:{uid}@example.test
+END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        )
+    }
+
+    fn google_state(token: &str) -> String {
+        format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}</d:href><d:propstat><d:prop><d:sync-token>https://www.googleapis.com/carddav/v1/synctoken/{token}</d:sync-token></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        )
+    }
+
+    fn requests(transport: &MockTransport) -> Vec<(String, Option<String>)> {
+        transport
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| (request.0.clone(), request.5.clone()))
+            .collect()
+    }
+
+    fn request(method: &str, depth: &str) -> (String, Option<String>) {
+        (method.into(), Some(depth.into()))
+    }
+
+    #[tokio::test]
+    async fn google_lists_by_propfind_then_follows_its_sync_token_with_depth_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = google_db(&dir).await;
+        let token = |conn: &mut rusqlite::Connection| repo::carddav::sync_state(conn, 1);
+
+        // Google turns down an empty sync token and addressbook-query.
+        let listing = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}</d:href><d:propstat><d:prop><d:getetag/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response><d:response><d:href>{GOOGLE_PATH}ada</d:href><d:propstat><d:prop><d:getetag>"1"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        );
+        let transport = MockTransport::new(vec![
+            dav(&google_state("A")),
+            dav(&listing),
+            dav(&google_card("Ada", "\"1\"", "ada")),
+        ]);
+        assert!(
+            sync_account(&db, &EventBus::new(), &transport, 1)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            requests(&transport),
+            [
+                request("PROPFIND", "0"),
+                request("PROPFIND", "1"),
+                request("REPORT", "0")
+            ]
+        );
+        assert!(
+            transport.seen.lock().unwrap()[1]
+                .4
+                .as_deref()
+                .unwrap()
+                .contains("<d:getetag/>")
+        );
+        let (_, stored) = db.read(token).await.unwrap();
+        assert!(stored.unwrap().ends_with("synctoken/A"));
+
+        // Later syncs follow the token with Depth 1, which Google needs, and
+        // never poll getctag.
+        let changes = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}bob</d:href><d:propstat><d:prop><d:getetag>"2"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>{GOOGLE_PATH}ada</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response><d:sync-token>https://www.googleapis.com/carddav/v1/synctoken/B</d:sync-token></d:multistatus>"#
+        );
+        let transport = MockTransport::new(vec![
+            dav(&changes),
+            dav(&google_card("Bob", "\"2\"", "bob")),
+        ]);
+        assert!(
+            sync_account(&db, &EventBus::new(), &transport, 1)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            requests(&transport),
+            [request("REPORT", "1"), request("REPORT", "0")]
+        );
+        assert!(
+            transport.seen.lock().unwrap()[0]
+                .4
+                .as_deref()
+                .unwrap()
+                .contains("synctoken/A")
+        );
+        let names = db
+            .read(|conn| repo::contacts::list_records(conn, "", 10))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|record| record.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["Bob"]);
+
+        // An expired token starts over from a fresh one.
+        let expired = DavResponse {
+            status: 400,
+            body: r#"<?xml version="1.0" encoding="UTF-8"?><d:error xmlns:d="DAV:"><d:valid-sync-token/></d:error>"#.into(),
+            ..Default::default()
+        };
+        let listing = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}bob</d:href><d:propstat><d:prop><d:getetag>"2"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        );
+        let transport = MockTransport::new(vec![expired, dav(&google_state("C")), dav(&listing)]);
+        sync_account(&db, &EventBus::new(), &transport, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            requests(&transport),
+            [
+                request("REPORT", "1"),
+                request("PROPFIND", "0"),
+                request("PROPFIND", "1")
+            ]
+        );
+        let (_, stored) = db.read(token).await.unwrap();
+        assert!(stored.unwrap().ends_with("synctoken/C"));
+    }
+
+    #[tokio::test]
+    async fn google_takes_a_new_contact_by_post_under_its_own_address_and_uid() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = google_db(&dir).await;
+        let entry = new_google_contact(&db).await;
+        let members = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}</d:href><d:propstat><d:prop><d:add-member><d:href>{GOOGLE_PATH}</d:href></d:add-member></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        );
+        let created = DavResponse {
+            status: 201,
+            location: Some(format!("{GOOGLE_PATH}c42")),
+            ..Default::default()
+        };
+        let transport = MockTransport::new(vec![
+            dav(&members),
+            created,
+            dav(&google_card("Ada", "\"9\"", "c42")),
+        ]);
+        assert!(push_dirty(&db, &transport, 1).await.unwrap());
+        {
+            let seen = transport.seen.lock().unwrap();
+            assert!(seen[0].4.as_deref().unwrap().contains("<d:add-member/>"));
+            assert_eq!(
+                (seen[1].0.as_str(), seen[1].1.as_str()),
+                ("POST", GOOGLE_BOOK)
+            );
+            assert!(seen[1].2.is_empty());
+            assert_eq!(seen[1].3.as_deref(), Some("text/vcard; charset=utf-8"));
+            assert!(seen[2].4.as_deref().unwrap().contains("lists/default/c42"));
+        }
+        let (href, etag, dirty, document) = db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT o.href,o.etag,o.dirty,e.document FROM carddav_objects o
+                     JOIN contact_entries e ON e.id=o.entry_id WHERE e.id=?1",
+                    [entry],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, bool>(2)?,
+                            r.get::<_, String>(3)?,
+                        ))
+                    },
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(href, format!("{GOOGLE_PATH}c42"));
+        assert_eq!(etag.as_deref(), Some("\"9\""));
+        assert!(!dirty);
+        assert!(document.contains("UID:c42"));
+    }
+
+    #[tokio::test]
+    async fn a_contact_google_stored_without_its_address_is_never_posted_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = google_db(&dir).await;
+        new_google_contact(&db).await;
+        let members = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}</d:href><d:propstat><d:prop><d:add-member><d:href>{GOOGLE_PATH}</d:href></d:add-member></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+        );
+        let transport = MockTransport::new(vec![
+            dav(&members),
+            DavResponse {
+                status: 201,
+                ..Default::default()
+            },
+        ]);
+        assert!(push_dirty(&db, &transport, 1).await.unwrap());
+        let again = MockTransport::new(Vec::new());
+        assert!(!push_dirty(&db, &again, 1).await.unwrap());
+        assert!(again.seen.lock().unwrap().is_empty());
+        // The next sync lists everything, which brings Google's copy.
+        assert!(
+            db.read(|conn| repo::carddav::has_failed_resources(conn, 1))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn google_without_an_add_member_address_takes_a_put() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = google_db(&dir).await;
+        new_google_contact(&db).await;
+        let members = format!(
+            r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>{GOOGLE_PATH}</d:href><d:propstat><d:prop><d:add-member/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response></d:multistatus>"#
+        );
+        let transport = MockTransport::new(vec![
+            dav(&members),
+            DavResponse {
+                status: 201,
+                etag: Some("\"1\"".into()),
+                ..Default::default()
+            },
+        ]);
+        push_dirty(&db, &transport, 1).await.unwrap();
+        let seen = transport.seen.lock().unwrap();
+        assert_eq!(seen[1].0, "PUT");
+        assert_eq!(seen[1].2, vec![("If-None-Match".into(), "*".into())]);
     }
 }

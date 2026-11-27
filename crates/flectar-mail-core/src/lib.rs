@@ -1690,6 +1690,7 @@ impl Core {
             self.db.clone(),
             self.bus.clone(),
             self.credentials.clone(),
+            self.tokens.clone(),
             account_id,
         );
         if let Some(previous) = self.card_handles.write().await.insert(account_id, handle) {
@@ -8339,8 +8340,7 @@ impl Core {
         credentials::check_available_async(self.credentials.clone()).await?;
         let transport = carddav::http::HttpTransport::new(
             net::proxy::Owner::Account(args.account_id),
-            args.username.clone(),
-            args.password.clone(),
+            carddav::http::DavAuth::Basic(args.username.clone(), args.password.clone()),
             &base_url,
         )?;
         let discovered = carddav::discovery::discover(&transport, &base_url).await?;
@@ -8358,6 +8358,7 @@ impl Core {
         .await?;
         let config = repo::carddav::CardDavConfig {
             account_id,
+            kind: CardDavKind::Generic,
             base_url,
             username: args.username,
             principal_url: discovered.principal_url,
@@ -8370,26 +8371,7 @@ impl Core {
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                repo::carddav::upsert_config(&tx, &config)?;
-                let mut first = None;
-                let urls = books
-                    .iter()
-                    .map(|book| book.url.clone())
-                    .collect::<HashSet<_>>();
-                for book in books {
-                    let id = repo::carddav::upsert_addressbook(
-                        &tx,
-                        account_id,
-                        &book.url,
-                        book.display_name.as_deref(),
-                        book.read_only,
-                    )?;
-                    first.get_or_insert(id);
-                }
-                repo::carddav::retain_addressbooks(&tx, account_id, &urls)?;
-                if let Some(id) = first {
-                    repo::carddav::ensure_default(&tx, account_id, id)?;
-                }
+                repo::carddav::save_discovery(&tx, &config, &books)?;
                 let result = repo::carddav::list_addressbooks(&tx, Some(account_id))?;
                 tx.commit()?;
                 Ok(result)
@@ -8472,6 +8454,114 @@ impl Core {
                 .await;
         self.bus.emit(CoreEvent::ContactsUpdated { account_id });
         Ok(())
+    }
+
+    /// Google Contacts over CardDAV (#423): re-run the account's Google
+    /// consent with the contacts scope added, since scopes are fixed at
+    /// consent time, swap in the widened tokens, then find its address books
+    /// with them. An account syncs one contacts server, so a CardDAV server
+    /// it already syncs stays until it's disconnected.
+    pub async fn connect_google_contacts(
+        &self,
+        account_id: i64,
+        open_url: impl FnOnce(String) -> std::result::Result<(), String> + Send,
+    ) -> Result<Vec<AddressBook>> {
+        let account = self
+            .db
+            .read(move |conn| repo::accounts::get(conn, account_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+        if account.provider != Provider::Gmail {
+            return Err(CoreError::CardDav(
+                "Google Contacts need a Gmail account".into(),
+            ));
+        }
+        let existing = self
+            .db
+            .read(move |conn| repo::carddav::get_config(conn, account_id))
+            .await?;
+        if existing.is_some_and(|config| config.kind != CardDavKind::Google) {
+            return Err(CoreError::CardDav(
+                "this account already syncs contacts with a CardDAV server".into(),
+            ));
+        }
+        credentials::check_available_async(self.credentials.clone()).await?;
+
+        // Asking for what else the account uses as well keeps it on Android.
+        let mut scopes = self.google_scopes_in_use(account_id).await?;
+        if !scopes.contains(&oauth::providers::GOOGLE_CONTACTS_SCOPE) {
+            scopes.push(oauth::providers::GOOGLE_CONTACTS_SCOPE);
+        }
+        let outcome = tokio::select! {
+            r = oauth::flow::authorize_with_broker(
+                Provider::Gmail,
+                &scopes,
+                Some(&account.email),
+                self.oauth_redirects.clone(),
+                open_url,
+            ) => r?,
+            _ = self.oauth_cancel.notified() => {
+                return Err(CoreError::Auth("sign-in cancelled".into()));
+            }
+        };
+        self.store_sign_in(&account, outcome).await?;
+
+        self.attach_google_contacts(account_id).await
+    }
+
+    /// Find the Gmail account's address books with its own tokens, which
+    /// must carry the contacts scope, and sync them from now on.
+    async fn attach_google_contacts(&self, account_id: i64) -> Result<Vec<AddressBook>> {
+        let email = self
+            .db
+            .read(move |conn| Ok(repo::accounts::get(conn, account_id)?.map(|a| a.email)))
+            .await?
+            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+        let token = self
+            .tokens
+            .access_token(account_id, Provider::Gmail)
+            .await?;
+        let base_url = carddav::google::start_url(&email)?;
+        let transport = carddav::google::transport(
+            net::proxy::Owner::Account(account_id),
+            carddav::http::DavAuth::Bearer(token),
+            &base_url,
+        )?;
+        let discovered =
+            carddav::discovery::discover_for(CardDavKind::Google, &transport, &base_url)
+                .await
+                .map_err(|error| match error {
+                    // Right after consent, a refused token means contacts
+                    // access was left unticked there.
+                    CoreError::NeedsReauth => CoreError::CardDav(
+                        "Google didn't let this app reach your contacts. Choose Connect Google Contacts again, and allow it.".into(),
+                    ),
+                    other => other,
+                })?;
+        let config = repo::carddav::CardDavConfig {
+            account_id,
+            kind: CardDavKind::Google,
+            base_url,
+            username: email,
+            principal_url: discovered.principal_url,
+            home_set_url: discovered.home_set_url,
+            enabled: true,
+            last_error: None,
+        };
+        let found = discovered.addressbooks;
+        let books = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                repo::carddav::save_discovery(&tx, &config, &found)?;
+                let books = repo::carddav::list_addressbooks(&tx, Some(account_id))?;
+                tx.commit()?;
+                Ok(books)
+            })
+            .await?;
+        self.spawn_card_task(account_id).await;
+        self.nudge_card(Some(account_id)).await;
+        Ok(books)
     }
 
     pub async fn list_events(&self, start_ms: i64, end_ms: i64) -> Result<Vec<CalendarEvent>> {

@@ -1485,11 +1485,39 @@ pub struct AddressBook {
     pub last_synced_at: Option<i64>,
 }
 
+/// How a CardDAV connection signs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardDavKind {
+    /// Any CardDAV server, with a username and an app password.
+    Generic,
+    /// Google Contacts, with the Gmail account's own OAuth tokens.
+    Google,
+}
+
+impl CardDavKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::Google => "google",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "generic" => Some(Self::Generic),
+            "google" => Some(Self::Google),
+            _ => None,
+        }
+    }
+}
+
 /// Per-account CardDAV connection shown by account settings.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CardDavConnection {
     pub account_id: i64,
+    pub kind: CardDavKind,
     pub base_url: String,
     pub username: String,
     pub enabled: bool,
