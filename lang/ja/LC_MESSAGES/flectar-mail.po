@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
-"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
+"PO-Revision-Date: 2026-11-27 14:48+0000\n"
+"Last-Translator: miyaji255 <84168445+miyaji255@users.noreply.github.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
 "Language: ja\n"
@@ -1199,10 +1199,8 @@ msgid "Text style preference saved."
 msgstr "書式設定を保存しました。"
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "ウィンドウのフレーム設定を保存しました。"
+msgstr "作成ウィンドウの設定を保存しました。"
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1221,10 +1219,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "文字スタイルの設定を保存できませんでした：{}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "送信取り消しの設定を保存できませんでした：{}"
+msgstr "作成ウィンドウの設定を保存できませんでした：{}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -1882,20 +1878,14 @@ msgid "Could not connect CardDAV: {}"
 msgstr "CardDAV に接続できませんでした：{}"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Authorize calendar access in your browser."
 msgid "Authorize contacts access in your browser."
 msgstr "ブラウザーでカレンダーへのアクセスを承認してください。"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Calendar connected and initial sync started."
 msgid "Google Contacts connected and initial sync started."
 msgstr "カレンダーに接続し、初期同期を開始しました。"
 
 #: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3588
-#, fuzzy
-#| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
 msgstr "カレンダーに接続できませんでした：{}"
 
@@ -2189,10 +2179,8 @@ msgid "Could not show the message: {}"
 msgstr "メールを表示できませんでした：{}"
 
 #: ui/app.slint:678
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "メールを送信できませんでした：{}"
+msgstr "メールを読み込めませんでした：{}"
 
 #: ui/app.slint:679
 msgid "Could not save the translation setting: {}"
@@ -2615,6 +2603,8 @@ msgstr "送信を取り消しました。メールは再び下書きになりま
 #: ui/app.slint:795
 msgid "Send cancelled here, but another of your devices may still send it."
 msgstr ""
+"このデバイスでの送信はキャンセルされましたが、別のデバイスから送信される可能"
+"性があります。"
 
 #: ui/app.slint:796
 msgid "This message is no longer scheduled."
@@ -2856,19 +2846,15 @@ msgstr "フォルダーを削除できませんでした：{}"
 
 #: ui/app.slint:850
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "フォルダーを非表示にしました。「設定」→「アカウント」から再表示できます。"
 
 #: ui/app.slint:851
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "フォルダーを削除できませんでした：{}"
+msgstr "フォルダーを非表示にできませんでした：{}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "フォルダーを選択できませんでした：{}"
+msgstr "フォルダーを変更できませんでした：{}"
 
 #: ui/app.slint:853
 msgid "Could not close preview: {}"
@@ -2919,10 +2905,8 @@ msgid "Could not open composer: {}"
 msgstr "メール作成画面を開けませんでした：{}"
 
 #: ui/app.slint:865
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "メールを独立したウィンドウで開けませんでした。"
+msgstr "スレッドを新しいウィンドウで開けませんでした：{}"
 
 #: ui/app.slint:866
 msgid "Add an account to send mail."
@@ -4290,7 +4274,7 @@ msgstr "{} に再確認"
 
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
-msgstr ""
+msgstr "メールの受信を続けるには、このデバイスで再度サインインしてください。"
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5196,10 +5180,8 @@ msgid "Open in a new window"
 msgstr "新しいウィンドウで開く"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "新しい署名"
+msgstr "署名なし"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:401
 msgid "From"
@@ -5207,23 +5189,19 @@ msgstr "差出人"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP：暗号化あり・デジタル署名あり"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "なし（暗号化なし）"
+msgstr "OpenPGP：暗号化あり"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP：デジタル署名あり・暗号化なし"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "他のタブを閉じる"
+msgstr "別のアドレスを選択…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:407
 msgid "To"
@@ -6467,8 +6445,6 @@ msgid "Rename folder"
 msgstr "フォルダー名を変更"
 
 #: ui/components/sidebar-controls.slint:241
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
 msgstr "フォルダーを非表示"
 
@@ -6977,23 +6953,16 @@ msgid "Sync"
 msgstr "同期"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"アカウントとサインイン、設定、テンプレート、スヌーズ、返信リマインダーをすべ"
-"てのデバイスで同じに保ち、どのデバイスからでも予約メールを送信できます。すべ"
-"てエンドツーエンドで暗号化されるため、Flectar Mail にも読めません。メール、連"
-"絡先、カレンダーは引き続きメールプロバイダーと同期されます。"
+"アカウント、設定、テンプレート、スヌーズ、返信リマインダーをすべてのデバイス"
+"で同期し、どのデバイスからでも予約メールを送信できます。すべて"
+"エンドツーエンドで暗号化されるため、Flectar Mail にも読めません。メール、連絡"
+"先、カレンダーは引き続きメールプロバイダーと同期されます。"
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7067,17 +7036,14 @@ msgid "{}."
 msgstr "{}。"
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"リカバリーコードが発行されるので、安全な場所に保管してください。パスワードと"
-"サインインも同期されるため、他のデバイスはすぐに使えます。"
+"リカバリーコードが発行されるので、安全な場所に保管してください。パスワードは"
+"すべてのデバイスに、Google と Microsoft のサインイン情報とアプリキーは同じ種"
+"類のデバイスに同期されます。"
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7297,10 +7263,8 @@ msgid "Passwords and sign-ins"
 msgstr "パスワードとサインイン"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr "このコードにより、すべてのデバイスで同期が無料になります。"
+msgstr "すべてのデバイス間でエンドツーエンド暗号化されます。"
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7308,29 +7272,27 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"接続前からこのデバイスにあったアカウントのパスワードとサインイン情報は、共有"
+"するまでこのデバイス内に留まります。上記に表示されているデバイスがすべて自分"
+"のものの場合のみ共有してください。"
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
 msgstr ""
-"すべてのデバイスでエンドツーエンド暗号化。リカバリーコードを持つ人は、あなた"
-"のアカウントにサインインできます。"
+"パスワードはすべてのデバイスに同期されます。Google と Microsoft のサインイン"
+"情報やアプリキーは同じ種類のデバイスに同期されます。リカバリーコードがあれば"
+"、誰でもアカウントにサインインできます。"
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "パスワードとサインインを同期"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "共有ロック"
+msgstr "共有"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7358,14 +7320,14 @@ msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
 msgstr ""
+"QR コードを読み取るには、スマートフォンの設定で Flectar Mail のカメラへの"
+"アクセスを許可してください。"
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
 msgstr ""
-"コードの有効期限が切れました。最初からやり直して新しいコードを取得してくださ"
-"い。"
+"QR コードスキャナーを起動できませんでした。もう一度試すか、代わりにコードを入"
+"力してください。"
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8595,16 +8557,12 @@ msgid "Google client ID"
 msgstr "Google クライアント ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "Google クライアント ID"
+msgstr "Google Android クライアント ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "Google クライアント ID"
+msgstr "Google iOS クライアント ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8615,10 +8573,8 @@ msgid "Microsoft client ID"
 msgstr "Microsoft クライアント ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "Microsoft クライアント ID"
+msgstr "Microsoft Entra クライアント ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8642,12 +8598,16 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"Google Cloud で、パッケージ {} 向けにこのアプリの署名証明書を使って Android "
+"クライアントを作成し、Gmail API を有効にしてください。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
 msgstr ""
+"Google Cloud でバンドル ID {} の iOS クライアントを作成し、Gmail API を有効に"
+"してください。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8663,12 +8623,17 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"Microsoft Entra で、パッケージ {} 向けにこのアプリの署名ハッシュを使って "
+"Android プラットフォームを追加してください。クライアントシークレットは不要で"
+"す。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
 msgstr ""
+"Microsoft Entra で、バンドル ID {} の iOS プラットフォームを追加してください"
+"。クライアントシークレットは不要です。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8695,13 +8660,11 @@ msgstr ""
 "す。キーは設定と共有されます。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
-msgstr "コードの対象期間中、Flectar Mail Sync はすべてのデバイスで無料です。"
+msgstr ""
+"Flectar Mail Sync を使うと、同じ種類の他のデバイスにもこれらのキーが同期され"
+"ます。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -9636,16 +9599,16 @@ msgstr ""
 "覧表示、開いて操作できます。"
 
 #: ui/dialogs/settings-dialog.slint:1820
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "新しいメール"
+msgstr "メールを開いたままにする"
 
 #: ui/dialogs/settings-dialog.slint:1821
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"スレッド内で別のメールを開いても、すでに開いているメールを閉じずに表示したま"
+"まにします。オフにすると、1通ずつ開いて読めます。"
 
 #: ui/dialogs/settings-dialog.slint:1834
 msgid "Mark messages as read"
@@ -9689,22 +9652,16 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "新しいメール、返信、転送はこのサイズで始まります。"
 
 #: ui/dialogs/settings-dialog.slint:1899
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "新しいウィンドウで開く"
+msgstr "新しいウィンドウで作成"
 
 #: ui/dialogs/settings-dialog.slint:1900
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
 msgstr ""
-"新しいメール、返信、転送はこのフォントで始まります。「デフォルト」を選ぶと何"
-"も指定せず、閲覧者各自のフォントで表示されます。"
+"新規メール、返信、転送、下書きを独立したウィンドウで開くため、メール一覧を見"
+"ながら作成できます。"
 
 #: ui/dialogs/settings-dialog.slint:1940
 msgid "Sending"
@@ -10441,11 +10398,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3483
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "サイドバーに表示して同期するフォルダー"
 
 #: ui/dialogs/settings-dialog.slint:3483
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "サイドバーに表示するフォルダー"
 
 #: ui/dialogs/settings-dialog.slint:3536
 msgid "Sync contacts with your Google account."
@@ -10456,14 +10413,10 @@ msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "標準準拠の CardDAV サーバーと連絡先を同期します。"
 
 #: ui/dialogs/settings-dialog.slint:3541
-#, fuzzy
-#| msgid "Contacts"
 msgid "Google Contacts"
 msgstr "アドレス帳"
 
 #: ui/dialogs/settings-dialog.slint:3565 ui/dialogs/settings-dialog.slint:3603
-#, fuzzy
-#| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
 msgstr "Google カレンダーを接続"
 
@@ -10481,8 +10434,6 @@ msgid "Fix CardDAV"
 msgstr "CardDAV を修復"
 
 #: ui/dialogs/settings-dialog.slint:3589
-#, fuzzy
-#| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
 msgstr "カレンダーの同期エラー：{}"
 
@@ -10503,19 +10454,15 @@ msgid "OAuth app credentials"
 msgstr "OAuth アプリの認証情報"
 
 #: ui/dialogs/settings-dialog.slint:3689
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "新しい連絡先はこのデバイスに保存されます。"
+msgstr "このデバイスには自分で登録したアプリキーが設定されています。"
 
 #: ui/dialogs/settings-dialog.slint:3689
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
 msgstr ""
-"上級者向け：自分で登録した Gmail または Microsoft のデスクトップアプリを使用"
-"します。"
+"高度な設定：このデバイスで自分で登録した Gmail または Microsoft のアプリを使"
+"用します。"
 
 #: ui/dialogs/settings-dialog.slint:3689
 msgid "Custom desktop app credentials are configured."
@@ -10772,10 +10719,8 @@ msgid "Open message"
 msgstr "メールを開く"
 
 #: ui/dialogs/settings-dialog.slint:4007
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "新しいウィンドウで開く"
+msgstr "メールを新しいウィンドウで開く"
 
 #: ui/dialogs/settings-dialog.slint:4008
 msgid "Select message"
@@ -11231,10 +11176,8 @@ msgid "Choose a profile for {}"
 msgstr "{} のプロファイルを選択"
 
 #: ui/dialogs/settings-dialog.slint:5270
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "アクション {} のフォルダー"
+msgstr "{} のフォルダー"
 
 #: ui/dialogs/settings-dialog.slint:5291
 msgid "Special folders of {}"
@@ -11420,10 +11363,8 @@ msgid "Keep syncing"
 msgstr "同期を続ける"
 
 #: ui/dialogs/settings-dialog.slint:5524
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "画像を削除"
+msgstr "デバイスを削除しますか？"
 
 #: ui/dialogs/settings-dialog.slint:5528
 msgid ""
@@ -11431,16 +11372,23 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"{} にサインインしたままになっている可能性があります。デバイスを紛失した場合や"
+"自分のものではない場合は、パスワードを変更し、各アカウントのセキュリティ設定"
+"から Flectar Mail のアクセス権を削除してください。"
 
 #: ui/dialogs/settings-dialog.slint:5545
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
+"このデバイスで Outlook にサインインするにはアプリキーが必要です。キーを保存し"
+"てからサインインしてください。"
 
 #: ui/dialogs/settings-dialog.slint:5546
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
+"このデバイスで Gmail にサインインするにはアプリキーが必要です。キーを保存して"
+"からサインインしてください。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11614,18 +11562,23 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"サイドバーや「移動先」一覧に表示するフォルダーと、このデバイスで同期する"
+"フォルダーを選択します。非表示にしたフォルダー内のメールも引き続き"
+"ダウンロードされ、配下のフォルダーも非表示になります。同期しないフォルダーは"
+"、開いたときに確認されます。"
 
 #: ui/folder-visibility.slint:144
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"サイドバーや「移動先」一覧に表示するフォルダーを選択します。非表示にした"
+"フォルダー内のメールも引き続きダウンロードされ、配下のフォルダーも非表示にな"
+"ります。"
 
 #: ui/folder-visibility.slint:253
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "{} 件中 {} 件のアドレスを表示しています。入力を増やすと絞り込めます。"
+msgstr "{}件（全{}件）のフォルダーを表示しています。入力を増やすと絞り込めます。"
 
 #: ui/link-services.slint:101
 msgid "Large files"
@@ -11945,17 +11898,14 @@ msgid "Every connection goes straight to its server."
 msgstr "すべての接続はサーバーに直接接続されます。"
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"すべての接続がこのプロキシを経由します。プロキシに接続できない場合、Flectar "
-"Mail は接続しません。"
+"Flectar Mail のすべての接続はこのプロキシを経由します。プロキシに接続できない"
+"場合、Flectar Mail はプロキシなしで接続しません。ただし、OS が証明書の発行元"
+"へ直接確認を行う場合があります。"
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -12018,30 +11968,28 @@ msgid "Change proxy"
 msgstr "プロキシを変更"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "その他の連絡先操作"
+msgstr "従量制課金接続"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "ダウンロード"
+msgstr "ダウンロードを一時停止"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"モバイルデータ通信やテザリングなどの従量制課金接続では、新着メールの確認は継"
+"続しつつ、メール本文や添付ファイルは開いたときにダウンロードされます。"
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "従量制課金接続のため、ダウンロードを待機しています。"
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "現在は従量制課金接続です。"
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -13146,8 +13094,6 @@ msgid "Deselect {}"
 msgstr "{} の選択を解除"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
 msgstr "新しいウィンドウで開く"
 
@@ -13217,10 +13163,8 @@ msgid "Copy name and email address"
 msgstr "名前とメールアドレスをコピー"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "メールを移動"
+msgstr "メールを閉じる"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."
