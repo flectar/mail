@@ -184,7 +184,15 @@ impl GmailApi {
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(HTTP_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("Flectar-Mail/", env!("CARGO_PKG_VERSION")))
+            // Google's performance guide asks for gzip, with "gzip" in the
+            // user agent too. Every body read here is bounded after
+            // decompression.
+            .gzip(true)
+            .user_agent(concat!(
+                "Flectar-Mail/",
+                env!("CARGO_PKG_VERSION"),
+                " (gzip)"
+            ))
             .build()
             .map_err(|error| CoreError::Network(error.to_string()))?;
         Ok(Self {
@@ -6358,6 +6366,98 @@ mod returned_receipt_tests {
             crate::models::Disposition::Displayed
         );
         assert_eq!(receipts[0].reported_at, 1_788_265_800_000);
+    }
+}
+
+#[cfg(test)]
+mod compression_tests {
+    use super::tests::gmail_account;
+    use super::*;
+    use reqwest::header::CONTENT_ENCODING;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    /// `{"historyId":"7"}`, gzip-compressed.
+    const GZIPPED: &[u8] = &[
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 86, 202, 200, 44, 46, 201, 47, 170, 244, 76, 81,
+        178, 82, 50, 87, 170, 5, 0, 248, 14, 87, 32, 17, 0, 0, 0,
+    ];
+
+    /// A server that answers one request with [`GZIPPED`] as gzip-encoded
+    /// JSON, keeping the request's head.
+    async fn compressing_server() -> (String, Arc<Mutex<String>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let head = Arc::new(Mutex::new(String::new()));
+        let kept = Arc::clone(&head);
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                stream.read_line(&mut line).await.unwrap();
+                if line.trim().is_empty() {
+                    break;
+                }
+                request.push_str(&line);
+            }
+            *kept.lock().unwrap() = request.to_ascii_lowercase();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                 Content-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                GZIPPED.len()
+            );
+            let stream = stream.get_mut();
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(GZIPPED).await.unwrap();
+        });
+        (origin, head)
+    }
+
+    #[tokio::test]
+    async fn gmail_asks_for_compressed_responses_as_google_advises() {
+        let (_dir, ctx, config) = gmail_account().await;
+        ctx.tokens
+            .store_initial(
+                config.id,
+                "access".into(),
+                Some(3600),
+                Some("refresh".into()),
+                "client".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        let (origin, head) = compressing_server().await;
+        let api = GmailApi::new(ctx, config).unwrap();
+        let profile = api
+            .get_json(
+                &format!("{origin}/gmail/v1/users/me/profile"),
+                cost::GET_PROFILE,
+            )
+            .await
+            .unwrap();
+        assert_eq!(profile["historyId"], "7");
+        let head = head.lock().unwrap().clone();
+        assert!(head.contains("accept-encoding: gzip"), "{head}");
+        assert!(head.contains(" (gzip)\r\n"), "{head}");
+    }
+
+    /// Other clients take responses as the server sends them.
+    #[tokio::test]
+    async fn other_clients_leave_responses_as_sent() {
+        let (origin, head) = compressing_server().await;
+        let response = crate::net::tls::client_builder()
+            .build()
+            .unwrap()
+            .get(format!("{origin}/file"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+        assert_eq!(response.bytes().await.unwrap().as_ref(), GZIPPED);
+        assert!(!head.lock().unwrap().contains("accept-encoding"));
     }
 }
 
