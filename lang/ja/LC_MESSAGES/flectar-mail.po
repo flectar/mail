@@ -30,7 +30,7 @@ msgstr "AI は誤ることがあります。メッセージの重要な部分は
 msgid "Close the summary"
 msgstr "要約を閉じる"
 
-#: ui/ai-summary.slint:110 ui/app.slint:659
+#: ui/ai-summary.slint:110 ui/app.slint:662
 msgid "Asking the AI server…"
 msgstr "AI サーバーに問い合わせ中…"
 
@@ -38,7 +38,7 @@ msgstr "AI サーバーに問い合わせ中…"
 msgid "Summarizing the conversation…"
 msgstr "スレッドを要約中…"
 
-#: ui/ai-summary.slint:119 ui/app.slint:653
+#: ui/ai-summary.slint:119 ui/app.slint:656
 msgid "Set up an AI server in Settings to use AI features."
 msgstr "AI 機能を使用するには、設定で AI サーバーを設定してください。"
 
@@ -100,8 +100,8 @@ msgid ""
 "The server can't be reached. Check the address and that the server is "
 "running."
 msgstr ""
-"サーバーに接続できません。アドレスとサーバーが起動しているか確認してください"
-"。"
+"サーバーに接続できません。アドレスとサーバーが起動しているか確認してくださ"
+"い。"
 
 #: ui/ai.slint:53 ui/translation.slint:81
 msgid ""
@@ -181,7 +181,7 @@ msgstr "API キーを削除"
 msgid "API key, if the server asks for one"
 msgstr "API キー(サーバーが要求する場合)"
 
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:344
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:410
 #: ui/dialogs/folder-dialog.slint:135 ui/network.slint:313
 #: ui/translation.slint:378 ui/views/files-view.slint:660
 msgid "Save"
@@ -226,7 +226,7 @@ msgstr "依頼内容"
 msgid "Make it shorter, keeping what matters."
 msgstr "大事な内容を保ちながら短くする。"
 
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:195
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:234
 #: ui/dialogs/settings-dialog.slint:77 ui/translation.slint:252
 msgid "Remove"
 msgstr "削除"
@@ -258,11 +258,11 @@ msgid ""
 "sender hid in it, and never your other mail. AI text can be wrong, so "
 "Flectar Mail marks it, and nothing it writes goes out until you send it."
 msgstr ""
-"AI 機能を使用した対象のみ: 要約する会話や、処理を依頼したテキストです。"
-"メッセージに表示されるテキストを受け取り、差出人が隠したテキストは受け取らず"
-"、他のメールには決してアクセスしません。AI のテキストは誤っている場合があるた"
-"め、Flectar Mail はそれを示します。また、AI が書いたものは、送信するまで外に"
-"出ません。"
+"AI 機能を使用した対象のみ: 要約する会話や、処理を依頼したテキストです。メッ"
+"セージに表示されるテキストを受け取り、差出人が隠したテキストは受け取らず、他"
+"のメールには決してアクセスしません。AI のテキストは誤っている場合があるため、"
+"Flectar Mail はそれを示します。また、AI が書いたものは、送信するまで外に出ま"
+"せん。"
 
 #: ui/app-icon.slint:19 ui/components/composer-actions.slint:23
 msgid "Orange"
@@ -662,7 +662,7 @@ msgstr "メールの履歴があります"
 msgid "New address-book entry"
 msgstr "新しいアドレス帳エントリ"
 
-#: ui/app.slint:259 ui/app.slint:1533 ui/components/composer-fields.slint:91
+#: ui/app.slint:259 ui/app.slint:1536 ui/components/composer-fields.slint:91
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
 msgstr "接続済みのアカウントがありません"
@@ -723,7 +723,7 @@ msgstr[0] "{n} 件の未読スレッド"
 msgid "Archive"
 msgstr "アーカイブ"
 
-#: ui/app.slint:282 ui/components/account-mail-preferences.slint:243
+#: ui/app.slint:282 ui/components/account-mail-preferences.slint:309
 #: ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:620
 msgid "Delete"
 msgstr "削除"
@@ -745,11 +745,11 @@ msgstr "新着メールを確認中"
 msgid "Last contacted {}"
 msgstr "最終連絡: {}"
 
-#: ui/app.slint:289 ui/app.slint:683
+#: ui/app.slint:289 ui/app.slint:686
 msgid "Loading local data…"
 msgstr "ローカルデータを読み込んでいます…"
 
-#: ui/app.slint:290 ui/app.slint:684
+#: ui/app.slint:290 ui/app.slint:687
 msgid "Local data ready."
 msgstr "ローカルデータの準備ができました。"
 
@@ -809,8 +809,8 @@ msgid ""
 "Action {}: this account keeps each message in one folder, so it can't copy "
 "mail."
 msgstr ""
-"アクション {}: このアカウントは各メッセージを 1 つのフォルダーに保持するため"
-"、メールをコピーできません。"
+"アクション {}: このアカウントは各メッセージを 1 つのフォルダーに保持するた"
+"め、メールをコピーできません。"
 
 #: ui/app.slint:337
 msgid "Action {}: choose a folder."
@@ -825,8 +825,8 @@ msgid ""
 "A rule can move mail out of the Inbox only once. Keep one of moving, "
 "archiving, trash and spam."
 msgstr ""
-"受信トレイからメールを出す操作は 1 つだけにできます。移動、アーカイブ、ごみ箱"
-"、迷惑メールのいずれか 1 つを残してください。"
+"受信トレイからメールを出す操作は 1 つだけにできます。移動、アーカイブ、ごみ"
+"箱、迷惑メールのいずれか 1 つを残してください。"
 
 #: ui/app.slint:340
 msgid "Could not save the rule: {}"
@@ -1009,7 +1009,8 @@ msgstr "~/.cursor/mcp.json の mcpServers に flectar-mail を追加してくだ
 
 #: ui/app.slint:381
 msgid "Add flectar-mail to the context_servers in Zed's settings.json."
-msgstr "Zed の settings.json の context_servers に flectar-mail を追加してください。"
+msgstr ""
+"Zed の settings.json の context_servers に flectar-mail を追加してください。"
 
 #: ui/app.slint:382
 msgid ""
@@ -1147,7 +1148,8 @@ msgstr "連絡先の候補設定を保存できませんでした: {}"
 
 #: ui/app.slint:413
 msgid "Contact storage is still starting. Try again shortly."
-msgstr "連絡先のストレージはまだ起動中です。しばらくしてからもう一度お試しください。"
+msgstr ""
+"連絡先のストレージはまだ起動中です。しばらくしてからもう一度お試しください。"
 
 #: ui/app.slint:414
 msgid "Cleared {} suggested people."
@@ -1335,7 +1337,8 @@ msgstr "スペルチェックの設定を保存できませんでした: {}"
 
 #: ui/app.slint:460
 msgid "At most {} tabs can be open. Close a tab to open another."
-msgstr "開けるタブは最大 {} 個です。ほかのタブを開くには、タブを 1 つ閉じてください。"
+msgstr ""
+"開けるタブは最大 {} 個です。ほかのタブを開くには、タブを 1 つ閉じてください。"
 
 #: ui/app.slint:461
 msgid "Mail grouping is active for this session."
@@ -1546,7 +1549,8 @@ msgstr ""
 
 #: ui/app.slint:515
 msgid "Your desktop did not allow Flectar Mail to run in the background."
-msgstr "デスクトップ環境が Flectar Mail のバックグラウンド実行を許可しませんでした。"
+msgstr ""
+"デスクトップ環境が Flectar Mail のバックグラウンド実行を許可しませんでした。"
 
 #: ui/app.slint:516
 msgid "Could not save close behavior: {}"
@@ -1562,7 +1566,8 @@ msgstr "Flectar Mail が既定のメールアプリになりました。"
 
 #: ui/app.slint:519
 msgid "Choose Flectar Mail for MAILTO in Windows Settings to finish."
-msgstr "完了するには、Windows 設定で MAILTO に Flectar Mail を選択してください。"
+msgstr ""
+"完了するには、Windows 設定で MAILTO に Flectar Mail を選択してください。"
 
 #: ui/app.slint:520
 msgid "Windows no longer offers this copy for email links."
@@ -1613,8 +1618,8 @@ msgid ""
 "Mail exported to {}. Some messages could not be found on this device or the "
 "mail server."
 msgstr ""
-"メールを {} にエクスポートしました。一部のメッセージがこのデバイスまたは"
-"メールサーバーで見つかりませんでした。"
+"メールを {} にエクスポートしました。一部のメッセージがこのデバイスまたはメー"
+"ルサーバーで見つかりませんでした。"
 
 #: ui/app.slint:535
 msgid "Could not export mail: {}"
@@ -1634,7 +1639,8 @@ msgstr "アカウントの順序を保存できませんでした: {}"
 
 #: ui/app.slint:539
 msgid "Mail history updated. Background sync is adjusting now."
-msgstr "メールの履歴を更新しました。バックグラウンドの同期が調整を行っています。"
+msgstr ""
+"メールの履歴を更新しました。バックグラウンドの同期が調整を行っています。"
 
 #: ui/app.slint:540
 msgid "Account removed from this device."
@@ -1654,7 +1660,8 @@ msgstr "アカウントを削除しました。メールの更新は再試行さ
 
 #: ui/app.slint:544
 msgid "Account removed; local cleanup needs a retry: {}"
-msgstr "アカウントを削除しました。ローカルのクリーンアップには再試行が必要です: {}"
+msgstr ""
+"アカウントを削除しました。ローカルのクリーンアップには再試行が必要です: {}"
 
 #: ui/app.slint:545
 msgid "Could not remove account: {}"
@@ -1779,255 +1786,267 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV の接続を解除できませんでした: {}"
 
 #: ui/app.slint:576
+#, fuzzy
+#| msgid "Prompts saved."
+msgid "Copies saved."
+msgstr "プロンプトを保存しました。"
+
+#: ui/app.slint:577
+#, fuzzy
+#| msgid "Could not save the file: {}"
+msgid "Could not save the copies: {}"
+msgstr "ファイルを保存できませんでした: {}"
+
+#: ui/app.slint:579
 msgctxt "special folder"
 msgid "No folder"
 msgstr "フォルダーなし"
 
-#: ui/app.slint:577
+#: ui/app.slint:580
 msgid "Could not read the folders: {}"
 msgstr "フォルダーを読み込めませんでした：{}"
 
-#: ui/app.slint:578
+#: ui/app.slint:581
 msgid "Could not choose the folder: {}"
 msgstr "フォルダーを選択できませんでした：{}"
 
-#: ui/app.slint:583
+#: ui/app.slint:586
 msgid "Connect an account before creating a backup."
 msgstr "バックアップを作成する前に、アカウントを接続してください。"
 
-#: ui/app.slint:584
+#: ui/app.slint:587
 msgid "Export Flectar Mail account backup"
 msgstr "Flectar Mail アカウントのバックアップをエクスポート"
 
-#: ui/app.slint:585
+#: ui/app.slint:588
 msgid "Flectar Mail backup"
 msgstr "Flectar Mail バックアップ"
 
-#: ui/app.slint:586 ui/dialogs/import-dialog.slint:406
+#: ui/app.slint:589 ui/dialogs/import-dialog.slint:406
 #: ui/views/onboarding-view.slint:243
 msgid "Import accounts and mail"
 msgstr "アカウントとメールをインポート"
 
-#: ui/app.slint:587
+#: ui/app.slint:590
 msgid "Choose a Thunderbird profile or a folder of mail"
 msgstr "Thunderbird プロフィールまたはメールのフォルダーを選択"
 
-#: ui/app.slint:588
+#: ui/app.slint:591
 msgid "Imported messages"
 msgstr "インポートしたメッセージ"
 
-#: ui/app.slint:589
+#: ui/app.slint:592
 msgid "Choose where to export the database snapshot"
 msgstr "データベースのスナップショットのエクスポート先を選択"
 
-#: ui/app.slint:590
+#: ui/app.slint:593
 msgid "Backup exported. Passwords and OAuth tokens were not included."
 msgstr ""
 "バックアップをエクスポートしました。パスワードと OAuth トークンは含まれていま"
 "せん。"
 
-#: ui/app.slint:591
+#: ui/app.slint:594
 msgid "Could not export backup: {}"
 msgstr "バックアップをエクスポートできませんでした: {}"
 
-#: ui/app.slint:592
+#: ui/app.slint:595
 msgid "Local data storage is unavailable. Retry startup."
 msgstr "ローカルデータのストレージを利用できません。起動を再試行してください。"
 
-#: ui/app.slint:593
+#: ui/app.slint:596
 msgid "Creating verified database snapshot…"
 msgstr "検証済みのデータベーススナップショットを作成しています…"
 
-#: ui/app.slint:594
+#: ui/app.slint:597
 msgid "All local Flectar Mail data was deleted."
 msgstr "ローカルの Flectar Mail データをすべて削除しました。"
 
-#: ui/app.slint:595
+#: ui/app.slint:598
 msgid "Could not delete all local data: {}"
 msgstr "ローカルデータをすべて削除できませんでした: {}"
 
-#: ui/app.slint:596
+#: ui/app.slint:599
 msgid "Deleting local accounts and cached data…"
 msgstr "ローカルのアカウントとキャッシュデータを削除しています…"
 
-#: ui/app.slint:601
+#: ui/app.slint:604
 msgid "Background mail refresh failed: {}"
 msgstr "バックグラウンドのメール更新に失敗しました: {}"
 
-#: ui/app.slint:602
+#: ui/app.slint:605
 msgid "No conversations in this folder"
 msgstr "このフォルダーにメールの履歴はありません"
 
-#: ui/app.slint:603
+#: ui/app.slint:606
 msgid "No conversations match this search"
 msgstr "この検索に一致する会話はありません"
 
-#: ui/app.slint:604
+#: ui/app.slint:607
 msgid "Mail core is ready for account synchronization and message actions."
 msgstr "メールコアの準備ができ、アカウントの同期とメッセージ操作が可能です。"
 
-#: ui/app.slint:605
+#: ui/app.slint:608
 msgid "Large message rendered in compatibility mode."
 msgstr "大きなメッセージを互換モードで表示しました。"
 
-#: ui/app.slint:606
+#: ui/app.slint:609
 msgid "Software email render failed: {}"
 msgstr "ソフトウェアレンダリングでのメール表示に失敗しました: {}"
 
-#: ui/app.slint:607
+#: ui/app.slint:610
 msgid "Rendered with software fallback after GPU error: {}"
 msgstr "GPU エラーのためソフトウェアフォールバックで表示しました: {}"
 
-#: ui/app.slint:608
+#: ui/app.slint:611
 msgid "Blitz render failed (GPU: {}; software: {})"
 msgstr "Blitz のレンダリングに失敗しました(GPU: {}; ソフトウェア: {})"
 
-#: ui/app.slint:613
+#: ui/app.slint:616
 msgid "Enter a name, email address, or phone number, then save."
 msgstr "名前、メールアドレス、または電話番号を入力して保存してください。"
 
-#: ui/app.slint:614
+#: ui/app.slint:617
 msgid "Could not save: contact storage is unavailable."
 msgstr "保存できませんでした: 連絡先のストレージを利用できません。"
 
-#: ui/app.slint:615
+#: ui/app.slint:618
 msgid "Could not save contact: {}"
 msgstr "連絡先を保存できませんでした: {}"
 
-#: ui/app.slint:616
+#: ui/app.slint:619
 msgid "Contact saved."
 msgstr "連絡先を保存しました。"
 
-#: ui/app.slint:617
+#: ui/app.slint:620
 msgid "Saved to contacts."
 msgstr "連絡先に保存しました。"
 
-#: ui/app.slint:618
+#: ui/app.slint:621
 msgid "Could not delete: contact storage is unavailable."
 msgstr "削除できませんでした: 連絡先のストレージを利用できません。"
 
-#: ui/app.slint:619
+#: ui/app.slint:622
 msgid "Could not delete contact: {}"
 msgstr "連絡先を削除できませんでした: {}"
 
-#: ui/app.slint:620
+#: ui/app.slint:623
 msgid "Contact deleted."
 msgstr "連絡先を削除しました。"
 
-#: ui/app.slint:621
+#: ui/app.slint:624
 msgid "Could not load contacts: {}"
 msgstr "連絡先を読み込めませんでした: {}"
 
-#: ui/app.slint:622
+#: ui/app.slint:625
 msgid "Local contact storage is still starting…"
 msgstr "ローカルの連絡先ストレージはまだ起動中です…"
 
-#: ui/app.slint:623
+#: ui/app.slint:626
 msgid "Loading contacts…"
 msgstr "連絡先を読み込んでいます…"
 
-#: ui/app.slint:628 ui/components/calendar-agenda.slint:247
+#: ui/app.slint:631 ui/components/calendar-agenda.slint:247
 msgid "Local calendar"
 msgstr "ローカルカレンダー"
 
-#: ui/app.slint:629 ui/components/calendar.slint:325
+#: ui/app.slint:632 ui/components/calendar.slint:325
 #: ui/components/calendar.slint:373 ui/components/calendar.slint:528
 msgid "Calendar"
 msgstr "カレンダー"
 
-#: ui/app.slint:630
+#: ui/app.slint:633
 msgid "Could not load calendar: {}"
 msgstr "カレンダーを読み込めませんでした: {}"
 
-#: ui/app.slint:631
+#: ui/app.slint:634
 msgid "Calendar shown and syncing."
 msgstr "カレンダーを表示し、同期しています。"
 
-#: ui/app.slint:632
+#: ui/app.slint:635
 msgid "Calendar hidden and sync paused."
 msgstr "カレンダーを非表示にし、同期を一時停止しました。"
 
-#: ui/app.slint:633
+#: ui/app.slint:636
 msgid "Calendar update failed: {}"
 msgstr "カレンダーの更新に失敗しました: {}"
 
-#: ui/app.slint:634
+#: ui/app.slint:637
 msgid "Only events created in Flectar Mail can be edited."
 msgstr "Flectar Mail で作成した予定のみ編集できます。"
 
-#: ui/app.slint:635
+#: ui/app.slint:638
 msgid "Only events created in Flectar Mail can be deleted."
 msgstr "Flectar Mail で作成した予定のみ削除できます。"
 
-#: ui/app.slint:636
+#: ui/app.slint:639
 msgid "Calendar storage is unavailable."
 msgstr "カレンダーのストレージを利用できません。"
 
-#: ui/app.slint:637
+#: ui/app.slint:640
 msgid "Could not delete event: {}"
 msgstr "予定を削除できませんでした: {}"
 
-#: ui/app.slint:638
+#: ui/app.slint:641
 msgid "Event deleted, but refresh failed: {}"
 msgstr "予定を削除しましたが、更新に失敗しました: {}"
 
-#: ui/app.slint:639
+#: ui/app.slint:642
 msgid "Event deleted."
 msgstr "予定を削除しました。"
 
-#: ui/app.slint:640
+#: ui/app.slint:643
 msgid "Removed from your calendar."
 msgstr "カレンダーから削除しました。"
 
-#: ui/app.slint:641
+#: ui/app.slint:644
 msgid "Could not answer: {}"
 msgstr "回答できませんでした: {}"
 
-#: ui/app.slint:642
+#: ui/app.slint:645
 msgid "Could not remove the event: {}"
 msgstr "予定を削除できませんでした: {}"
 
-#: ui/app.slint:643
+#: ui/app.slint:646
 msgid "Could not add the event: {}"
 msgstr "予定を追加できませんでした: {}"
 
-#: ui/app.slint:644
+#: ui/app.slint:647
 msgid "Calendar invitations preference saved."
 msgstr "カレンダーの招待設定を保存しました。"
 
-#: ui/app.slint:645
+#: ui/app.slint:648
 msgid "Could not save the calendar invitations preference: {}"
 msgstr "カレンダーの招待の設定を保存できませんでした: {}"
 
-#: ui/app.slint:646
+#: ui/app.slint:649
 msgid "Read receipt preference saved."
 msgstr "開封確認の設定を保存しました。"
 
-#: ui/app.slint:647
+#: ui/app.slint:650
 msgid "Could not save the read receipt preference: {}"
 msgstr "開封確認の設定を保存できませんでした: {}"
 
-#: ui/app.slint:648
+#: ui/app.slint:651
 msgid "Could not answer the read receipt request: {}"
 msgstr "開封確認のリクエストに回答できませんでした: {}"
 
-#: ui/app.slint:649
+#: ui/app.slint:652
 msgid "Could not show the message: {}"
 msgstr "メールを表示できませんでした：{}"
 
-#: ui/app.slint:650
+#: ui/app.slint:653
 msgid "Could not save the translation setting: {}"
 msgstr "翻訳設定を保存できませんでした：{}"
 
-#: ui/app.slint:651
+#: ui/app.slint:654
 msgid "Could not remove the key: {}"
 msgstr "API キーを削除できませんでした：{}"
 
-#: ui/app.slint:652
+#: ui/app.slint:655
 msgid "Could not save the prompts: {}"
 msgstr "プロンプトを保存できませんでした：{}"
 
-#: ui/app.slint:654
+#: ui/app.slint:657
 msgid ""
 "The AI server can't be reached. Check its address in Settings and that it's "
 "running."
@@ -2035,93 +2054,94 @@ msgstr ""
 "AI サーバーに接続できません。アドレスの設定とサーバーが起動しているかを確認し"
 "てください。"
 
-#: ui/app.slint:655
+#: ui/app.slint:658
 msgid ""
 "The AI server's address in Settings has to start with https://, or with "
 "http://localhost for a server on this computer."
 msgstr ""
-"設定の AI サーバーアドレスは https:// で始まる必要があります。この"
-"コンピューター上のサーバーの場合は http://localhost で始められます。"
+"設定の AI サーバーアドレスは https:// で始まる必要があります。このコンピュー"
+"ター上のサーバーの場合は http://localhost で始められます。"
 
-#: ui/app.slint:656
+#: ui/app.slint:659
 msgid "The AI server didn't accept the key in Settings."
 msgstr "AI サーバーが設定のキーを受け付けませんでした。"
 
-#: ui/app.slint:657
+#: ui/app.slint:660
 msgid "The AI server didn't answer as expected. It said: {}"
 msgstr "AI サーバーから予期しない応答がありました。応答内容: {}"
 
-#: ui/app.slint:658
+#: ui/app.slint:661
 msgid "Write something to improve first."
 msgstr "まず、改善する文章を入力してください。"
 
-#: ui/app.slint:660
+#: ui/app.slint:663
 msgid "The AI server sent back no text, so the message stays as it is."
-msgstr "AI サーバーからテキストが返されなかったため、メッセージは元のままです。"
+msgstr ""
+"AI サーバーからテキストが返されなかったため、メッセージは元のままです。"
 
-#: ui/app.slint:661
+#: ui/app.slint:664
 msgid "The text changed while the AI server worked, so it stays as it is."
 msgstr "AI サーバーの処理中にテキストが変更されたため、元のままです。"
 
-#: ui/app.slint:662
+#: ui/app.slint:665
 msgid "Changed by AI. Check it before you send it. Undo restores your text."
 msgstr ""
 "AI が変更しました。送信前に確認してください。「元に戻す」で自分のテキストに戻"
 "せます。"
 
-#: ui/app.slint:663
+#: ui/app.slint:666
 msgid "The AI server found nothing to change."
 msgstr "AI サーバーは変更すべき点を見つけられませんでした。"
 
-#: ui/app.slint:665
+#: ui/app.slint:668
 msgid "Automatic ({})"
 msgstr "自動（{}）"
 
-#: ui/app.slint:666
+#: ui/app.slint:669
 msgid "Could not mark all as read: {}"
 msgstr "すべて既読にできませんでした: {}"
 
-#: ui/app.slint:667
+#: ui/app.slint:670
 msgid "Use YYYY-MM-DD for the date and a time such as {}."
 msgstr "日付は YYYY-MM-DD、時刻は {} のような形式で入力してください。"
 
-#: ui/app.slint:668
+#: ui/app.slint:671
 msgid "Event duration must be a number of minutes."
 msgstr "予定の長さは分数で指定してください。"
 
-#: ui/app.slint:669
+#: ui/app.slint:672
 msgid "Add a title and choose a duration from 15 to 1440 minutes."
 msgstr "タイトルを入力し、15〜1440 分の長さを選択してください。"
 
-#: ui/app.slint:670
+#: ui/app.slint:673
 msgid "That local time does not exist in the current time zone."
 msgstr "その現地時刻は現在のタイムゾーンに存在しません。"
 
-#: ui/app.slint:671
+#: ui/app.slint:674
 msgid "Could not save event: {}"
 msgstr "予定を保存できませんでした: {}"
 
-#: ui/app.slint:672
+#: ui/app.slint:675
 msgid "Event saved, but refresh failed: {}"
 msgstr "予定を保存しましたが、更新に失敗しました: {}"
 
-#: ui/app.slint:673
+#: ui/app.slint:676
 msgid "Event saved. Provider sync will run when enabled."
 msgstr "予定を保存しました。プロバイダーとの同期は有効にすると実行されます。"
 
-#: ui/app.slint:678
+#: ui/app.slint:681
 msgid "Email resource render failed: {}"
 msgstr "メールリソースの表示に失敗しました: {}"
 
-#: ui/app.slint:679
+#: ui/app.slint:682
 msgid "Message refresh failed: {}"
 msgstr "メッセージの更新に失敗しました: {}"
 
-#: ui/app.slint:680
+#: ui/app.slint:683
 msgid "Message load failed: {}"
 msgstr "メッセージの読み込みに失敗しました: {}"
 
-#: ui/app.slint:681
+#: ui/app.slint:684
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
@@ -2129,168 +2149,169 @@ msgstr ""
 "ローカルのメールボックスを開けませんでした。アカウント操作は開始されていませ"
 "ん。再試行するか、診断情報をコピーしてサポートに問い合わせてください。"
 
-#: ui/app.slint:682
+#: ui/app.slint:685
 msgid "Local storage startup failed."
 msgstr "ローカルストレージの起動に失敗しました。"
 
-#: ui/app.slint:689
+#: ui/app.slint:692
 msgid "Could not identify the dragged account."
 msgstr "ドラッグされたアカウントを特定できませんでした。"
 
-#: ui/app.slint:690
+#: ui/app.slint:693
 msgid "Account ordering requires local mail data."
 msgstr "アカウントの並べ替えにはローカルのメールデータが必要です。"
 
-#: ui/app.slint:691
+#: ui/app.slint:694
 msgid "Could not find the account to reorder."
 msgstr "並べ替えるアカウントが見つかりませんでした。"
 
-#: ui/app.slint:692
+#: ui/app.slint:695
 msgid "Saving account order…"
 msgstr "アカウントの順序を保存しています…"
 
-#: ui/app.slint:693
+#: ui/app.slint:696
 msgid "Sent copy settings require local mail data."
 msgstr "送信済みコピーの設定にはローカルのメールデータが必要です。"
 
-#: ui/app.slint:694
+#: ui/app.slint:697
 msgid "Updating Sent copy settings…"
 msgstr "送信済みコピーの設定を更新しています…"
 
-#: ui/app.slint:695
+#: ui/app.slint:698
 msgid "Sent copy settings updated."
 msgstr "送信済みコピーの設定を更新しました。"
 
-#: ui/app.slint:696
+#: ui/app.slint:699
 msgid "Could not update Sent copy settings: {}"
 msgstr "送信済みコピーの設定を更新できませんでした: {}"
 
-#: ui/app.slint:697
+#: ui/app.slint:700
 msgid "Server mail settings require local mail data."
 msgstr "サーバーのメール設定にはローカルのメールデータが必要です。"
 
-#: ui/app.slint:698
+#: ui/app.slint:701
 msgid "Updating server mail settings…"
 msgstr "サーバーのメール設定を更新しています…"
 
-#: ui/app.slint:699
+#: ui/app.slint:702
 msgid "Server mail settings updated."
 msgstr "サーバーのメール設定を更新しました。"
 
-#: ui/app.slint:700
+#: ui/app.slint:703
 msgid "Could not update server mail settings: {}"
 msgstr "サーバーのメール設定を更新できませんでした: {}"
 
-#: ui/app.slint:701
+#: ui/app.slint:704
 msgid "Folder settings require local mail data."
 msgstr "フォルダーの設定にはローカルのメールデータが必要です。"
 
-#: ui/app.slint:702
+#: ui/app.slint:705
 msgid "Updating folder settings…"
 msgstr "フォルダーの設定を更新しています…"
 
-#: ui/app.slint:703
+#: ui/app.slint:706
 msgid "Folder settings updated."
 msgstr "フォルダー設定を更新しました。"
 
-#: ui/app.slint:704
+#: ui/app.slint:707
 msgid "Could not update folder settings: {}"
 msgstr "フォルダー設定を更新できませんでした：{}"
 
-#: ui/app.slint:705
+#: ui/app.slint:708
 msgid "Sync settings require local mail data."
 msgstr "同期の設定にはローカルのメールデータが必要です。"
 
-#: ui/app.slint:706
+#: ui/app.slint:709
 msgid "Updating sync settings…"
 msgstr "同期設定を更新中…"
 
-#: ui/app.slint:707
+#: ui/app.slint:710
 msgid "Sync settings updated."
 msgstr "同期設定を更新しました。"
 
-#: ui/app.slint:708
+#: ui/app.slint:711
 msgid "Could not update sync settings: {}"
 msgstr "同期設定を更新できませんでした：{}"
 
-#: ui/app.slint:709
+#: ui/app.slint:712
 msgid "Mail history requires local mail data."
 msgstr "メールの履歴にはローカルのメールデータが必要です。"
 
-#: ui/app.slint:710
+#: ui/app.slint:713
 msgid "Updating mail history…"
 msgstr "メールの履歴を更新しています…"
 
-#: ui/app.slint:711
+#: ui/app.slint:714
 msgid "Remote images are unavailable in this minimal build."
 msgstr "この最小ビルドではリモート画像を利用できません。"
 
-#: ui/app.slint:712
+#: ui/app.slint:715
 msgid "Could not save remote-image setting: {}"
 msgstr "リモート画像の設定を保存できませんでした: {}"
 
-#: ui/app.slint:713
+#: ui/app.slint:716
 msgid "Remote sender icons unavailable: {}"
 msgstr "差出人のリモートアイコンを利用できません: {}"
 
-#: ui/app.slint:714
+#: ui/app.slint:717
 msgid "Remote images unavailable: {}"
 msgstr "リモート画像を利用できません: {}"
 
-#: ui/app.slint:715
+#: ui/app.slint:718
 msgid "Remote body images and sender favicons enabled."
 msgstr "本文のリモート画像と差出人のファビコンを有効にしました。"
 
-#: ui/app.slint:716
+#: ui/app.slint:719
 msgid "Remote images blocked."
 msgstr "リモート画像をブロックしました。"
 
-#: ui/app.slint:717
+#: ui/app.slint:720
 msgid "Could not refresh message images: {}"
 msgstr "メッセージの画像を更新できませんでした: {}"
 
-#: ui/app.slint:718
+#: ui/app.slint:721
 msgid "Remote-image loading is disabled."
 msgstr "リモート画像の読み込みは無効です。"
 
-#: ui/app.slint:719
+#: ui/app.slint:722
 msgid "Could not load message images: {}"
 msgstr "メッセージの画像を読み込めませんでした: {}"
 
-#: ui/app.slint:720
+#: ui/app.slint:723
 msgid "Sync finished, refresh failed: {}"
 msgstr "同期は完了しましたが、更新に失敗しました: {}"
 
-#: ui/app.slint:721
+#: ui/app.slint:724
 msgid "Sync complete."
 msgstr "同期が完了しました。"
 
-#: ui/app.slint:722
+#: ui/app.slint:725
 msgid "Sync failed: {}"
 msgstr "同期に失敗しました: {}"
 
-#: ui/app.slint:723
+#: ui/app.slint:726
 msgid "Local mail data is unavailable; preview data is read-only."
-msgstr "ローカルのメールデータを利用できません。プレビューデータは読み取り専用です。"
+msgstr ""
+"ローカルのメールデータを利用できません。プレビューデータは読み取り専用です。"
 
-#: ui/app.slint:724
+#: ui/app.slint:727
 msgid "Synchronizing accounts…"
 msgstr "アカウントを同期しています…"
 
-#: ui/app.slint:729
+#: ui/app.slint:732
 msgid "Message action completed."
 msgstr "メッセージの操作が完了しました。"
 
-#: ui/app.slint:730
+#: ui/app.slint:733
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr "完全な削除をキューに入れました。サーバーが確認するとメールは消えます。"
 
-#: ui/app.slint:731
+#: ui/app.slint:734
 msgid "Message action failed: {}"
 msgstr "メッセージの操作に失敗しました: {}"
 
-#: ui/app.slint:732
+#: ui/app.slint:735
 msgid ""
 "Your message may have gone out, but the mail server didn't confirm it. Check "
 "Sent before you send it again."
@@ -2298,434 +2319,435 @@ msgstr ""
 "メッセージは送信された可能性がありますが、メールサーバーは確認していません。"
 "再送信する前に送信済みを確認してください。"
 
-#: ui/app.slint:733
+#: ui/app.slint:736
 msgid "Message action failed: message is no longer available"
 msgstr "メッセージの操作に失敗しました: メッセージは利用できなくなりました"
 
-#: ui/app.slint:734
+#: ui/app.slint:737
 msgid "Label added."
 msgstr "ラベルを追加しました。"
 
-#: ui/app.slint:735
+#: ui/app.slint:738
 msgid "Label removed."
 msgstr "ラベルを外しました。"
 
-#: ui/app.slint:736
+#: ui/app.slint:739
 msgid "Label created and added."
 msgstr "ラベルを作成して追加しました。"
 
-#: ui/app.slint:737
+#: ui/app.slint:740
 msgid "Label created."
 msgstr "ラベルを作成しました。"
 
-#: ui/app.slint:738
+#: ui/app.slint:741
 msgid "Label updated."
 msgstr "ラベルを更新しました。"
 
-#: ui/app.slint:739
+#: ui/app.slint:742
 msgid "Label deleted."
 msgstr "ラベルを削除しました。"
 
-#: ui/app.slint:740
+#: ui/app.slint:743
 msgid "No other folder to move this mail to."
 msgstr "このメールの移動先となる他のフォルダーはありません。"
 
-#: ui/app.slint:741
+#: ui/app.slint:744
 msgid "Could not move mail: {}"
 msgstr "メールを移動できませんでした: {}"
 
-#: ui/app.slint:742
+#: ui/app.slint:745
 msgid "Snoozed until {}"
 msgstr "{} までスヌーズ中"
 
-#: ui/app.slint:743
+#: ui/app.slint:746
 msgid "Could not snooze mail: {}"
 msgstr "メールをスヌーズできませんでした：{}"
 
-#: ui/app.slint:744
+#: ui/app.slint:747
 msgid "Scheduled to send {}"
 msgstr "{} に送信予定"
 
-#: ui/app.slint:745
+#: ui/app.slint:748
 msgid "Could not schedule the message: {}"
 msgstr "メールの送信を予約できませんでした：{}"
 
-#: ui/app.slint:746
+#: ui/app.slint:749
 msgid "Could not send the message: {}"
 msgstr "メールを送信できませんでした：{}"
 
-#: ui/app.slint:747
+#: ui/app.slint:750
 msgid "Could not cancel the send: {}"
 msgstr "送信をキャンセルできませんでした：{}"
 
-#: ui/app.slint:748
+#: ui/app.slint:751
 msgid "Send cancelled. The message is a draft again."
 msgstr "送信を取り消しました。メッセージは再び下書きになりました。"
 
-#: ui/app.slint:749
+#: ui/app.slint:752
 msgid "This message is no longer scheduled."
 msgstr "このメールの送信予約はすでに解除されています。"
 
-#: ui/app.slint:750
+#: ui/app.slint:753
 msgid "Choose a reminder after the time the message goes out."
 msgstr "メッセージの送信時刻より後のリマインダーを選択してください。"
 
-#: ui/app.slint:751 ui/components/composer-actions.slint:585
+#: ui/app.slint:754 ui/components/composer-actions.slint:585
 msgid "Reminds you {} if nobody replies"
 msgstr "返信がない場合 {} に通知します"
 
-#: ui/app.slint:752
+#: ui/app.slint:755
 msgid "Could not set the reminder: {}"
 msgstr "リマインダーを設定できませんでした：{}"
 
-#: ui/app.slint:753
+#: ui/app.slint:756
 msgid "Reminder removed."
 msgstr "リマインダーを削除しました。"
 
-#: ui/app.slint:754
+#: ui/app.slint:757
 msgid "Save recovery code"
 msgstr "リカバリーコードを保存"
 
-#: ui/app.slint:755
+#: ui/app.slint:758
 msgid "Text files"
 msgstr "テキストファイル"
 
-#: ui/app.slint:756
+#: ui/app.slint:759
 msgid "No folder to copy this mail to."
 msgstr "このメールのコピー先となるフォルダーはありません。"
 
-#: ui/app.slint:757
+#: ui/app.slint:760
 msgid "Attaching the original's files…"
 msgstr "元のメールのファイルを添付しています…"
 
-#: ui/app.slint:758
+#: ui/app.slint:761
 msgid "Could not attach the original's files: {}"
 msgstr "元のメールのファイルを添付できませんでした: {}"
 
-#: ui/app.slint:759
+#: ui/app.slint:762
 msgid "Some of the original's files are over the 25 MB limit for attachments."
-msgstr "元のメールのファイルの一部が添付ファイルの 25 MB の上限を超えています。"
+msgstr ""
+"元のメールのファイルの一部が添付ファイルの 25 MB の上限を超えています。"
 
-#: ui/app.slint:760
+#: ui/app.slint:763
 msgid "Could not copy mail: {}"
 msgstr "メールをコピーできませんでした: {}"
 
-#: ui/app.slint:761
+#: ui/app.slint:764
 msgid "Moving mail to the other account…"
 msgstr "メールを別のアカウントへ移動しています…"
 
-#: ui/app.slint:762
+#: ui/app.slint:765
 msgid "Copying mail to the other account…"
 msgstr "メールを別のアカウントへコピーしています…"
 
-#: ui/app.slint:763
+#: ui/app.slint:766
 msgid "Conversation archived."
 msgid_plural "{0} conversations archived."
 msgstr[0] "{0}件のスレッドをアーカイブしました。"
 
-#: ui/app.slint:764
+#: ui/app.slint:767
 msgid "Message archived."
 msgid_plural "{0} messages archived."
 msgstr[0] "{0}件のメールをアーカイブしました。"
 
-#: ui/app.slint:765
+#: ui/app.slint:768
 msgid "Conversation moved to Trash."
 msgid_plural "{0} conversations moved to Trash."
 msgstr[0] "{0}件のスレッドをゴミ箱に移動しました。"
 
-#: ui/app.slint:766
+#: ui/app.slint:769
 msgid "Message moved to Trash."
 msgid_plural "{0} messages moved to Trash."
 msgstr[0] "{0}件のメールをゴミ箱に移動しました。"
 
-#: ui/app.slint:767
+#: ui/app.slint:770
 msgid "Conversation marked as spam."
 msgid_plural "{0} conversations marked as spam."
 msgstr[0] "{0}件のスレッドを迷惑メールに分類しました。"
 
-#: ui/app.slint:768
+#: ui/app.slint:771
 msgid "Message marked as spam."
 msgid_plural "{0} messages marked as spam."
 msgstr[0] "{0}件のメールを迷惑メールに分類しました。"
 
-#: ui/app.slint:769
+#: ui/app.slint:772
 msgid "Conversation moved."
 msgid_plural "{0} conversations moved."
 msgstr[0] "{0}件のスレッドを移動しました。"
 
-#: ui/app.slint:770
+#: ui/app.slint:773
 msgid "Message moved."
 msgid_plural "{0} messages moved."
 msgstr[0] "{0}件のメールを移動しました。"
 
-#: ui/app.slint:771
+#: ui/app.slint:774
 msgid "Conversation marked as read."
 msgid_plural "{0} conversations marked as read."
 msgstr[0] "{0}件のスレッドを既読にしました。"
 
-#: ui/app.slint:772
+#: ui/app.slint:775
 msgid "Message marked as read."
 msgid_plural "{0} messages marked as read."
 msgstr[0] "{0}件のメールを既読にしました。"
 
-#: ui/app.slint:773
+#: ui/app.slint:776
 msgid "Conversation marked as unread."
 msgid_plural "{0} conversations marked as unread."
 msgstr[0] "{0}件のスレッドを未読にしました。"
 
-#: ui/app.slint:774
+#: ui/app.slint:777
 msgid "Message marked as unread."
 msgid_plural "{0} messages marked as unread."
 msgstr[0] "{0}件のメールを未読にしました。"
 
-#: ui/app.slint:775
+#: ui/app.slint:778
 msgid "Conversation starred."
 msgid_plural "{0} conversations starred."
 msgstr[0] "{0}件のスレッドにスターを付けました。"
 
-#: ui/app.slint:776
+#: ui/app.slint:779
 msgid "Message starred."
 msgid_plural "{0} messages starred."
 msgstr[0] "{0}件のメールにスターを付けました。"
 
-#: ui/app.slint:777
+#: ui/app.slint:780
 msgid "Conversation unstarred."
 msgid_plural "{0} conversations unstarred."
 msgstr[0] "{0}件のスレッドからスターを外しました。"
 
-#: ui/app.slint:778
+#: ui/app.slint:781
 msgid "Message unstarred."
 msgid_plural "{0} messages unstarred."
 msgstr[0] "{0}件のメールからスターを外しました。"
 
-#: ui/app.slint:779
+#: ui/app.slint:782
 msgid "This can no longer be undone."
 msgstr "これ以上は元に戻せません。"
 
-#: ui/app.slint:780
+#: ui/app.slint:783
 msgid "Could not undo: {}"
 msgstr "元に戻せませんでした: {}"
 
-#: ui/app.slint:781
+#: ui/app.slint:784
 msgid "This message names no way to unsubscribe."
 msgstr "このメッセージには配信停止の方法が記載されていません。"
 
-#: ui/app.slint:782
+#: ui/app.slint:785
 msgid "Could not unsubscribe: {}"
 msgstr "配信停止できませんでした: {}"
 
-#: ui/app.slint:783
+#: ui/app.slint:786
 msgid "Unsubscribed from {}."
 msgstr "{}の配信を停止しました。"
 
-#: ui/app.slint:784
+#: ui/app.slint:787
 msgid "Unsubscribe request sent to {}."
 msgstr "{} に配信停止のリクエストを送信しました。"
 
-#: ui/app.slint:785
+#: ui/app.slint:788
 msgid "Blocked {}."
 msgstr "{} をブロックしました。"
 
-#: ui/app.slint:786
+#: ui/app.slint:789
 msgid "Unblocked {}."
 msgstr "{} のブロックを解除しました。"
 
-#: ui/app.slint:787
+#: ui/app.slint:790
 msgid "Could not block: {}"
 msgstr "ブロックできませんでした: {}"
 
-#: ui/app.slint:788
+#: ui/app.slint:791
 msgid "Could not unblock: {}"
 msgstr "ブロックを解除できませんでした: {}"
 
-#: ui/app.slint:789
+#: ui/app.slint:792
 msgid "Moved one message to the other account."
 msgid_plural "Moved {0} messages to the other account."
 msgstr[0] "{0} 件のメッセージを別のアカウントへ移動しました。"
 
-#: ui/app.slint:790
+#: ui/app.slint:793
 msgid "Copied one message to the other account."
 msgid_plural "Copied {0} messages to the other account."
 msgstr[0] "{0} 件のメッセージを別のアカウントへコピーしました。"
 
-#: ui/app.slint:791
+#: ui/app.slint:794
 msgid "Moved or copied one message to the other account."
 msgid_plural "Moved or copied {0} messages to the other account."
 msgstr[0] "{0} 件のメッセージを別のアカウントへ移動またはコピーしました。"
 
-#: ui/app.slint:792
+#: ui/app.slint:795
 msgid "The other account had that message already."
 msgid_plural "The other account had those {0} messages already."
 msgstr[0] "別のアカウントには既にその {0} 件のメッセージがありました。"
 
-#: ui/app.slint:793
+#: ui/app.slint:796
 msgid "Could not move or copy one message: {1}"
 msgid_plural "Could not move or copy {0} messages: {1}"
 msgstr[0] "{0} 件のメッセージを移動またはコピーできませんでした: {1}"
 
-#: ui/app.slint:794
+#: ui/app.slint:797
 msgid "Could not update label: {}"
 msgstr "ラベルを更新できませんでした: {}"
 
-#: ui/app.slint:795
+#: ui/app.slint:798
 msgid "Could not save label: {}"
 msgstr "ラベルを保存できませんでした: {}"
 
-#: ui/app.slint:796
+#: ui/app.slint:799
 msgid "Could not delete label: {}"
 msgstr "ラベルを削除できませんでした: {}"
 
-#: ui/app.slint:797
+#: ui/app.slint:800
 msgid "Folder created."
 msgstr "フォルダーを作りました。"
 
-#: ui/app.slint:798
+#: ui/app.slint:801
 msgid "Folder renamed."
 msgstr "フォルダー名を変更しました。"
 
-#: ui/app.slint:799
+#: ui/app.slint:802
 msgid "Folder deleted."
 msgstr "フォルダーを削除しました。"
 
-#: ui/app.slint:800
+#: ui/app.slint:803
 msgid "Could not create folder: {}"
 msgstr "フォルダーを作成できませんでした: {}"
 
-#: ui/app.slint:801
+#: ui/app.slint:804
 msgid "Could not rename folder: {}"
 msgstr "フォルダー名を変更できませんでした: {}"
 
-#: ui/app.slint:802
+#: ui/app.slint:805
 msgid "Could not delete folder: {}"
 msgstr "フォルダーを削除できませんでした: {}"
 
-#: ui/app.slint:803
+#: ui/app.slint:806
 msgid "Could not close preview: {}"
 msgstr "プレビューを閉じられませんでした: {}"
 
-#: ui/app.slint:804
+#: ui/app.slint:807
 msgid "Opened the system print view."
 msgstr "システムの印刷ビューを開きました。"
 
-#: ui/app.slint:805
+#: ui/app.slint:808
 msgid "Could not print message: {}"
 msgstr "メッセージを印刷できませんでした: {}"
 
-#: ui/app.slint:806
+#: ui/app.slint:809
 msgid "Opened the message in your browser."
 msgstr "メッセージをブラウザーで開きました。"
 
-#: ui/app.slint:807
+#: ui/app.slint:810
 msgid "Could not open message in browser: {}"
 msgstr "メッセージをブラウザーで開けませんでした: {}"
 
-#: ui/app.slint:808
+#: ui/app.slint:811
 msgid "Connect an account before replying or forwarding."
 msgstr "返信や転送の前に、アカウントを接続してください。"
 
-#: ui/app.slint:809
+#: ui/app.slint:812
 msgid "Choose a message first."
 msgstr "先にメッセージを選択してください。"
 
-#: ui/app.slint:810
+#: ui/app.slint:813
 msgid "Only drafts can be reopened for editing."
 msgstr "再び開いて編集できるのは下書きのみです。"
 
-#: ui/app.slint:811
+#: ui/app.slint:814
 msgid "Could not open draft: {}"
 msgstr "下書きを開けませんでした: {}"
 
-#: ui/app.slint:812
+#: ui/app.slint:815
 msgid "Could not open draft: invalid account identifier"
 msgstr "下書きを開けませんでした: アカウント識別子が無効です"
 
-#: ui/app.slint:813
+#: ui/app.slint:816
 msgid "Connected account"
 msgstr "接続済みのアカウント"
 
-#: ui/app.slint:814
+#: ui/app.slint:817
 msgid "Could not open composer: {}"
 msgstr "メール作成画面を開けませんでした: {}"
 
-#: ui/app.slint:815
+#: ui/app.slint:818
 msgid "Add an account to send mail."
 msgstr "メールを送信するには、アカウントを追加してください。"
 
-#: ui/app.slint:816 ui/components/sidebar.slint:686
+#: ui/app.slint:819 ui/components/sidebar.slint:686
 #: ui/dialogs/settings-dialog.slint:2525
 msgid "On this device"
 msgstr "このデバイス上"
 
-#: ui/app.slint:817
+#: ui/app.slint:820
 msgid "Could not open composer: invalid account identifier"
 msgstr "メール作成画面を開けませんでした: アカウント識別子が無効です"
 
 #. Reply and forward quotation headers, written into the draft.
-#: ui/app.slint:823
+#: ui/app.slint:826
 msgid "On {}, {} wrote:"
 msgstr "{} に {} さんは書きました:"
 
-#: ui/app.slint:824
+#: ui/app.slint:827
 msgid "{} wrote:"
 msgstr "{} さんは書きました:"
 
-#: ui/app.slint:825 ui/components/email-composer.slint:944
+#: ui/app.slint:828 ui/components/email-composer.slint:944
 msgid "Forwarded message"
 msgstr "転送されたメッセージ"
 
-#: ui/app.slint:826
+#: ui/app.slint:829
 msgid "All profiles"
 msgstr "すべてのプロファイル"
 
-#: ui/app.slint:827
+#: ui/app.slint:830
 msgid "A saved search named “{}” already exists."
 msgstr "「{}」という名前の保存済み検索は既に存在します。"
 
-#: ui/app.slint:828
+#: ui/app.slint:831
 msgid "Couldn't save the search: {}"
 msgstr "検索条件を保存できませんでした：{}"
 
-#: ui/app.slint:829
+#: ui/app.slint:832
 msgctxt "forwarded message header"
 msgid "From: {}"
 msgstr "差出人: {}"
 
-#: ui/app.slint:830
+#: ui/app.slint:833
 msgctxt "forwarded message header"
 msgid "Date: {}"
 msgstr "日付: {}"
 
-#: ui/app.slint:831
+#: ui/app.slint:834
 msgctxt "forwarded message header"
 msgid "Subject: {}"
 msgstr "件名: {}"
 
-#: ui/app.slint:832
+#: ui/app.slint:835
 msgctxt "forwarded message header"
 msgid "To: {}"
 msgstr "宛先: {}"
 
-#: ui/app.slint:833
+#: ui/app.slint:836
 msgid "Attach files to this email"
 msgstr "このメールにファイルを添付"
 
-#: ui/app.slint:834
+#: ui/app.slint:837
 msgid "Could not add attachments: {}"
 msgstr "添付ファイルを追加できませんでした: {}"
 
-#: ui/app.slint:835
+#: ui/app.slint:838
 msgid "Could not show the quoted message: {}"
 msgstr "引用メッセージを表示できませんでした: {}"
 
-#: ui/app.slint:836
+#: ui/app.slint:839
 msgid "Added 1 attachment."
 msgstr "添付ファイルを 1 件追加しました。"
 
-#: ui/app.slint:837
+#: ui/app.slint:840
 msgid "Added {} attachments."
 msgstr "添付ファイルを {} 件追加しました。"
 
-#: ui/app.slint:838
+#: ui/app.slint:841
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
@@ -2733,210 +2755,212 @@ msgstr ""
 "追加された添付ファイル: {}。スキップ: {}(重複、読み取れない、または合計 25 "
 "MB の上限を超えています)。"
 
-#: ui/app.slint:839
+#: ui/app.slint:842
 msgid "Attachment removed."
 msgstr "添付ファイルを削除しました。"
 
-#: ui/app.slint:840
+#: ui/app.slint:843
 msgid "Insert images in this email"
 msgstr "このメールに画像を挿入"
 
-#: ui/app.slint:841
+#: ui/app.slint:844
 msgid "Images"
 msgstr "画像"
 
-#: ui/app.slint:842
+#: ui/app.slint:845
 msgid "Could not add images: {}"
 msgstr "画像を追加できませんでした: {}"
 
-#: ui/app.slint:843
+#: ui/app.slint:846
 msgid "Attaching the message…"
 msgid_plural "Attaching {0} messages…"
 msgstr[0] "{0} 件のメールを添付中…"
 
-#: ui/app.slint:844
+#: ui/app.slint:847
 msgid "Could not attach a forwarded message: {}"
 msgstr "転送するメールを添付できませんでした：{}"
 
-#: ui/app.slint:845
+#: ui/app.slint:848
 msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr "{} は PNG、JPEG、GIF、WebP のいずれの画像でもありません。"
 
-#: ui/app.slint:846
+#: ui/app.slint:849
 msgid "Images and attachments can take up to 25 MB in all."
 msgstr "画像と添付ファイルは合計 25 MB までです。"
 
-#: ui/app.slint:847
+#: ui/app.slint:850
 msgid "At full size, the photos would take the message over 25 MB."
 msgstr "フルサイズでは、写真によりメッセージが 25 MB を超えます。"
 
-#: ui/app.slint:848
+#: ui/app.slint:851
 msgid "Formatting and pictures removed. Undo restores them."
 msgstr "書式と画像を削除しました。「元に戻す」で復元できます。"
 
-#: ui/app.slint:849
+#: ui/app.slint:852
 msgid "Give the signature a name."
 msgstr "署名の名前を入力してください。"
 
-#: ui/app.slint:850
+#: ui/app.slint:853
 msgid "A signature can hold pictures, but not attachments."
 msgstr "署名には画像を含められますが、添付ファイルは含められません。"
 
-#: ui/app.slint:851
+#: ui/app.slint:854
 msgid "Choose the account this message should be sent from."
 msgstr "このメッセージの送信元アカウントを選択してください。"
 
-#: ui/app.slint:852
+#: ui/app.slint:855
 msgid "Choose a verified sender identity for this message."
 msgstr "このメッセージの検証済み差出人 ID を選択してください。"
 
-#: ui/app.slint:853
+#: ui/app.slint:856
 msgid "Connect an account before saving or sending mail."
 msgstr "メールの保存や送信の前に、アカウントを接続してください。"
 
-#: ui/app.slint:854
+#: ui/app.slint:857
 msgid "Message queued for delivery (action {})."
 msgstr "メッセージを送信キューに入れました(操作 {})。"
 
-#: ui/app.slint:855
+#: ui/app.slint:858
 msgid "Sending message…"
 msgstr "メッセージを送信しています…"
 
-#: ui/app.slint:856
+#: ui/app.slint:859
 msgid "This message has already been sent."
 msgstr "このメッセージは既に送信されています。"
 
-#: ui/app.slint:857
+#: ui/app.slint:860
 msgid "Could not take the message back: {}"
 msgstr "メッセージを取り戻せませんでした: {}"
 
-#: ui/app.slint:858
+#: ui/app.slint:861
 msgid "Message sent."
 msgstr "メッセージを送信しました。"
 
-#: ui/app.slint:859
+#: ui/app.slint:862
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "メッセージは送信されませんでした: {} 下書きは保存されています。"
 
-#: ui/app.slint:860
+#: ui/app.slint:863
 msgid "Draft saved locally (#{})."
 msgstr "下書きをローカルに保存しました(#{})。"
 
-#: ui/app.slint:861
+#: ui/app.slint:864
 msgid "Compose failed: {}"
 msgstr "作成に失敗しました: {}"
 
-#: ui/app.slint:862
+#: ui/app.slint:865
 msgid "Could not open the message in its own window."
 msgstr "メッセージを独立したウィンドウで開けませんでした。"
 
-#: ui/app.slint:863
+#: ui/app.slint:866
 msgid ""
 "Could not open the message in its own window, so it was saved to Drafts."
-msgstr "メッセージを独立したウィンドウで開けなかったため、下書きに保存しました。"
+msgstr ""
+"メッセージを独立したウィンドウで開けなかったため、下書きに保存しました。"
 
-#: ui/app.slint:864
+#: ui/app.slint:867
 msgid "Connect an account before managing email templates."
 msgstr "メールテンプレートを管理する前に、アカウントを接続してください。"
 
-#: ui/app.slint:865
+#: ui/app.slint:868
 msgid "Could not load email templates: {}"
 msgstr "メールテンプレートを読み込めませんでした: {}"
 
-#: ui/app.slint:866
+#: ui/app.slint:869
 msgid "Enter a template name."
 msgstr "テンプレート名を入力してください。"
 
-#: ui/app.slint:867
+#: ui/app.slint:870
 msgid "Add a subject or message to the template."
 msgstr "テンプレートに件名またはメッセージを追加してください。"
 
-#: ui/app.slint:868
+#: ui/app.slint:871
 msgid "Email template saved."
 msgstr "メールテンプレートを保存しました。"
 
-#: ui/app.slint:869
+#: ui/app.slint:872
 msgid "Could not save email template: {}"
 msgstr "メールテンプレートを保存できませんでした: {}"
 
-#: ui/app.slint:870
+#: ui/app.slint:873
 msgid "Email template deleted."
 msgstr "メールテンプレートを削除しました。"
 
-#: ui/app.slint:871
+#: ui/app.slint:874
 msgid "Could not delete email template: {}"
 msgstr "メールテンプレートを削除できませんでした: {}"
 
-#: ui/app.slint:872
+#: ui/app.slint:875
 msgid "Email template is no longer available."
 msgstr "そのメールテンプレートは利用できなくなりました。"
 
-#: ui/app.slint:873
+#: ui/app.slint:876
 msgid "Email template inserted."
 msgstr "メールテンプレートを挿入しました。"
 
-#: ui/app.slint:874 ui/components/composer-actions.slint:978
+#: ui/app.slint:877 ui/components/composer-actions.slint:978
 msgid "Share files by link"
 msgstr "リンクでファイルを共有"
 
-#: ui/app.slint:875
+#: ui/app.slint:878
 msgid "Connect a storage service in Settings to send files by link."
-msgstr "リンクでファイルを送るには、設定でストレージサービスを接続してください。"
+msgstr ""
+"リンクでファイルを送るには、設定でストレージサービスを接続してください。"
 
-#: ui/app.slint:876
+#: ui/app.slint:879
 msgid "{} asks for the password {}. Pass it on another way."
 msgstr "{} はパスワード {} を求めています。別の方法で伝えてください。"
 
-#: ui/app.slint:877
+#: ui/app.slint:880
 msgid "{} couldn't go up: {}"
 msgstr "{} は上位フォルダーへ移動できませんでした: {}"
 
-#: ui/app.slint:878
+#: ui/app.slint:881
 msgid "Uploading… {}%"
 msgstr "アップロードしています… {}%"
 
-#: ui/app.slint:879 ui/app.slint:912
+#: ui/app.slint:882 ui/app.slint:915
 msgid "{} · until {}"
 msgstr "{} · {} まで"
 
-#: ui/app.slint:880
+#: ui/app.slint:883
 msgid "1 file shared by link"
 msgid_plural "{0} files shared by link"
 msgstr[0] "リンクで共有したファイル {0} 件"
 
-#: ui/app.slint:881
+#: ui/app.slint:884
 msgid "available until {}"
 msgstr "{} まで利用可能"
 
-#: ui/app.slint:882
+#: ui/app.slint:885
 msgid "password protected"
 msgstr "パスワード保護"
 
-#: ui/app.slint:883
+#: ui/app.slint:886
 msgid "Remove {} to send the message."
 msgstr "メールを送信するには {} を削除してください。"
 
-#: ui/app.slint:884
+#: ui/app.slint:887
 msgid "Files over the 25 MB limit go as links."
 msgstr "25 MB の上限を超えるファイルはリンクとして送られます。"
 
-#: ui/app.slint:885
+#: ui/app.slint:888
 msgid "Large files preference saved."
 msgstr "大容量ファイル設定を保存しました。"
 
-#: ui/app.slint:886
+#: ui/app.slint:889
 msgid "Could not save the large files preference: {}"
 msgstr "大きなファイルの設定を保存できませんでした: {}"
 
-#: ui/app.slint:887
+#: ui/app.slint:890
 msgid "Fill in {} before sending."
 msgstr "送信前に {} を入力してください。"
 
-#: ui/app.slint:888
+#: ui/app.slint:891
 msgid "Fill in {} or send again."
 msgstr "{} を入力するか、再度送信してください。"
 
-#: ui/app.slint:889
+#: ui/app.slint:892
 msgctxt ""
 "Comma-separated words that suggest a message has a file attached. Keep the "
 "English ones out: they always count."
@@ -2946,43 +2970,43 @@ msgid ""
 "letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
 msgstr "添付, 添付ファイル, 添付します, 履歴書, 職務経歴書, カバーレター"
 
-#: ui/app.slint:890
+#: ui/app.slint:893
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "メールテンプレートを挿入しましたが、使用状況を保存できませんでした: {}"
 
-#: ui/app.slint:891
+#: ui/app.slint:894
 msgid "Choose a supported account type and connection security."
 msgstr "対応しているアカウントの種類と接続のセキュリティを選択してください。"
 
-#: ui/app.slint:892
+#: ui/app.slint:895
 msgid "IMAP port must be between 1 and 65535."
 msgstr "IMAP ポートは 1〜65535 の範囲で指定してください。"
 
-#: ui/app.slint:893
+#: ui/app.slint:896
 msgid "POP3 port must be between 1 and 65535."
 msgstr "POP3 ポートは 1〜65535 の範囲で指定してください。"
 
-#: ui/app.slint:894
+#: ui/app.slint:897
 msgid "SMTP port must be between 1 and 65535."
 msgstr "SMTP ポートは 1〜65535 の範囲で指定してください。"
 
-#: ui/app.slint:895
+#: ui/app.slint:898
 msgid "Local mail data is unavailable. Retry startup."
 msgstr "ローカルのメールデータを利用できません。起動を再試行してください。"
 
-#: ui/app.slint:896
+#: ui/app.slint:899
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "JMAP を検出し、機能を確認しています…"
 
-#: ui/app.slint:897
+#: ui/app.slint:900
 msgid "Certificate imported. Connect to verify the server."
 msgstr "証明書をインポートしました。接続してサーバーを確認してください。"
 
-#: ui/app.slint:898
+#: ui/app.slint:901
 msgid "Could not load account preferences: {}"
 msgstr "アカウント設定を読み込めませんでした: {}"
 
-#: ui/app.slint:899
+#: ui/app.slint:902
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -2990,52 +3014,52 @@ msgstr ""
 "編集済みの署名は保持されています。別の署名を挿入する前にこれをメッセージ本文"
 "として残すには、「署名なし」を選択してください。"
 
-#: ui/app.slint:900
+#: ui/app.slint:903
 msgid "Certificate import failed: {}"
 msgstr "証明書のインポートに失敗しました: {}"
 
-#: ui/app.slint:901
+#: ui/app.slint:904
 msgid "Testing IMAP and SMTP connections…"
 msgstr "IMAP と SMTP の接続をテスト中…"
 
-#: ui/app.slint:902
+#: ui/app.slint:905
 msgid "Testing POP3 and SMTP connections…"
 msgstr "POP3 と SMTP の接続をテスト中…"
 
-#: ui/app.slint:903
+#: ui/app.slint:906
 msgid "Testing the IMAP connection…"
 msgstr "IMAP の接続をテスト中…"
 
-#: ui/app.slint:904
+#: ui/app.slint:907
 msgid "Testing the POP3 connection…"
 msgstr "POP3 の接続をテスト中…"
 
-#: ui/app.slint:909
+#: ui/app.slint:912
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
-"別のブラウザー認証が進行中です。完了するか、「キャンセル」を選択してください"
-"。"
+"別のブラウザー認証が進行中です。完了するか、「キャンセル」を選択してくださ"
+"い。"
 
-#: ui/app.slint:910
+#: ui/app.slint:913
 msgid "{n} account"
 msgid_plural "{n} accounts"
 msgstr[0] "{n} 件のアカウント"
 
-#: ui/app.slint:911
+#: ui/app.slint:914
 msgid "{} · from {}"
 msgstr "{}・{}から"
 
-#: ui/app.slint:913
+#: ui/app.slint:916
 msgid ""
 "POP3 accounts can't have automatic replies from Flectar Mail. Your "
 "provider's webmail may offer them."
 msgstr ""
-"POP3 アカウントでは、Flectar Mail による自動返信は利用できません。"
-"プロバイダーのウェブメールで提供されている場合があります。"
+"POP3 アカウントでは、Flectar Mail による自動返信は利用できません。プロバイ"
+"ダーのウェブメールで提供されている場合があります。"
 
-#: ui/app.slint:914
+#: ui/app.slint:917
 msgid ""
 "Flectar Mail can't set this account's automatic replies yet. Your provider's "
 "webmail can."
@@ -3043,24 +3067,25 @@ msgstr ""
 "Flectar Mail はまだこのアカウントの自動返信を設定できません。プロバイダーの"
 "ウェブメールなら設定できます。"
 
-#: ui/app.slint:915
+#: ui/app.slint:918
 msgid ""
 "Gmail answers each sender once, and again after four days. Mailing lists and "
 "spam get no reply."
 msgstr ""
-"Gmail は各差出人に 1 回、4 日経つと再度返信します。メーリングリストと迷惑"
-"メールには返信しません。"
+"Gmail は各差出人に 1 回、4 日経つと再度返信します。メーリングリストと迷惑メー"
+"ルには返信しません。"
 
-#: ui/app.slint:916
+#: ui/app.slint:919
 msgid "Outlook answers each sender once while replies are on."
 msgstr "Outlook は、自動返信が有効な間、各差出人に 1 回だけ返信します。"
 
-#: ui/app.slint:917
+#: ui/app.slint:920
 msgid ""
 "Your server answers each sender once every few days, and never mailing lists."
-msgstr "サーバーは各差出人に数日ごとに 1 回返信し、メーリングリストには返信しません。"
+msgstr ""
+"サーバーは各差出人に数日ごとに 1 回返信し、メーリングリストには返信しません。"
 
-#: ui/app.slint:918
+#: ui/app.slint:921
 msgid ""
 "Your server answers each sender once, and again after four days. Mailing "
 "lists and spam get no reply."
@@ -3068,7 +3093,7 @@ msgstr ""
 "サーバーは各差出人に 1 回、4 日経つと再度返信します。メーリングリストと迷惑"
 "メールには返信しません。"
 
-#: ui/app.slint:919
+#: ui/app.slint:922
 msgid ""
 "Flectar Mail found no way to set automatic replies on this account's server. "
 "Your provider's webmail may offer them."
@@ -3076,225 +3101,226 @@ msgstr ""
 "Flectar Mail は、このアカウントのサーバーで自動返信を設定する方法を見つけられ"
 "ませんでした。プロバイダーのウェブメールで提供されている場合があります。"
 
-#: ui/app.slint:920
+#: ui/app.slint:923
 msgid "Checking whether this account's server can send automatic replies…"
 msgstr "このアカウントのサーバーが自動返信に対応しているか確認しています…"
 
-#: ui/app.slint:921
+#: ui/app.slint:924
 msgid "Couldn't check this account's server: {}"
 msgstr "このアカウントのサーバーを確認できませんでした: {}"
 
-#: ui/app.slint:922
+#: ui/app.slint:925
 msgid "Outlook needs a last day with a first day."
 msgstr "Outlook では、最初の日を設定する場合は最後の日も必要です。"
 
-#: ui/app.slint:923
+#: ui/app.slint:926
 msgid "Senders who aren't in your contacts get no reply."
 msgstr "連絡先にない差出人には返信しません。"
 
-#: ui/app.slint:924
+#: ui/app.slint:927
 msgid ""
 "Senders outside your organization who aren't in your contacts get no reply."
 msgstr "組織外で連絡先にない差出人には返信しません。"
 
-#: ui/app.slint:925
+#: ui/app.slint:928
 msgid "Write the first day as YYYY-MM-DD."
 msgstr "最初の日は YYYY-MM-DD で入力してください。"
 
-#: ui/app.slint:926
+#: ui/app.slint:929
 msgid "Write the last day as YYYY-MM-DD."
 msgstr "最後の日は YYYY-MM-DD で入力してください。"
 
-#: ui/app.slint:927
+#: ui/app.slint:930
 msgid "The last day comes before the first."
 msgstr "最後の日は最初の日より後になるようにしてください。"
 
-#: ui/app.slint:928
+#: ui/app.slint:931
 msgid "Write the message to send."
 msgstr "送信するメッセージを入力してください。"
 
-#: ui/app.slint:929
+#: ui/app.slint:932
 msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr "ブラウザーで、Flectar Mail による Gmail 設定の変更を許可してください。"
 
-#: ui/app.slint:930 ui/network.slint:194
+#: ui/app.slint:933 ui/network.slint:194
 msgid "Saved."
 msgstr "保存しました。"
 
-#: ui/app.slint:931
+#: ui/app.slint:934
 msgid "Could not save automatic replies: {}"
 msgstr "自動返信を保存できませんでした：{}"
 
-#: ui/app.slint:932 ui/dialogs/settings-dialog.slint:2790
+#: ui/app.slint:935 ui/dialogs/settings-dialog.slint:2790
 #: ui/dialogs/settings-dialog.slint:2833 ui/views/onboarding-view.slint:174
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "このプロバイダーを有効にするには、サインイン設定でアプリキーを追加してくださ"
 "い。"
 
-#: ui/app.slint:933
+#: ui/app.slint:936
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Gmail または Outlook の OAuth を選択してください。"
 
-#: ui/app.slint:934
+#: ui/app.slint:937
 msgid "Complete sign-in in your browser, or choose Cancel here."
-msgstr "ブラウザーでサインインを完了するか、ここで「キャンセル」を選択してください。"
+msgstr ""
+"ブラウザーでサインインを完了するか、ここで「キャンセル」を選択してください。"
 
-#: ui/app.slint:935
+#: ui/app.slint:938
 msgid "Cancelling browser sign-in…"
 msgstr "ブラウザーでのサインインをキャンセルしています…"
 
-#: ui/app.slint:936
+#: ui/app.slint:939
 msgid "Finishing browser sign-in…"
 msgstr "ブラウザーでのサインインを完了しています…"
 
-#: ui/app.slint:937
+#: ui/app.slint:940
 msgid "Could not use that browser address: {}"
 msgstr "そのブラウザーアドレスは利用できません: {}"
 
-#: ui/app.slint:938
+#: ui/app.slint:941
 msgid "Calendar core is unavailable."
 msgstr "カレンダーコアを利用できません。"
 
-#: ui/app.slint:939
+#: ui/app.slint:942
 msgid "Account no longer exists."
 msgstr "アカウントは存在しません。"
 
-#: ui/app.slint:940
+#: ui/app.slint:943
 msgid "Authorize calendar access in your browser."
 msgstr "ブラウザーでカレンダーへのアクセスを承認してください。"
 
-#: ui/app.slint:941
+#: ui/app.slint:944
 msgid "OAuth app keys saved."
 msgstr "OAuth アプリキーを保存しました。"
 
-#: ui/app.slint:942
+#: ui/app.slint:945
 msgid "{} OAuth settings saved."
 msgstr "{} 件の OAuth 設定を保存しました。"
 
-#: ui/app.slint:943
+#: ui/app.slint:946
 msgid "OAuth settings failed: {}"
 msgstr "OAuth 設定に失敗しました: {}"
 
-#: ui/app.slint:944
+#: ui/app.slint:947
 msgid "Mail refresh failed: {}"
 msgstr "メールの更新に失敗しました: {}"
 
-#: ui/app.slint:945
+#: ui/app.slint:948
 msgid "Mail filter failed: {}"
 msgstr "メールのフィルター処理に失敗しました: {}"
 
-#: ui/app.slint:946
+#: ui/app.slint:949
 msgid "Mail pagination failed: {}"
 msgstr "メールのページングに失敗しました: {}"
 
-#: ui/app.slint:947
+#: ui/app.slint:950
 msgid "Could not mark message as read: {}"
 msgstr "メッセージを既読にできませんでした: {}"
 
-#: ui/app.slint:948 ui/views/mail-reading-pane.slint:199
+#: ui/app.slint:951 ui/views/mail-reading-pane.slint:199
 #: ui/views/mail-reading-pane.slint:1462
 msgid "Loading message…"
 msgstr "メッセージを読み込んでいます…"
 
-#: ui/app.slint:1019 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:1022 ui/components/workspace-navigation.slint:787
 #: ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26
 #: ui/views/onboarding-view.slint:140
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1752 ui/app.slint:1765
+#: ui/app.slint:1755 ui/app.slint:1768
 msgid "Global Labels (local only)"
 msgstr "グローバルラベル(ローカルのみ)"
 
-#: ui/app.slint:2686
+#: ui/app.slint:2689
 msgid "Drop to start a new message"
 msgstr "ドロップして新しいメッセージを作成"
 
-#: ui/app.slint:2694 ui/components/email-composer.slint:1245
+#: ui/app.slint:2697 ui/components/email-composer.slint:1245
 msgid "Pictures go in the text, and other files are attached."
 msgstr "画像は本文に入り、その他のファイルは添付されます。"
 
-#: ui/app.slint:2762
+#: ui/app.slint:2765
 msgid "Empty Trash?"
 msgstr "ゴミ箱を空にしますか？"
 
-#: ui/app.slint:2762 ui/views/files-view.slint:578
+#: ui/app.slint:2765 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "完全に削除しますか?"
 
-#: ui/app.slint:2766
+#: ui/app.slint:2769
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr "接続中のすべてのアカウントのごみ箱内のメッセージを完全に削除しますか?"
 
-#: ui/app.slint:2767
+#: ui/app.slint:2770
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "このアカウントのごみ箱内のメッセージをすべて完全に削除しますか?"
 
-#: ui/app.slint:2769
+#: ui/app.slint:2772
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "選択した会話をごみ箱から完全に削除しますか?"
 
-#: ui/app.slint:2770
+#: ui/app.slint:2773
 msgid "Permanently delete this conversation from Trash?"
 msgstr "この会話をごみ箱から完全に削除しますか?"
 
-#: ui/app.slint:2771 ui/app.slint:2797 ui/components/calendar.slint:1261
+#: ui/app.slint:2774 ui/app.slint:2800 ui/components/calendar.slint:1261
 msgid "This action cannot be undone."
 msgstr "この操作は元に戻せません。"
 
-#: ui/app.slint:2772 ui/dialogs/settings-dialog.slint:2592
+#: ui/app.slint:2775 ui/dialogs/settings-dialog.slint:2592
 msgid "Empty Trash"
 msgstr "ごみ箱を空にする"
 
-#: ui/app.slint:2772 ui/views/files-view.slint:660
+#: ui/app.slint:2775 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "完全に削除"
 
-#: ui/app.slint:2794
+#: ui/app.slint:2797
 msgid "Mark all as read?"
 msgstr "すべて既読にしますか？"
 
-#: ui/app.slint:2796
+#: ui/app.slint:2799
 msgid "All unread messages in {} will be marked as read."
 msgstr "{}内の未読メールがすべて既読になります。"
 
-#: ui/app.slint:2798
+#: ui/app.slint:2801
 msgid "Mark all as read"
 msgstr "すべて既読にする"
 
-#: ui/app.slint:2816
+#: ui/app.slint:2819
 msgid "Run this rule on the Inbox?"
 msgstr "このルールを受信トレイに実行しますか?"
 
-#: ui/app.slint:2818
+#: ui/app.slint:2821
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] "現在、そこで {n} 件のメッセージに一致します。"
 
-#: ui/app.slint:2820
+#: ui/app.slint:2823
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] "他 {n} 件は、本文がダウンロードされた後にのみ確認できます。"
 
-#: ui/app.slint:2821
+#: ui/app.slint:2824
 msgid "Undo takes it back."
 msgstr "「元に戻す」で取り消せます。"
 
-#: ui/app.slint:2822
+#: ui/app.slint:2825
 msgid "Run rule"
 msgstr "ルールを実行"
 
-#: ui/app.slint:2841
+#: ui/app.slint:2844
 msgid "Replace changes made elsewhere?"
 msgstr "他の場所で行われた変更を置き換えますか?"
 
-#: ui/app.slint:2842
+#: ui/app.slint:2845
 msgid "Run replies before your filters?"
 msgstr "フィルターの前に自動返信を実行しますか?"
 
-#: ui/app.slint:2845
+#: ui/app.slint:2848
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
@@ -3302,7 +3328,7 @@ msgstr ""
 "サーバー上に Flectar Mail が保持している自動返信スクリプトが、Flectar Mail 以"
 "外で変更されました。"
 
-#: ui/app.slint:2846
+#: ui/app.slint:2849
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
@@ -3310,43 +3336,43 @@ msgstr ""
 "サーバーはこのフィルタースクリプトを実行しています。Flectar Mail は自動返信を"
 "先に実行し、その後変更せずにこのスクリプトを実行します。"
 
-#: ui/app.slint:2848
+#: ui/app.slint:2851
 msgid "Saving replaces those changes with what you set here."
 msgstr "保存すると、これらの変更はここで設定した内容に置き換えられます。"
 
-#: ui/app.slint:2849
+#: ui/app.slint:2852
 msgid "Your filters keep running, also once replies are off."
 msgstr "フィルターは、自動返信をオフにした後も引き続き実行されます。"
 
-#: ui/app.slint:2850
+#: ui/app.slint:2853
 msgid "Replace changes"
 msgstr "変更を置き換える"
 
-#: ui/app.slint:2850
+#: ui/app.slint:2853
 msgid "Run both"
 msgstr "両方実行"
 
-#: ui/app.slint:3053
+#: ui/app.slint:3056
 msgid "Mailbox startup failed"
 msgstr "メールボックスの起動に失敗しました"
 
-#: ui/app.slint:3059
+#: ui/app.slint:3062
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail はローカルストレージを開けませんでした"
 
-#: ui/app.slint:3072
+#: ui/app.slint:3075
 msgid "Diagnostic ID: {}"
 msgstr "診断 ID: {}"
 
-#: ui/app.slint:3075
+#: ui/app.slint:3078
 msgid "Diagnostic ID {}"
 msgstr "診断 ID {}"
 
-#: ui/app.slint:3080
+#: ui/app.slint:3083
 msgid "Retry"
 msgstr "再試行"
 
-#: ui/app.slint:3088 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3091 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "診断情報をコピー"
 
@@ -3438,116 +3464,159 @@ msgstr "ここで作成した予定の招待は {} から送信されます。"
 msgid "Add CalDAV calendar"
 msgstr "CalDAV カレンダーを追加"
 
-#: ui/components/account-mail-preferences.slint:137
+#: ui/components/account-mail-preferences.slint:146
+msgid "Cc"
+msgstr "CC"
+
+#: ui/components/account-mail-preferences.slint:147
+msgid "Addresses that get a copy (optional)"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:150
+msgid "Bcc"
+msgstr "BCC"
+
+#: ui/components/account-mail-preferences.slint:151
+msgid "Addresses that get a hidden copy (optional)"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:167
+#, fuzzy
+#| msgid "Sync {}"
+msgid "Cc {}"
+msgstr "{} を同期"
+
+#: ui/components/account-mail-preferences.slint:168
+#, fuzzy
+#| msgid "Sync {}"
+msgid "Bcc {}"
+msgstr "{} を同期"
+
+#: ui/components/account-mail-preferences.slint:169
+msgid "Bcc {} from your provider"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:175
 msgid "Server allows any address at this domain"
 msgstr "サーバーはこのドメインの任意のアドレスを許可しています"
 
-#: ui/components/account-mail-preferences.slint:140
+#: ui/components/account-mail-preferences.slint:178
 msgid "Awaiting verification by the provider; cannot be selected yet"
 msgstr "プロバイダーによる確認待ちのため、まだ選択できません"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:181
 msgid "The server refused the last message from this address: {}"
 msgstr "サーバーはこのアドレスからの最新のメッセージを拒否しました: {}"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:181
 msgid "The server refused the last message from this address"
 msgstr "サーバーはこのアドレスからの最新のメッセージを拒否しました"
 
-#: ui/components/account-mail-preferences.slint:146
+#: ui/components/account-mail-preferences.slint:184
 msgid "Sign-in address · replies go to {}"
 msgstr "サインインアドレス · 返信先: {}"
 
-#: ui/components/account-mail-preferences.slint:146
+#: ui/components/account-mail-preferences.slint:184
 msgid "Sign-in address"
 msgstr "サインインアドレス"
 
-#: ui/components/account-mail-preferences.slint:150
+#: ui/components/account-mail-preferences.slint:188
 msgid "Added by you · accepted by the server · replies go to {}"
 msgstr "自分で追加 · サーバーに許可済み · 返信先: {}"
 
-#: ui/components/account-mail-preferences.slint:150
+#: ui/components/account-mail-preferences.slint:188
 msgid "Added by you · accepted by the server"
 msgstr "自分で追加 · サーバーに許可済み"
 
-#: ui/components/account-mail-preferences.slint:152
+#: ui/components/account-mail-preferences.slint:190
 msgid "Added by you · not used yet · replies go to {}"
 msgstr "自分で追加 · 未使用 · 返信先: {}"
 
-#: ui/components/account-mail-preferences.slint:152
+#: ui/components/account-mail-preferences.slint:190
 msgid "Added by you · not used yet"
 msgstr "自分で追加 · 未使用"
 
-#: ui/components/account-mail-preferences.slint:154
+#: ui/components/account-mail-preferences.slint:192
 msgid "Provided by the server · replies go to {}"
 msgstr "サーバーから提供 · 返信先: {}"
 
-#: ui/components/account-mail-preferences.slint:154
+#: ui/components/account-mail-preferences.slint:192
 msgid "Provided by the server"
 msgstr "サーバーから提供"
 
-#: ui/components/account-mail-preferences.slint:158
+#: ui/components/account-mail-preferences.slint:196
 msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgstr "差出人情報・署名・OpenPGP・自動返信"
 
-#: ui/components/account-mail-preferences.slint:159
+#: ui/components/account-mail-preferences.slint:197
 msgid ""
 "Choose an account to manage its sender identity, signature, message "
 "protection and automatic replies."
-msgstr "差出人情報・署名・メール保護・自動返信を管理するアカウントを選択します。"
+msgstr ""
+"差出人情報・署名・メール保護・自動返信を管理するアカウントを選択します。"
 
-#: ui/components/account-mail-preferences.slint:170
+#: ui/components/account-mail-preferences.slint:208
 msgid "Signatures"
 msgstr "署名"
 
-#: ui/components/account-mail-preferences.slint:171
+#: ui/components/account-mail-preferences.slint:209
 msgid "OpenPGP"
 msgstr "OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:172
+#: ui/components/account-mail-preferences.slint:210
 msgid "Automatic replies"
 msgstr "自動返信"
 
-#: ui/components/account-mail-preferences.slint:177
+#: ui/components/account-mail-preferences.slint:215
 msgid "Default sender identity"
 msgstr "デフォルトの差出人情報"
 
-#: ui/components/account-mail-preferences.slint:177
+#: ui/components/account-mail-preferences.slint:215
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr ""
 "新しいメールを作成するときに自動的に選択されます。サインイン用のメールアドレ"
 "スは変わりません。"
 
-#: ui/components/account-mail-preferences.slint:183
+#: ui/components/account-mail-preferences.slint:221
 msgid "Save sender default"
 msgstr "デフォルトを保存"
 
-#: ui/components/account-mail-preferences.slint:184
+#: ui/components/account-mail-preferences.slint:222
 msgid "Refresh sender identities"
 msgstr "差出人情報のリストを更新"
 
-#: ui/components/account-mail-preferences.slint:194
+#: ui/components/account-mail-preferences.slint:233
 #: ui/dialogs/settings-dialog.slint:3006
 msgid "Edit"
 msgstr "編集"
 
-#: ui/components/account-mail-preferences.slint:198
+#: ui/components/account-mail-preferences.slint:237
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
-"送信できるアドレスは Gmail が決定します。Gmail の設定の「アカウント」›「"
-"メールの送信元」でアドレスを追加してから、差出人 ID を更新してください。"
+"送信できるアドレスは Gmail が決定します。Gmail の設定の「アカウント」›「メー"
+"ルの送信元」でアドレスを追加してから、差出人 ID を更新してください。"
 
-#: ui/components/account-mail-preferences.slint:201
+#: ui/components/account-mail-preferences.slint:242
+msgid "Copies of mail from {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:243
 msgid "Edit sender address"
 msgstr "差出人情報を編集"
 
-#: ui/components/account-mail-preferences.slint:201
+#: ui/components/account-mail-preferences.slint:243
 msgid "Add a sender address"
 msgstr "差出人情報を追加"
 
-#: ui/components/account-mail-preferences.slint:205
+#: ui/components/account-mail-preferences.slint:248
+msgid ""
+"Your provider sets this address's name and reply-to address. Mail you write "
+"from it starts with these copies too."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:250
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
@@ -3555,7 +3624,7 @@ msgstr ""
 "サーバーでは、ワイルドカードで示されたドメインの任意のアドレスから送信できま"
 "す。差出人として選択したいアドレスを追加してください。"
 
-#: ui/components/account-mail-preferences.slint:206
+#: ui/components/account-mail-preferences.slint:251
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
 "server decides when you send; Flectar Mail shows whether it accepted the "
@@ -3565,40 +3634,46 @@ msgstr ""
 "そのアドレスから送信できるかどうかは、送信時にサーバーが判断します。Flectar "
 "Mailには、直前に送信したメールをサーバーが受け付けたかどうかが表示されます。"
 
-#: ui/components/account-mail-preferences.slint:208
+#: ui/components/account-mail-preferences.slint:253
 #: ui/dialogs/settings-dialog.slint:4446 ui/views/onboarding-view.slint:287
 msgid "Email address"
 msgstr "メールアドレス"
 
-#: ui/components/account-mail-preferences.slint:208
+#: ui/components/account-mail-preferences.slint:253
 msgid "alias@example.com"
 msgstr "alias@example.com"
 
-#: ui/components/account-mail-preferences.slint:209
+#: ui/components/account-mail-preferences.slint:254
 msgid "Sender name"
 msgstr "差出人の表示名"
 
-#: ui/components/account-mail-preferences.slint:209
+#: ui/components/account-mail-preferences.slint:254
 msgid "Name shown to recipients (optional)"
 msgstr "受信者に表示される名前（任意）"
 
-#: ui/components/account-mail-preferences.slint:210
+#: ui/components/account-mail-preferences.slint:255
 msgid "Reply-to address"
 msgstr "返信先メールアドレス"
 
-#: ui/components/account-mail-preferences.slint:210
+#: ui/components/account-mail-preferences.slint:255
 msgid "Where replies should go (optional)"
 msgstr "返信を受け取るメールアドレス（任意）"
 
-#: ui/components/account-mail-preferences.slint:214
+#: ui/components/account-mail-preferences.slint:262
+#, fuzzy
+#| msgid "Sent copies"
+msgid "Save copies"
+msgstr "送信済みメールのコピー"
+
+#: ui/components/account-mail-preferences.slint:263
 msgid "Save sender address"
 msgstr "差出人情報を保存"
 
-#: ui/components/account-mail-preferences.slint:214
+#: ui/components/account-mail-preferences.slint:263
 msgid "Add sender address"
 msgstr "送信者情報を追加"
 
-#: ui/components/account-mail-preferences.slint:215
+#: ui/components/account-mail-preferences.slint:268
 #: ui/components/rule-editor.slint:516 ui/device-sync.slint:1373
 #: ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128
 #: ui/dialogs/oauth-setup-dialog.slint:130
@@ -3609,83 +3684,96 @@ msgstr "送信者情報を追加"
 msgid "Cancel"
 msgstr "キャンセル"
 
-#: ui/components/account-mail-preferences.slint:220
+#: ui/components/account-mail-preferences.slint:275
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic Cc and Bcc"
+msgstr "自動"
+
+#: ui/components/account-mail-preferences.slint:276
+msgid ""
+"Every message you write from this account starts with these copies, and "
+"shows them so you can take them out. Each sender address can add its own."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:286
 msgid "Signature"
 msgstr "署名"
 
-#: ui/components/account-mail-preferences.slint:220
+#: ui/components/account-mail-preferences.slint:286
 msgid "Saved separately for each account."
 msgstr "アカウントごとに保存されます。"
 
-#: ui/components/account-mail-preferences.slint:236
+#: ui/components/account-mail-preferences.slint:302
 msgid "Signature preview"
 msgstr "署名のプレビュー"
 
-#: ui/components/account-mail-preferences.slint:239
+#: ui/components/account-mail-preferences.slint:305
 msgid ""
 "Signatures can have formatting and pictures. They open in the composer to "
 "write."
 msgstr "署名には書式や画像を含められます。編集するときは作成画面で開きます。"
 
-#: ui/components/account-mail-preferences.slint:241
+#: ui/components/account-mail-preferences.slint:307
 msgid "Edit signature"
 msgstr "署名を編集"
 
-#: ui/components/account-mail-preferences.slint:242
+#: ui/components/account-mail-preferences.slint:308
 msgid "New signature"
 msgstr "新しい署名"
 
-#: ui/components/account-mail-preferences.slint:246
+#: ui/components/account-mail-preferences.slint:312
 msgid "New messages"
 msgstr "新しいメール"
 
-#: ui/components/account-mail-preferences.slint:246
+#: ui/components/account-mail-preferences.slint:312
 msgid "Signature inserted when you start a message."
 msgstr "メッセージの作成を開始したときに署名を挿入します。"
 
-#: ui/components/account-mail-preferences.slint:252
+#: ui/components/account-mail-preferences.slint:318
 msgid "Replies & forwards"
 msgstr "返信と転送"
 
-#: ui/components/account-mail-preferences.slint:252
+#: ui/components/account-mail-preferences.slint:318
 msgid "Placed above the quoted message."
 msgstr "引用メッセージの上に配置します。"
 
-#: ui/components/account-mail-preferences.slint:257
+#: ui/components/account-mail-preferences.slint:323
 msgid "Save signature defaults"
 msgstr "署名の既定を保存"
 
-#: ui/components/account-mail-preferences.slint:260
+#: ui/components/account-mail-preferences.slint:326
 msgid "Message format"
 msgstr "メール形式"
 
-#: ui/components/account-mail-preferences.slint:260
+#: ui/components/account-mail-preferences.slint:326
 msgid "How new messages start. Each message can change it."
 msgstr "新しいメッセージの初期形式です。メッセージごとに変更できます。"
 
-#: ui/components/account-mail-preferences.slint:261
+#: ui/components/account-mail-preferences.slint:327
 msgctxt "message format"
 msgid "Formatted text"
 msgstr "書式付きテキスト"
 
-#: ui/components/account-mail-preferences.slint:261
+#: ui/components/account-mail-preferences.slint:327
 msgctxt "message format"
 msgid "Plain text"
 msgstr "プレーンテキスト"
 
-#: ui/components/account-mail-preferences.slint:270
+#: ui/components/account-mail-preferences.slint:336
 msgid "Plain text in replies to plain text"
 msgstr "プレーンテキストへの返信はプレーンテキスト"
 
-#: ui/components/account-mail-preferences.slint:270
+#: ui/components/account-mail-preferences.slint:336
 msgid "Replies and forwards to plain-text messages start as plain text."
-msgstr "プレーンテキストのメッセージへの返信と転送は、プレーンテキストで始まります。"
+msgstr ""
+"プレーンテキストのメッセージへの返信と転送は、プレーンテキストで始まります。"
 
-#: ui/components/account-mail-preferences.slint:277
+#: ui/components/account-mail-preferences.slint:343
 msgid "Request read receipts"
 msgstr "開封確認をリクエスト"
 
-#: ui/components/account-mail-preferences.slint:277
+#: ui/components/account-mail-preferences.slint:343
 msgid ""
 "New messages ask to be told when they're read. Each message can change it "
 "under More options."
@@ -3693,68 +3781,68 @@ msgstr ""
 "新しいメッセージは、開封時に通知するよう求めます。メッセージごとに「その他の"
 "オプション」で変更できます。"
 
-#: ui/components/account-mail-preferences.slint:292
+#: ui/components/account-mail-preferences.slint:358
 msgid "Send automatic replies"
 msgstr "自動返信を送信"
 
-#: ui/components/account-mail-preferences.slint:301
+#: ui/components/account-mail-preferences.slint:367
 msgid "FIRST DAY (OPTIONAL)"
 msgstr "最初の日(省略可)"
 
-#: ui/components/account-mail-preferences.slint:302
+#: ui/components/account-mail-preferences.slint:368
 msgid "First day"
 msgstr "最初の日"
 
-#: ui/components/account-mail-preferences.slint:302
+#: ui/components/account-mail-preferences.slint:368
 #: ui/views/contacts-view.slint:786
 msgid "YYYY-MM-DD"
 msgstr "YYYY-MM-DD"
 
-#: ui/components/account-mail-preferences.slint:306
+#: ui/components/account-mail-preferences.slint:372
 msgid "LAST DAY (OPTIONAL)"
 msgstr "最後の日(省略可)"
 
-#: ui/components/account-mail-preferences.slint:307
+#: ui/components/account-mail-preferences.slint:373
 msgid "Last day"
 msgstr "最後の日"
 
-#: ui/components/account-mail-preferences.slint:312
+#: ui/components/account-mail-preferences.slint:378
 msgid "SUBJECT"
 msgstr "件名"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:379
 msgid "Subject"
 msgstr "件名"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:379
 msgid "Such as Out of office"
 msgstr "例: 不在連絡"
 
-#: ui/components/account-mail-preferences.slint:315
+#: ui/components/account-mail-preferences.slint:381
 msgid "MESSAGE"
 msgstr "メッセージ"
 
-#: ui/components/account-mail-preferences.slint:319
+#: ui/components/account-mail-preferences.slint:385
 msgid "Message, such as I'm away until Monday and will answer when I'm back."
 msgstr "メッセージ。例: 月曜日まで不在です。戻り次第返信します。"
 
-#: ui/components/account-mail-preferences.slint:323
+#: ui/components/account-mail-preferences.slint:389
 msgid "Only reply to my contacts"
 msgstr "連絡先のみに返信"
 
-#: ui/components/account-mail-preferences.slint:329
+#: ui/components/account-mail-preferences.slint:395
 msgid "Only reply inside my organization"
 msgstr "組織内のみに返信"
 
-#: ui/components/account-mail-preferences.slint:329
+#: ui/components/account-mail-preferences.slint:395
 msgid "Senders from other domains get no reply."
 msgstr "他のドメインの差出人には返信しません。"
 
-#: ui/components/account-mail-preferences.slint:344 ui/network.slint:191
+#: ui/components/account-mail-preferences.slint:410 ui/network.slint:191
 msgid "Saving…"
 msgstr "保存しています…"
 
-#: ui/components/account-mail-preferences.slint:353
+#: ui/components/account-mail-preferences.slint:419
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
@@ -3762,7 +3850,7 @@ msgstr ""
 "OpenPGP はメッセージ本文と添付ファイルを保護します。デジタル署名により、受信"
 "者はメッセージに署名したのが誰かを確認できます。"
 
-#: ui/components/account-mail-preferences.slint:354
+#: ui/components/account-mail-preferences.slint:420
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
@@ -3770,7 +3858,7 @@ msgstr ""
 "インストール済みの GnuPG 2.x とその安全な鍵の保存を使用します。パスフレーズ"
 "は GnuPG のロック解除ダイアログで入力します。"
 
-#: ui/components/account-mail-preferences.slint:354
+#: ui/components/account-mail-preferences.slint:420
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
@@ -3778,11 +3866,11 @@ msgstr ""
 "このモバイルビルドでは OpenPGP を利用できません。対応する暗号化エンジンがない"
 "場合、保護されたアカウントは送信できません。"
 
-#: ui/components/account-mail-preferences.slint:355
+#: ui/components/account-mail-preferences.slint:421
 msgid "Create a new key"
 msgstr "新しい鍵を作成"
 
-#: ui/components/account-mail-preferences.slint:356
+#: ui/components/account-mail-preferences.slint:422
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
@@ -3790,71 +3878,71 @@ msgstr ""
 "新しい鍵の有効期限は 2 年です。GnuPG が秘密鍵をパスフレーズで保護するよう求め"
 "ます。"
 
-#: ui/components/account-mail-preferences.slint:357
+#: ui/components/account-mail-preferences.slint:423
 msgid "Your full OpenPGP fingerprint"
 msgstr "OpenPGP の完全なフィンガープリント"
 
-#: ui/components/account-mail-preferences.slint:357
+#: ui/components/account-mail-preferences.slint:423
 msgid "Your full OpenPGP key fingerprint"
 msgstr "OpenPGP 鍵の完全なフィンガープリント"
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:425
 msgid "Digitally sign messages"
 msgstr "メッセージにデジタル署名する"
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:425
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr "秘密鍵を所持していることを証明します。メッセージは暗号化されません。"
 
-#: ui/components/account-mail-preferences.slint:364
+#: ui/components/account-mail-preferences.slint:430
 msgid "Require encryption"
 msgstr "暗号化を必須にする"
 
-#: ui/components/account-mail-preferences.slint:364
+#: ui/components/account-mail-preferences.slint:430
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 "すべての受信者が検証済みで使用可能な鍵を持っていない限り、送信をブロックしま"
 "す。"
 
-#: ui/components/account-mail-preferences.slint:368
+#: ui/components/account-mail-preferences.slint:434
 msgid "Verified recipient keys"
 msgstr "検証済みの受信者の鍵"
 
-#: ui/components/account-mail-preferences.slint:369
+#: ui/components/account-mail-preferences.slint:435
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
 "verify it."
 msgstr ""
-"フィンガープリントを別の信頼できる手段で受信者と照合し、1 行に 1 件「"
-"email=フィンガープリント」の形式で入力してください。鍵をインポートしただけで"
-"は検証は完了しません。"
+"フィンガープリントを別の信頼できる手段で受信者と照合し、1 行に 1 件「email="
+"フィンガープリント」の形式で入力してください。鍵をインポートしただけでは検証"
+"は完了しません。"
 
-#: ui/components/account-mail-preferences.slint:370
+#: ui/components/account-mail-preferences.slint:436
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr "person@example.org=フィンガープリント全体"
 
-#: ui/components/account-mail-preferences.slint:371
+#: ui/components/account-mail-preferences.slint:437
 msgid "Save OpenPGP settings"
 msgstr "OpenPGP 設定を保存"
 
-#: ui/components/account-mail-preferences.slint:373
+#: ui/components/account-mail-preferences.slint:439
 msgid "Import key"
 msgstr "鍵をインポート"
 
-#: ui/components/account-mail-preferences.slint:374
+#: ui/components/account-mail-preferences.slint:440
 msgid "Export public key"
 msgstr "公開鍵をエクスポート"
 
-#: ui/components/account-mail-preferences.slint:375
+#: ui/components/account-mail-preferences.slint:441
 msgid "Show keys"
 msgstr "鍵を表示"
 
-#: ui/components/account-mail-preferences.slint:383
+#: ui/components/account-mail-preferences.slint:449
 msgid "Open message file (.eml)"
 msgstr "メッセージファイルを開く(.eml)"
 
-#: ui/components/account-mail-preferences.slint:385
+#: ui/components/account-mail-preferences.slint:451
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
@@ -3862,7 +3950,7 @@ msgstr ""
 "有効期限、失効、秘密鍵のバックアップは GnuPG で管理します。ここでは公開鍵のみ"
 "エクスポートされます。"
 
-#: ui/components/account-mail-preferences.slint:386
+#: ui/components/account-mail-preferences.slint:452
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
@@ -3872,15 +3960,15 @@ msgstr ""
 "す。サーバー上の既存の下書きは遡って保護されません。S/MIME 証明書には対応して"
 "いません。"
 
-#: ui/components/account-mail-preferences.slint:389
+#: ui/components/account-mail-preferences.slint:455
 msgid "Working…"
 msgstr "処理中…"
 
-#: ui/components/account-mail-preferences.slint:401
+#: ui/components/account-mail-preferences.slint:467
 msgid "OpenPGP message"
 msgstr "OpenPGP メッセージ"
 
-#: ui/components/account-mail-preferences.slint:404
+#: ui/components/account-mail-preferences.slint:470
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
@@ -3888,11 +3976,11 @@ msgstr ""
 "復号された内容は、リモートコンテンツなしでテキストとして表示されます。検索に"
 "は追加されず、メールデータベースにも保存されません。"
 
-#: ui/components/account-mail-preferences.slint:405
+#: ui/components/account-mail-preferences.slint:471
 msgid "Export decrypted message"
 msgstr "復号したメッセージをエクスポート"
 
-#: ui/components/account-mail-preferences.slint:406
+#: ui/components/account-mail-preferences.slint:472
 #: ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
 #: ui/components/rule-editor.slint:349
 #: ui/dialogs/attachment-preview-dialog.slint:40
@@ -3991,7 +4079,8 @@ msgstr "エージェントが読み取れる範囲"
 
 #: ui/components/agent-access-page.slint:100
 msgid "Add an email account, and agents can read it here."
-msgstr "メールアカウントを追加すると、エージェントがここで読み取れるようになります。"
+msgstr ""
+"メールアカウントを追加すると、エージェントがここで読み取れるようになります。"
 
 #: ui/components/agent-access-page.slint:124
 msgid "Agents can't read this account."
@@ -4018,8 +4107,8 @@ msgid ""
 "Agents can save drafts in Drafts for you to check and send. They can't send "
 "anything themselves."
 msgstr ""
-"エージェントは、確認して送信できるよう下書きフォルダーに下書きを保存できます"
-"。自分で送信することはできません。"
+"エージェントは、確認して送信できるよう下書きフォルダーに下書きを保存できま"
+"す。自分で送信することはできません。"
 
 #: ui/components/agent-access-page.slint:190
 msgid "Mark messages"
@@ -4027,7 +4116,8 @@ msgstr "メールの状態を変更"
 
 #: ui/components/agent-access-page.slint:191
 msgid "Agents can mark messages read or unread, and flag them."
-msgstr "エージェントは、メッセージを既読/未読にしたり、フラグを付けたりできます。"
+msgstr ""
+"エージェントは、メッセージを既読/未読にしたり、フラグを付けたりできます。"
 
 #: ui/components/agent-access-page.slint:200
 msgid "Move messages"
@@ -4111,9 +4201,9 @@ msgid ""
 "data, but no agent is immune to instructions hidden in mail, so give agents "
 "only what they need."
 msgstr ""
-"メッセージの内容は差出人が書いたものです。信頼できるエージェントはそれを"
-"データとして扱いますが、メールに隠された指示に耐性のあるエージェントはないた"
-"め、必要な範囲だけをエージェントに与えてください。"
+"メッセージの内容は差出人が書いたものです。信頼できるエージェントはそれをデー"
+"タとして扱いますが、メールに隠された指示に耐性のあるエージェントはないため、"
+"必要な範囲だけをエージェントに与えてください。"
 
 #: ui/components/app-icon-picker.slint:97
 msgid "App icon"
@@ -4140,8 +4230,8 @@ msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers remove the "
 "old icon from the home screen."
 msgstr ""
-"新しいアイコンは Flectar Mail を終了すると表示されます。ランチャーによっては"
-"、古いアイコンがホーム画面から削除されることがあります。"
+"新しいアイコンは Flectar Mail を終了すると表示されます。ランチャーによって"
+"は、古いアイコンがホーム画面から削除されることがあります。"
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -4780,7 +4870,8 @@ msgstr "翻訳結果が選択テキストと入れ替わります。「元に戻
 msgid ""
 "The translation takes the place of what you wrote. Undo brings the original "
 "back."
-msgstr "翻訳結果が入力したテキストと入れ替わります。「元に戻す」で原文に戻せます。"
+msgstr ""
+"翻訳結果が入力したテキストと入れ替わります。「元に戻す」で原文に戻せます。"
 
 #: ui/components/composer-actions.slint:1571 ui/translation.slint:423
 msgid "Translate into"
@@ -4851,17 +4942,9 @@ msgstr "宛先"
 msgid "name@example.com · separate with commas"
 msgstr "name@example.com・コンマ区切り"
 
-#: ui/components/composer-fields.slint:392
-msgid "Cc"
-msgstr "CC"
-
 #: ui/components/composer-fields.slint:393
 msgid "Carbon copy"
 msgstr "CCを入力"
-
-#: ui/components/composer-fields.slint:403
-msgid "Bcc"
-msgstr "BCC"
 
 #: ui/components/composer-fields.slint:404
 msgid "Blind carbon copy"
@@ -5447,9 +5530,9 @@ msgid ""
 "here. Only trust certificates from your server administrator. Server names "
 "and expiry dates are still checked."
 msgstr ""
-"Proton Bridge の場合は、Bridge 設定から証明書をエクスポートしてここで"
-"インポートしてください。サーバー管理者が提供した証明書のみ信頼してください。"
-"サーバー名と有効期限は引き続き確認されます。"
+"Proton Bridge の場合は、Bridge 設定から証明書をエクスポートしてここでインポー"
+"トしてください。サーバー管理者が提供した証明書のみ信頼してください。サーバー"
+"名と有効期限は引き続き確認されます。"
 
 #: ui/components/mail-security-fields.slint:138
 msgid "Import certificate file"
@@ -5479,7 +5562,8 @@ msgstr "メール送信"
 msgid ""
 "Turn off for an account that only receives mail. It then needs no SMTP "
 "server."
-msgstr "受信のみのアカウントではオフにします。その場合、SMTP サーバーは不要です。"
+msgstr ""
+"受信のみのアカウントではオフにします。その場合、SMTP サーバーは不要です。"
 
 #: ui/components/mail-security-fields.slint:282
 msgid "POP3 sign-in"
@@ -5561,8 +5645,8 @@ msgid ""
 "If the final browser page says localhost can’t be reached, copy its full "
 "address and paste it below."
 msgstr ""
-"最後のブラウザーページで localhost に接続できないと表示された場合は、完全な"
-"アドレスをコピーして以下に貼り付けてください。"
+"最後のブラウザーページで localhost に接続できないと表示された場合は、完全なア"
+"ドレスをコピーして以下に貼り付けてください。"
 
 #: ui/components/oauth-browser-help.slint:89
 msgid "Final browser address"
@@ -5960,8 +6044,8 @@ msgid ""
 "compare addresses there, include the @, as in @example.com."
 msgstr ""
 "サーバーは名前を比較できないため、Flectar Mail が開いている間に実行されます。"
-"サーバー側でアドレスを比較するには、@example.com のように @ を含めてください"
-"。"
+"サーバー側でアドレスを比較するには、@example.com のように @ を含めてくださ"
+"い。"
 
 #: ui/components/rule-editor.slint:479
 msgid ""
@@ -6060,7 +6144,8 @@ msgstr "検索のヒント"
 msgid ""
 "Search on server, at the end of the results, finds mail that isn't on this "
 "device."
-msgstr "結果の最後の「サーバーで検索」で、このデバイスにないメールを検索します。"
+msgstr ""
+"結果の最後の「サーバーで検索」で、このデバイスにないメールを検索します。"
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -6607,8 +6692,8 @@ msgid ""
 "Sync was deleted on another device. This device keeps its accounts and "
 "settings. Turn sync on again to start over."
 msgstr ""
-"同期は別のデバイスで削除されました。このデバイスのアカウントと設定は残ります"
-"。やり直すには、同期をもう一度有効にしてください。"
+"同期は別のデバイスで削除されました。このデバイスのアカウントと設定は残りま"
+"す。やり直すには、同期をもう一度有効にしてください。"
 
 #: ui/device-sync.slint:641
 msgid "Could not turn on sync: {}"
@@ -6616,7 +6701,8 @@ msgstr "同期を有効にできませんでした: {}"
 
 #: ui/device-sync.slint:642 ui/device-sync.slint:1083
 msgid "Enter the sync server's address, such as https://sync.example.com."
-msgstr "同期サーバーのアドレスを入力してください(例: https://sync.example.com)。"
+msgstr ""
+"同期サーバーのアドレスを入力してください(例: https://sync.example.com)。"
 
 #: ui/device-sync.slint:643
 msgid "Could not remove the device: {}"
@@ -6740,7 +6826,8 @@ msgstr "同期が完了せず、再試行されます。"
 
 #: ui/device-sync.slint:734
 msgid "Changes made here wait to upload; nothing is lost."
-msgstr "ここで行った変更はアップロードを待っています。失われるものはありません。"
+msgstr ""
+"ここで行った変更はアップロードを待っています。失われるものはありません。"
 
 #: ui/device-sync.slint:735
 msgid "Syncing with {}"
@@ -6815,8 +6902,8 @@ msgid ""
 "A code makes sync free until {}. Turn off renewal in Manage so you aren't "
 "charged before then."
 msgstr ""
-"コードにより、{} まで同期は無料になります。それまでに請求されないよう、「管理"
-"」で更新をオフにしてください。"
+"コードにより、{} まで同期は無料になります。それまでに請求されないよう、「管"
+"理」で更新をオフにしてください。"
 
 #: ui/device-sync.slint:786
 msgid "Then free until {}, with your code."
@@ -6907,9 +6994,9 @@ msgid ""
 "Turning off keeps this device's accounts and settings. Deleting also removes "
 "the encrypted copy from the server; each device keeps its own."
 msgstr ""
-"無効にすると、このデバイスのアカウントと設定は保持されます。削除すると、"
-"サーバーからも暗号化されたコピーが削除されます。各デバイスのコピーはそれぞれ"
-"保持されます。"
+"無効にすると、このデバイスのアカウントと設定は保持されます。削除すると、サー"
+"バーからも暗号化されたコピーが削除されます。各デバイスのコピーはそれぞれ保持"
+"されます。"
 
 #: ui/device-sync.slint:926 ui/dialogs/settings-dialog.slint:3473
 msgid "Delete…"
@@ -6970,8 +7057,8 @@ msgid ""
 "On a new device, open Settings in Flectar Mail, then Sync, choose Recovery "
 "code and enter these 24 words in order."
 msgstr ""
-"新しいデバイスでは、Flectar Mail で「設定」→「同期」を開き、「"
-"リカバリーコード」を選択して、この 24 語を順番に入力してください。"
+"新しいデバイスでは、Flectar Mail で「設定」→「同期」を開き、「リカバリーコー"
+"ド」を選択して、この 24 語を順番に入力してください。"
 
 #: ui/device-sync.slint:1174
 msgid ""
@@ -6995,9 +7082,9 @@ msgid ""
 "Flectar Mail cannot show them again."
 msgstr ""
 "すべてのデバイスを失った場合、この 24 語ですべてがサインイン済みの状態で復元"
-"されます。この語句を持つ人は、あなたとしてメールを読んだり送信したりできます"
-"。書き留めるか、パスワードマネージャーなど自分だけがアクセスできる場所に保存"
-"してください。Flectar Mail がこの語句を再表示することはできません。"
+"されます。この語句を持つ人は、あなたとしてメールを読んだり送信したりできま"
+"す。書き留めるか、パスワードマネージャーなど自分だけがアクセスできる場所に保"
+"存してください。Flectar Mail がこの語句を再表示することはできません。"
 
 #: ui/device-sync.slint:1183
 msgid ""
@@ -7044,8 +7131,8 @@ msgid ""
 "On your phone or other device, open Flectar Mail, go to Settings → Sync → "
 "Connect this device, and scan this code."
 msgstr ""
-"スマートフォンまたは他のデバイスで Flectar Mail を開き、「設定」→「同期」→「"
-"このデバイスを接続」に進んで、このコードをスキャンしてください。"
+"スマートフォンまたは他のデバイスで Flectar Mail を開き、「設定」→「同期」→"
+"「このデバイスを接続」に進んで、このコードをスキャンしてください。"
 
 #: ui/device-sync.slint:1285
 msgid "QR code for adding a device"
@@ -7068,16 +7155,19 @@ msgstr ""
 
 #: ui/device-sync.slint:1310
 msgid "A new device asks to join. Add it if it's yours."
-msgstr "新しいデバイスが参加を求めています。自分のデバイスであれば追加してください。"
+msgstr ""
+"新しいデバイスが参加を求めています。自分のデバイスであれば追加してください。"
 
 #: ui/device-sync.slint:1324
 msgid "The device is joining. Your accounts will be ready there in a moment."
-msgstr "デバイスが参加しています。まもなくそこでアカウントが使えるようになります。"
+msgstr ""
+"デバイスが参加しています。まもなくそこでアカウントが使えるようになります。"
 
 #: ui/device-sync.slint:1325
 msgid ""
 "The device is joining. It will ask you to sign in to your accounts once."
-msgstr "デバイスが参加しています。アカウントへのサインインを 1 回求められます。"
+msgstr ""
+"デバイスが参加しています。アカウントへのサインインを 1 回求められます。"
 
 #: ui/device-sync.slint:1332
 msgid "The device was not added."
@@ -7091,7 +7181,8 @@ msgstr ""
 
 #: ui/device-sync.slint:1334 ui/device-sync.slint:1444
 msgid "That QR code isn't for Flectar Mail Sync, or it expired."
-msgstr "その QR コードは Flectar Mail Sync のものではないか、有効期限が切れています。"
+msgstr ""
+"その QR コードは Flectar Mail Sync のものではないか、有効期限が切れています。"
 
 #: ui/device-sync.slint:1351
 msgid "Show QR code"
@@ -7118,8 +7209,8 @@ msgid ""
 "On your other device, go to Settings → Sync → Add a device → Use a code. "
 "Enter the code it shows:"
 msgstr ""
-"別のデバイスで「設定」→「同期」→「デバイスを追加」→「コードを使用」に進みます"
-"。表示されたコードを入力してください:"
+"別のデバイスで「設定」→「同期」→「デバイスを追加」→「コードを使用」に進みま"
+"す。表示されたコードを入力してください:"
 
 #: ui/device-sync.slint:1422
 msgid ""
@@ -7139,7 +7230,8 @@ msgstr "別のデバイスはこのデバイスを追加しませんでした。
 
 #: ui/device-sync.slint:1441
 msgid "The code expired. Get a new one on your other device."
-msgstr "コードの有効期限が切れました。別のデバイスで新しいコードを取得してください。"
+msgstr ""
+"コードの有効期限が切れました。別のデバイスで新しいコードを取得してください。"
 
 #: ui/device-sync.slint:1442
 msgid ""
@@ -7233,7 +7325,8 @@ msgstr "自分の回答"
 
 #: ui/dialogs/calendar-details-dialog.slint:88
 msgid "Answer for only this event, or for every event in the series?"
-msgstr "この予定のみに回答しますか、それともシリーズのすべての予定に回答しますか?"
+msgstr ""
+"この予定のみに回答しますか、それともシリーズのすべての予定に回答しますか?"
 
 #: ui/dialogs/calendar-details-dialog.slint:99
 msgid "This event"
@@ -7391,8 +7484,8 @@ msgstr "フォルダーを削除しますか?"
 msgid ""
 "Delete “{}” and all nested labels from “{}”? Messages will not be deleted."
 msgstr ""
-"「{}」と「{}」内のすべての階層ラベルを削除しますか?メッセージは削除されません"
-"。"
+"「{}」と「{}」内のすべての階層ラベルを削除しますか?メッセージは削除されませ"
+"ん。"
 
 #: ui/dialogs/folder-dialog.slint:74
 msgid "Delete “{}” from “{}”? Messages will not be deleted."
@@ -7440,16 +7533,19 @@ msgstr "受信メールサーバーが設定されていません。"
 
 #: ui/dialogs/import-dialog.slint:132
 msgid "The incoming server {} uses a protocol Flectar Mail does not support."
-msgstr "受信サーバー {} は、Flectar Mail が対応していないプロトコルを使用しています。"
+msgstr ""
+"受信サーバー {} は、Flectar Mail が対応していないプロトコルを使用しています。"
 
 #: ui/dialogs/import-dialog.slint:133
 msgid ""
 "No outgoing mail server is configured, so the account only receives mail."
-msgstr "送信メールサーバーが設定されていないため、このアカウントは受信のみです。"
+msgstr ""
+"送信メールサーバーが設定されていないため、このアカウントは受信のみです。"
 
 #: ui/dialogs/import-dialog.slint:134
 msgid "The outgoing server {} uses a protocol Flectar Mail does not support."
-msgstr "送信サーバー {} は、Flectar Mail が対応していないプロトコルを使用しています。"
+msgstr ""
+"送信サーバー {} は、Flectar Mail が対応していないプロトコルを使用しています。"
 
 #: ui/dialogs/import-dialog.slint:135
 msgid ""
@@ -7481,7 +7577,8 @@ msgstr ""
 msgid ""
 "The incoming server connects without signing in, which Flectar Mail does not "
 "support."
-msgstr "受信サーバーはサインインなしで接続します。Flectar Mail は対応していません。"
+msgstr ""
+"受信サーバーはサインインなしで接続します。Flectar Mail は対応していません。"
 
 #: ui/dialogs/import-dialog.slint:140
 msgid ""
@@ -7494,7 +7591,8 @@ msgstr ""
 #: ui/dialogs/import-dialog.slint:141
 msgid ""
 "The incoming server signs in with {}, which Flectar Mail does not support."
-msgstr "受信サーバーは {} でサインインします。Flectar Mail は対応していません。"
+msgstr ""
+"受信サーバーは {} でサインインします。Flectar Mail は対応していません。"
 
 #: ui/dialogs/import-dialog.slint:142
 msgid ""
@@ -7507,7 +7605,8 @@ msgstr ""
 #: ui/dialogs/import-dialog.slint:143
 msgid ""
 "The outgoing server signs in with {}, which Flectar Mail does not support."
-msgstr "送信サーバーは {} でサインインします。Flectar Mail は対応していません。"
+msgstr ""
+"送信サーバーは {} でサインインします。Flectar Mail は対応していません。"
 
 #: ui/dialogs/import-dialog.slint:144
 msgid ""
@@ -7548,8 +7647,8 @@ msgid ""
 "The account signs in as {}, which is not an email address. Add it with its "
 "own address instead."
 msgstr ""
-"このアカウントは {} でサインインしますが、これはメールアドレスではありません"
-"。専用のアドレスで追加してください。"
+"このアカウントは {} でサインインしますが、これはメールアドレスではありませ"
+"ん。専用のアドレスで追加してください。"
 
 #: ui/dialogs/import-dialog.slint:152
 msgid ""
@@ -7564,7 +7663,8 @@ msgstr "プロバイダーの標準の送信サーバーが {} を置き換え�
 
 #: ui/dialogs/import-dialog.slint:154
 msgid "This account syncs with {} instead of downloading mail with POP3."
-msgstr "このアカウントは POP3 でメールをダウンロードする代わりに、{} と同期します。"
+msgstr ""
+"このアカウントは POP3 でメールをダウンロードする代わりに、{} と同期します。"
 
 #: ui/dialogs/import-dialog.slint:155 ui/dialogs/settings-dialog.slint:3210
 msgid "Mail is removed from the server once it's on this device."
@@ -7594,7 +7694,8 @@ msgstr ""
 msgid "One other address is managed by Gmail and appears after you sign in."
 msgid_plural ""
 "{n} other addresses are managed by Gmail and appear after you sign in."
-msgstr[0] "他の {n} 件のアドレスは Gmail で管理されており、サインイン後に表示されます。"
+msgstr[0] ""
+"他の {n} 件のアドレスは Gmail で管理されており、サインイン後に表示されます。"
 
 #: ui/dialogs/import-dialog.slint:160
 msgid ""
@@ -7604,12 +7705,13 @@ msgid_plural ""
 "{n} sending addresses were not imported because they are invalid or use "
 "another outgoing server."
 msgstr[0] ""
-"送信アドレス {n} 件は、無効であるか別の送信サーバーを使用しているため、"
-"インポートされませんでした。"
+"送信アドレス {n} 件は、無効であるか別の送信サーバーを使用しているため、イン"
+"ポートされませんでした。"
 
 #: ui/dialogs/import-dialog.slint:161
 msgid "A signature stored in a file outside the profile was not imported."
-msgstr "プロフィール外のファイルに保存されていた署名はインポートされませんでした。"
+msgstr ""
+"プロフィール外のファイルに保存されていた署名はインポートされませんでした。"
 
 #: ui/dialogs/import-dialog.slint:162
 msgid "A signature larger than 32 KB was not imported."
@@ -7629,10 +7731,10 @@ msgid ""
 "Thunderbird profile export or prefs.js, a Flectar Mail backup, or mail saved "
 "as .mbox or .eml files."
 msgstr ""
-"対応している設定のエクスポートまたはメールファイルではありません。.k9s "
-"ファイル、Thunderbird プロフィールのエクスポートまたは prefs.js、Flectar "
-"Mail のバックアップ、.mbox または .eml ファイルとして保存されたメールを選択し"
-"てください。"
+"対応している設定のエクスポートまたはメールファイルではありません。.k9s ファイ"
+"ル、Thunderbird プロフィールのエクスポートまたは prefs.js、Flectar Mail の"
+"バックアップ、.mbox または .eml ファイルとして保存されたメールを選択してくだ"
+"さい。"
 
 #: ui/dialogs/import-dialog.slint:170
 msgid "The file is damaged: {}"
@@ -7683,8 +7785,8 @@ msgid ""
 "The import stopped: {}. The mail imported until then was kept, and importing "
 "the same mail again adds the rest."
 msgstr ""
-"インポートが停止しました: {}。それまでにインポートしたメールは保持されており"
-"、同じメールを再度インポートすると残りが追加されます。"
+"インポートが停止しました: {}。それまでにインポートしたメールは保持されてお"
+"り、同じメールを再度インポートすると残りが追加されます。"
 
 #: ui/dialogs/import-dialog.slint:179
 msgid "Import failed: {}"
@@ -7727,8 +7829,8 @@ msgid ""
 "Local Folders kept outside the profile were not found. Choose their folder "
 "to import them."
 msgstr ""
-"プロフィール外に保存されたローカルフォルダーが見つかりませんでした。"
-"インポートするには、そのフォルダーを選択してください。"
+"プロフィール外に保存されたローカルフォルダーが見つかりませんでした。インポー"
+"トするには、そのフォルダーを選択してください。"
 
 #: ui/dialogs/import-dialog.slint:229
 msgid "Local Folders kept outside the profile were not found."
@@ -7809,10 +7911,10 @@ msgid ""
 "a Flectar Mail backup, and mail from Thunderbird or saved mail files. "
 "Passwords are never imported: you sign in to each account afterward."
 msgstr ""
-"Thunderbird、Thunderbird for Android、K-9 Mail、または Flectar Mail の"
-"バックアップからアカウントを、Thunderbird または保存されたメールファイルから"
-"メールを取り込みます。パスワードはインポートされません。後で各アカウントに"
-"サインインしてください。"
+"Thunderbird、Thunderbird for Android、K-9 Mail、または Flectar Mail のバック"
+"アップからアカウントを、Thunderbird または保存されたメールファイルからメール"
+"を取り込みます。パスワードはインポートされません。後で各アカウントにサインイ"
+"ンしてください。"
 
 #: ui/dialogs/import-dialog.slint:497
 msgid "Thunderbird on this device"
@@ -7844,8 +7946,8 @@ msgid ""
 "profile exports (.zip) and prefs.js, Flectar Mail backups (.json), and mail "
 "saved as .mbox or .eml files or in ZIP archives of them."
 msgstr ""
-"対応形式: Thunderbird for Android と K-9 Mail の設定(.k9s)、Thunderbird "
-"プロフィールのエクスポート(.zip)と prefs.js、Flectar Mail のバックアップ"
+"対応形式: Thunderbird for Android と K-9 Mail の設定(.k9s)、Thunderbird プロ"
+"フィールのエクスポート(.zip)と prefs.js、Flectar Mail のバックアップ"
 "(.json)、.mbox または .eml ファイルとして保存されたメール、およびそれらを含"
 "む ZIP アーカイブ。"
 
@@ -7907,8 +8009,8 @@ msgid ""
 "Mail stays on this device unless you choose an account for it. Messages "
 "already there are skipped, so an import can be repeated."
 msgstr ""
-"アカウントを選択しない限り、メールはこのデバイスに残ります。既に存在する"
-"メッセージはスキップされるため、インポートを繰り返せます。"
+"アカウントを選択しない限り、メールはこのデバイスに残ります。既に存在するメッ"
+"セージはスキップされるため、インポートを繰り返せます。"
 
 #: ui/dialogs/import-dialog.slint:718
 msgid ""
@@ -7931,8 +8033,8 @@ msgstr[0] "選択したフォルダー {n} 件、{}"
 msgid "Imported one account. Sign in to it to start syncing."
 msgid_plural "Imported {n} accounts. Sign in to each one to start syncing."
 msgstr[0] ""
-"{n} 件のアカウントをインポートしました。同期を開始するには、それぞれ"
-"サインインしてください。"
+"{n} 件のアカウントをインポートしました。同期を開始するには、それぞれサインイ"
+"ンしてください。"
 
 #: ui/dialogs/import-dialog.slint:755
 msgid "No accounts were imported."
@@ -7942,7 +8044,8 @@ msgstr "インポートされたアカウントはありません。"
 msgid "One account was already in Flectar Mail and was left unchanged."
 msgid_plural ""
 "{n} accounts were already in Flectar Mail and were left unchanged."
-msgstr[0] "{n} 件のアカウントは既に Flectar Mail にあるため、変更されませんでした。"
+msgstr[0] ""
+"{n} 件のアカウントは既に Flectar Mail にあるため、変更されませんでした。"
 
 #: ui/dialogs/import-dialog.slint:767
 msgid ""
@@ -8117,16 +8220,16 @@ msgid ""
 "Use a public desktop app registration in Microsoft Entra. No client secret "
 "is needed."
 msgstr ""
-"Microsoft Entra では、公開デスクトップアプリの登録を使用します。"
-"クライアントシークレットは不要です。"
+"Microsoft Entra では、公開デスクトップアプリの登録を使用します。クライアント"
+"シークレットは不要です。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:114
 msgid ""
 "Gmail also works without app keys. Close this, choose Connect another "
 "provider, and sign in with a Google app password."
 msgstr ""
-"Gmail はアプリキーなしでも利用できます。これを閉じて「別のプロバイダーを接続"
-"」を選択し、Google のアプリパスワードでサインインしてください。"
+"Gmail はアプリキーなしでも利用できます。これを閉じて「別のプロバイダーを接"
+"続」を選択し、Google のアプリパスワードでサインインしてください。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:118
 msgid ""
@@ -8515,14 +8618,15 @@ msgid ""
 "macOS doesn't allow notifications from Flectar Mail where it is now. Move it "
 "to the Applications folder, then open it again."
 msgstr ""
-"macOS は現在の場所にある Flectar Mail からの通知を許可しません。"
-"アプリケーションフォルダーに移動してから、再度開いてください。"
+"macOS は現在の場所にある Flectar Mail からの通知を許可しません。アプリケー"
+"ションフォルダーに移動してから、再度開いてください。"
 
 #: ui/dialogs/settings-dialog.slint:854
 msgid ""
 "This system has no notification service running, so notifications can't be "
 "shown."
-msgstr "このシステムでは通知サービスが動作していないため、通知を表示できません。"
+msgstr ""
+"このシステムでは通知サービスが動作していないため、通知を表示できません。"
 
 #: ui/dialogs/settings-dialog.slint:860
 msgid "Desktop notifications"
@@ -8610,11 +8714,11 @@ msgid ""
 "font"
 msgstr ""
 "全般 テーマ 外観 パレット アプリアイコン Dock タスクバー ランチャー 言語 時"
-"刻 時計 12 時間制 24 時間制 ワークスペース レイアウト ウィンドウ "
-"フレームレス タイトルバー レンダラー プライバシー リモート画像 同期 "
-"メッセージのグループ化 日付 受信トレイ トレイ バックグラウンド 起動 "
-"サインイン ログイン ダウンロード先 フォルダー 添付ファイル 保存 タブ 会話 "
-"スレッド 動きを減らす アニメーション アクセシビリティ 文字サイズ フォント"
+"刻 時計 12 時間制 24 時間制 ワークスペース レイアウト ウィンドウ フレームレ"
+"ス タイトルバー レンダラー プライバシー リモート画像 同期 メッセージのグルー"
+"プ化 日付 受信トレイ トレイ バックグラウンド 起動 サインイン ログイン ダウン"
+"ロード先 フォルダー 添付ファイル 保存 タブ 会話 スレッド 動きを減らす アニ"
+"メーション アクセシビリティ 文字サイズ フォント"
 
 #: ui/dialogs/settings-dialog.slint:918
 msgid "sending undo send delay take back"
@@ -8659,10 +8763,9 @@ msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
 msgstr ""
-"同期 デバイス スマートフォン コンピューター ペアリング QR コード "
-"リカバリーコード 暗号化 バックアップ セットアップ サーバー "
-"サブスクリプション 請求 トライアル プラン 価格 コード利用 パスワード "
-"サインイン"
+"同期 デバイス スマートフォン コンピューター ペアリング QR コード リカバリー"
+"コード 暗号化 バックアップ セットアップ サーバー サブスクリプション 請求 トラ"
+"イアル プラン 価格 コード利用 パスワード サインイン"
 
 #: ui/dialogs/settings-dialog.slint:928
 msgid ""
@@ -8678,14 +8781,15 @@ msgid ""
 "rules filters sort incoming new mail automatically move folder label mark "
 "read star archive trash spam junk conditions actions"
 msgstr ""
-"ルール フィルター 振り分け 新着メール 自動 移動 フォルダー ラベル 既読 "
-"スター アーカイブ ごみ箱 迷惑メール 条件 アクション"
+"ルール フィルター 振り分け 新着メール 自動 移動 フォルダー ラベル 既読 ス"
+"ター アーカイブ ごみ箱 迷惑メール 条件 アクション"
 
 #: ui/dialogs/settings-dialog.slint:932
 msgid ""
 "translation translate languages foreign deepl libretranslate ai model ollama "
 "lm studio always never"
-msgstr "翻訳 言語 外国語 DeepL LibreTranslate AI モデル Ollama LM Studio 常に しない"
+msgstr ""
+"翻訳 言語 外国語 DeepL LibreTranslate AI モデル Ollama LM Studio 常に しない"
 
 #: ui/dialogs/settings-dialog.slint:934
 msgid ""
@@ -8721,8 +8825,8 @@ msgid ""
 "storage data usage mail attachments files databases backup snapshot import "
 "export delete"
 msgstr ""
-"ストレージ データ 使用量 メール 添付ファイル ファイル データベース "
-"バックアップ スナップショット インポート エクスポート 削除"
+"ストレージ データ 使用量 メール 添付ファイル ファイル データベース バックアッ"
+"プ スナップショット インポート エクスポート 削除"
 
 #: ui/dialogs/settings-dialog.slint:942
 msgid ""
@@ -8745,8 +8849,8 @@ msgid ""
 "services flectar base account sign in subscription paid sync devices "
 "business email custom domain mailbox"
 msgstr ""
-"サービス flectar ベース アカウント サインイン サブスクリプション 有料 同期 "
-"デバイス ビジネス メール 独自ドメイン メールボックス"
+"サービス flectar ベース アカウント サインイン サブスクリプション 有料 同期 デ"
+"バイス ビジネス メール 独自ドメイン メールボックス"
 
 #: ui/dialogs/settings-dialog.slint:947
 msgid "about version credits contributors license flectar"
@@ -8893,7 +8997,8 @@ msgstr "フレームレスウィンドウ"
 
 #: ui/dialogs/settings-dialog.slint:1501
 msgid "Replace the system title bar with window controls in the toolbar."
-msgstr "システムのタイトルバーを、ツールバー内のウィンドウ操作ボタンに置き換えます。"
+msgstr ""
+"システムのタイトルバーを、ツールバー内のウィンドウ操作ボタンに置き換えます。"
 
 #: ui/dialogs/settings-dialog.slint:1510
 msgid "Reduce motion"
@@ -8909,7 +9014,8 @@ msgstr "インターフェースの文字サイズ"
 
 #: ui/dialogs/settings-dialog.slint:1525
 msgid "Text in menus, lists and settings. Message zoom stays separate."
-msgstr "メニュー、リスト、設定の文字サイズです。メッセージのズームは別の設定です。"
+msgstr ""
+"メニュー、リスト、設定の文字サイズです。メッセージのズームは別の設定です。"
 
 #: ui/dialogs/settings-dialog.slint:1526
 msgid "Smaller"
@@ -8966,11 +9072,13 @@ msgstr "時刻は{}のように表示されます。"
 #: ui/dialogs/settings-dialog.slint:1598
 msgid ""
 "Add a language in Windows Settings, under Time & language, to check spelling."
-msgstr "スペルチェックには、Windows 設定の「時刻と言語」で言語を追加してください。"
+msgstr ""
+"スペルチェックには、Windows 設定の「時刻と言語」で言語を追加してください。"
 
 #: ui/dialogs/settings-dialog.slint:1600
 msgid "Turn on the spell checker in Android's settings to check spelling."
-msgstr "スペルチェックには、Android の設定でスペルチェッカーを有効にしてください。"
+msgstr ""
+"スペルチェックには、Android の設定でスペルチェッカーを有効にしてください。"
 
 #: ui/dialogs/settings-dialog.slint:1602
 msgid ""
@@ -8985,8 +9093,8 @@ msgid ""
 "Underline misspelled words in messages you write, in the languages set in "
 "System Settings. Right-click a word for corrections."
 msgstr ""
-"作成中のメッセージで、システム設定に追加した言語のスペルミスに下線を付けます"
-"。単語を右クリックすると修正候補を表示できます。"
+"作成中のメッセージで、システム設定に追加した言語のスペルミスに下線を付けま"
+"す。単語を右クリックすると修正候補を表示できます。"
 
 #: ui/dialogs/settings-dialog.slint:1606
 msgid ""
@@ -9100,7 +9208,8 @@ msgstr "送信取り消し"
 #: ui/dialogs/settings-dialog.slint:1765
 msgid ""
 "How long a sent message waits before it leaves, so that you can take it back."
-msgstr "送信したメッセージが実際に送られるまで待つ時間です。この間なら取り消せます。"
+msgstr ""
+"送信したメッセージが実際に送られるまで待つ時間です。この間なら取り消せます。"
 
 #: ui/dialogs/settings-dialog.slint:1790
 msgid "Add invitations to my calendar"
@@ -9151,8 +9260,8 @@ msgstr "バックグラウンドで実行を続ける"
 #: ui/dialogs/settings-dialog.slint:1847
 msgid "Closing the window hides Flectar Mail while mail continues syncing."
 msgstr ""
-"ウィンドウを閉じると Flectar Mail は非表示になり、メールの同期は継続されます"
-"。"
+"ウィンドウを閉じると Flectar Mail は非表示になり、メールの同期は継続されま"
+"す。"
 
 #: ui/dialogs/settings-dialog.slint:1848
 msgid "Disabled by default; Quit from the tray menu stops the app."
@@ -9160,7 +9269,8 @@ msgstr "既定では無効です。トレイメニューの「終了」でアプ
 
 #: ui/dialogs/settings-dialog.slint:1848
 msgid "Disabled by default; open Flectar Mail again to bring its window back."
-msgstr "既定では無効です。Flectar Mail をもう一度開くと、ウィンドウが戻ります。"
+msgstr ""
+"既定では無効です。Flectar Mail をもう一度開くと、ウィンドウが戻ります。"
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Start automatically"
@@ -9203,8 +9313,8 @@ msgid ""
 "Add Flectar Mail to your applications menu to open email links from browsers "
 "and other apps here."
 msgstr ""
-"ブラウザーや他のアプリのメールリンクをここで開くには、"
-"アプリケーションメニューに Flectar Mail を追加してください。"
+"ブラウザーや他のアプリのメールリンクをここで開くには、アプリケーションメ"
+"ニューに Flectar Mail を追加してください。"
 
 #: ui/dialogs/settings-dialog.slint:1908
 msgid "Open email links from browsers and other apps in Flectar Mail."
@@ -9282,7 +9392,8 @@ msgstr "GPU — WGPU"
 
 #: ui/dialogs/settings-dialog.slint:2036
 msgid "GPU — WGPU could not start, so CPU — Low Memory is active."
-msgstr "GPU — WGPU を起動できなかったため、CPU — 低メモリが有効になっています。"
+msgstr ""
+"GPU — WGPU を起動できなかったため、CPU — 低メモリが有効になっています。"
 
 #: ui/dialogs/settings-dialog.slint:2036
 msgid "Restart required. Your current renderer is still active."
@@ -9313,8 +9424,8 @@ msgid ""
 "Keep your address book clean while still making frequent recipients easy to "
 "find."
 msgstr ""
-"アドレス帳をすっきりさせながら、よく送る宛先はすぐに見つけられるようにします"
-"。"
+"アドレス帳をすっきりさせながら、よく送る宛先はすぐに見つけられるようにしま"
+"す。"
 
 #: ui/dialogs/settings-dialog.slint:2171
 msgid "Remember people I email"
@@ -9373,8 +9484,8 @@ msgid ""
 "People you email remain available as local suggestions and never sync to "
 "CardDAV. Clear them any time to restart learning."
 msgstr ""
-"メールを送った相手はローカルの候補として表示され、CardDAV には同期されません"
-"。いつでも消去して学習をやり直せます。"
+"メールを送った相手はローカルの候補として表示され、CardDAV には同期されませ"
+"ん。いつでも消去して学習をやり直せます。"
 
 #: ui/dialogs/settings-dialog.slint:2262
 msgid "Clear now"
@@ -9414,9 +9525,9 @@ msgid ""
 "Where the server can run a rule, it does, so the rule works while Flectar "
 "Mail is closed. Other rules run while Flectar Mail is open."
 msgstr ""
-"ルールは受信トレイに届いた新しいメールを、上から順に試して振り分けます。"
-"サーバーで実行できるルールはサーバーが実行するため、Flectar Mail を閉じている"
-"間も機能します。その他のルールは Flectar Mail が開いている間に実行されます。"
+"ルールは受信トレイに届いた新しいメールを、上から順に試して振り分けます。サー"
+"バーで実行できるルールはサーバーが実行するため、Flectar Mail を閉じている間も"
+"機能します。その他のルールは Flectar Mail が開いている間に実行されます。"
 
 #: ui/dialogs/settings-dialog.slint:2425
 msgid ""
@@ -9744,8 +9855,8 @@ msgid ""
 "Show and sync only the folders you subscribed to on the server, plus Inbox "
 "and the folders mail is filed into."
 msgstr ""
-"サーバーで購読したフォルダーと、受信トレイ、およびメールが振り分けられる"
-"フォルダーのみ表示して同期します。"
+"サーバーで購読したフォルダーと、受信トレイ、およびメールが振り分けられるフォ"
+"ルダーのみ表示して同期します。"
 
 #: ui/dialogs/settings-dialog.slint:3177 ui/folder-roles.slint:132
 msgid "Special folders"
@@ -9785,8 +9896,8 @@ msgid ""
 "Mail removed from the server is kept only on this device. Database snapshots "
 "in Storage include it."
 msgstr ""
-"サーバーから削除されたメールは、このデバイスにのみ残ります。ストレージの"
-"データベーススナップショットにも含まれます。"
+"サーバーから削除されたメールは、このデバイスにのみ残ります。ストレージのデー"
+"タベーススナップショットにも含まれます。"
 
 #: ui/dialogs/settings-dialog.slint:3263 ui/dialogs/settings-dialog.slint:3379
 msgid "Sync contacts with a standards-compliant CardDAV server."
@@ -9854,8 +9965,8 @@ msgstr "Outlook を保存"
 msgid ""
 "Outlook public desktop clients use PKCE and do not need a client secret."
 msgstr ""
-"Outlook の公開デスクトップクライアントは PKCE を使用するため、"
-"クライアントシークレットは不要です。"
+"Outlook の公開デスクトップクライアントは PKCE を使用するため、クライアント"
+"シークレットは不要です。"
 
 #: ui/dialogs/settings-dialog.slint:3379
 msgid "Connect CardDAV"
@@ -10026,7 +10137,8 @@ msgstr "件数を表示する Dock で、受信トレイの未読メッセージ
 msgid ""
 "Show how many unread Important messages are in your Inbox, on docks that "
 "show counts."
-msgstr "件数を表示する Dock で、受信トレイの未読の重要メッセージ数を表示します。"
+msgstr ""
+"件数を表示する Dock で、受信トレイの未読の重要メッセージ数を表示します。"
 
 #: ui/dialogs/settings-dialog.slint:3654
 msgid "Show how many unread messages are in your Inbox."
@@ -10149,8 +10261,8 @@ msgid ""
 "A Flectar account is only needed for business email. Flectar Mail Sync works "
 "without one. Learn more at flectar.com/mail."
 msgstr ""
-"Flectar アカウントが必要なのはビジネスメールのみです。Flectar Mail Sync は"
-"アカウントなしで利用できます。詳しくは flectar.com/mail をご覧ください。"
+"Flectar アカウントが必要なのはビジネスメールのみです。Flectar Mail Sync はア"
+"カウントなしで利用できます。詳しくは flectar.com/mail をご覧ください。"
 
 #: ui/dialogs/settings-dialog.slint:3799
 msgid "Sign in with Flectar"
@@ -10170,9 +10282,9 @@ msgid ""
 "templates, snoozes and reply reminders stay the same on all of them, and any "
 "of them sends your scheduled emails."
 msgstr ""
-"スマートフォンとパソコンを一度接続すれば、アカウント、設定、テンプレート、"
-"スヌーズ、返信リマインダーがすべてのデバイスで同じに保たれ、どのデバイスから"
-"でも予約メールを送信できます。"
+"スマートフォンとパソコンを一度接続すれば、アカウント、設定、テンプレート、ス"
+"ヌーズ、返信リマインダーがすべてのデバイスで同じに保たれ、どのデバイスからで"
+"も予約メールを送信できます。"
 
 #: ui/dialogs/settings-dialog.slint:3817
 msgid "Snoozes, reply reminders and templates everywhere"
@@ -10191,8 +10303,8 @@ msgid ""
 "Your mail stays with your mail provider. Flectar Mail Sync carries your "
 "setup and sign-ins, and a scheduled message until it goes out."
 msgstr ""
-"メールはメールプロバイダーに留まります。Flectar Mail Sync が運ぶのは設定と"
-"サインイン、および送信予定の予約メッセージだけです。"
+"メールはメールプロバイダーに留まります。Flectar Mail Sync が運ぶのは設定とサ"
+"インイン、および送信予定の予約メッセージだけです。"
 
 #: ui/dialogs/settings-dialog.slint:3837
 msgid "Business email"
@@ -10204,7 +10316,8 @@ msgstr "独自ドメインのメールボックス"
 
 #: ui/dialogs/settings-dialog.slint:3839
 msgid "Professional addresses such as you@yourcompany.com, hosted by Flectar."
-msgstr "you@yourcompany.com のようなビジネス向けアドレスを Flectar がホストします。"
+msgstr ""
+"you@yourcompany.com のようなビジネス向けアドレスを Flectar がホストします。"
 
 #: ui/dialogs/settings-dialog.slint:3841
 msgid "Connect a domain you already own"
@@ -10320,7 +10433,8 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:4106
 msgid "Third-party components retain their own licenses and notices."
-msgstr "サードパーティのコンポーネントは、それぞれのライセンスと表記に従います。"
+msgstr ""
+"サードパーティのコンポーネントは、それぞれのライセンスと表記に従います。"
 
 #: ui/dialogs/settings-dialog.slint:4139
 msgid "Settings sections"
@@ -10346,7 +10460,8 @@ msgstr "新しいカレンダーを検出します。"
 msgid ""
 "Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV "
 "servers."
-msgstr "iCloud、Fastmail、Nextcloud、標準準拠の CalDAV サーバーに対応しています。"
+msgstr ""
+"iCloud、Fastmail、Nextcloud、標準準拠の CalDAV サーバーに対応しています。"
 
 #: ui/dialogs/settings-dialog.slint:4304
 msgid "https://calendar.example.com/"
@@ -10357,8 +10472,8 @@ msgid ""
 "To sync one calendar, such as a shared mailbox's, enter that calendar's own "
 "address."
 msgstr ""
-"共有メールボックスのカレンダーのような 1 つのカレンダーを同期するには、その"
-"カレンダー自体のアドレスを入力してください。"
+"共有メールボックスのカレンダーのような 1 つのカレンダーを同期するには、そのカ"
+"レンダー自体のアドレスを入力してください。"
 
 #: ui/dialogs/settings-dialog.slint:4319 ui/dialogs/settings-dialog.slint:4440
 msgid "Usually your email address"
@@ -10391,7 +10506,8 @@ msgstr "メールの同期と送信に JMAP を使用し、自動検出に対応
 #: ui/dialogs/settings-dialog.slint:4419
 msgid ""
 "Downloads mail from a POP3 server to this device and sends through SMTP."
-msgstr "POP3 サーバーからこのデバイスにメールをダウンロードし、SMTP で送信します。"
+msgstr ""
+"POP3 サーバーからこのデバイスにメールをダウンロードし、SMTP で送信します。"
 
 #: ui/dialogs/settings-dialog.slint:4419
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
@@ -10482,8 +10598,8 @@ msgstr "プロファイルを作成"
 msgid ""
 "Its color marks its accounts' mail, and choosing it shows only their mail."
 msgstr ""
-"この色はアカウントのメールに付けられ、選択するとそのメールだけが表示されます"
-"。"
+"この色はアカウントのメールに付けられ、選択するとそのメールだけが表示されま"
+"す。"
 
 #: ui/dialogs/settings-dialog.slint:4623
 msgid "Profile name"
@@ -10569,7 +10685,8 @@ msgstr "プライバシーへの同意を取り消しますか?"
 msgid ""
 "Flectar Mail will stop and show the privacy consent screen the next time you "
 "open it."
-msgstr "Flectar Mail は停止し、次回起動時にプライバシーの同意画面を表示します。"
+msgstr ""
+"Flectar Mail は停止し、次回起動時にプライバシーの同意画面を表示します。"
 
 #: ui/dialogs/settings-dialog.slint:4807
 msgid ""
@@ -10593,7 +10710,8 @@ msgstr "インポートしたメールとそのフォルダーをこのデバイ
 
 #: ui/dialogs/settings-dialog.slint:4826
 msgid "It exists only here. Export it first to keep a copy."
-msgstr "ここにしか存在しません。コピーを残すには、先にエクスポートしてください。"
+msgstr ""
+"ここにしか存在しません。コピーを残すには、先にエクスポートしてください。"
 
 #: ui/dialogs/settings-dialog.slint:4831
 msgid "Delete mail"
@@ -10616,8 +10734,8 @@ msgid ""
 "This account's mail is stored only on this device. Export it first to keep a "
 "copy."
 msgstr ""
-"このアカウントのメールはこのデバイスにのみ保存されています。コピーを残すには"
-"、先にエクスポートしてください。"
+"このアカウントのメールはこのデバイスにのみ保存されています。コピーを残すに"
+"は、先にエクスポートしてください。"
 
 #: ui/dialogs/settings-dialog.slint:4851
 msgid "Messages on the mail server will not be deleted."
@@ -10714,11 +10832,13 @@ msgstr "{} を配信停止しますか?"
 #: ui/dialogs/unsubscribe-dialog.slint:23
 msgid ""
 "{} did not take the request. You can unsubscribe on its website instead."
-msgstr "{} はリクエストを受け付けませんでした。ウェブサイトで配信停止できます。"
+msgstr ""
+"{} はリクエストを受け付けませんでした。ウェブサイトで配信停止できます。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:25
 msgid "Your request went to {}. It can take a few days for the mail to stop."
-msgstr "リクエストを {} に送信しました。メールが止まるまで数日かかることがあります。"
+msgstr ""
+"リクエストを {} に送信しました。メールが止まるまで数日かかることがあります。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:26
 msgid "It can take a few days for the mail to stop."
@@ -10730,7 +10850,8 @@ msgstr "Flectar Mail は、このメールの送信を止めるよう {} に依�
 
 #: ui/dialogs/unsubscribe-dialog.slint:28
 msgid "Flectar Mail will send an email asking the list to unsubscribe you."
-msgstr "Flectar Mail は、配信停止を求めるメールをメーリングリストに送信します。"
+msgstr ""
+"Flectar Mail は、配信停止を求めるメールをメーリングリストに送信します。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:29
 msgid "{} takes unsubscribe requests on its website."
@@ -10747,7 +10868,8 @@ msgstr "送信前にメールを確認できます。"
 #: ui/dialogs/unsubscribe-dialog.slint:140
 msgid "One message from this list is still in your inbox."
 msgid_plural "{n} messages from this list are still in your inbox."
-msgstr[0] "このメーリングリストからのメッセージ {n} 件がまだ受信トレイにあります。"
+msgstr[0] ""
+"このメーリングリストからのメッセージ {n} 件がまだ受信トレイにあります。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:171
 msgid "Review email"
@@ -10850,8 +10972,8 @@ msgid ""
 "Flectar Mail files mail in the folders your server marks for each purpose. "
 "Choose others if those aren't right."
 msgstr ""
-"Flectar Mail は、サーバーが目的ごとに指定したフォルダーにメールを振り分けます"
-"。適切でない場合は他のフォルダーを選択してください。"
+"Flectar Mail は、サーバーが目的ごとに指定したフォルダーにメールを振り分けま"
+"す。適切でない場合は他のフォルダーを選択してください。"
 
 #: ui/folder-roles.slint:165
 msgid "Reading the folders…"
@@ -10868,10 +10990,10 @@ msgid ""
 "Google Drive or OneDrive when that's on, and your Nextcloud or ownCloud "
 "server otherwise."
 msgstr ""
-"メッセージには大きすぎるファイルや、リンクで共有するファイルは"
-"クラウドストレージに保存され、メッセージにはそのリンクが添付されます。"
-"メッセージは、アカウントの Google Drive や OneDrive が有効な場合はそれを、そ"
-"うでない場合は Nextcloud または ownCloud サーバーを使用します。"
+"メッセージには大きすぎるファイルや、リンクで共有するファイルはクラウドスト"
+"レージに保存され、メッセージにはそのリンクが添付されます。メッセージは、アカ"
+"ウントの Google Drive や OneDrive が有効な場合はそれを、そうでない場合は "
+"Nextcloud または ownCloud サーバーを使用します。"
 
 #: ui/link-services.slint:108
 msgid "Remove {} ({})"
@@ -10947,8 +11069,8 @@ msgid ""
 "Each Nextcloud or ownCloud link gets a password of its own, which the "
 "message leaves out for you to pass on another way."
 msgstr ""
-"Nextcloud または ownCloud の各リンクには固有のパスワードが設定されます。"
-"メッセージには含まれないため、別の方法で伝えてください。"
+"Nextcloud または ownCloud の各リンクには固有のパスワードが設定されます。メッ"
+"セージには含まれないため、別の方法で伝えてください。"
 
 #: ui/mailbox-words.slint:7
 msgid "Inbox"
@@ -11078,7 +11200,8 @@ msgstr "プロキシがユーザー名とパスワードを受け付けません
 
 #: ui/network.slint:206
 msgid "The proxy asks for {} sign-in, which Flectar Mail doesn't support."
-msgstr "プロキシが {} のサインインを求めています。Flectar Mail は対応していません。"
+msgstr ""
+"プロキシが {} のサインインを求めています。Flectar Mail は対応していません。"
 
 #: ui/network.slint:207
 msgid ""
@@ -11113,7 +11236,8 @@ msgstr "プロキシ経由でメールサーバーに接続できません。"
 msgid ""
 "The password can't be saved, as the system's password storage isn't "
 "available."
-msgstr "システムのパスワード保存機能が利用できないため、パスワードを保存できません。"
+msgstr ""
+"システムのパスワード保存機能が利用できないため、パスワードを保存できません。"
 
 #: ui/network.slint:214
 msgid "The proxy settings can't be saved."
@@ -11184,8 +11308,8 @@ msgid ""
 "An account can connect without a proxy, or through one of its own, along "
 "with its calendars, contacts and files."
 msgstr ""
-"アカウントは、プロキシなしで接続するか、独自のプロキシ経由で接続できます。"
-"カレンダー、連絡先、ファイルも同様です。"
+"アカウントは、プロキシなしで接続するか、独自のプロキシ経由で接続できます。カ"
+"レンダー、連絡先、ファイルも同様です。"
 
 #: ui/network.slint:365
 msgid "The proxy above."
@@ -11262,7 +11386,8 @@ msgstr "翻訳サービスの現在の上限を使い切りました。"
 
 #: ui/translation.slint:79
 msgid "The translation service is busy. Try again in a moment."
-msgstr "翻訳サービスが混み合っています。しばらくしてからもう一度お試しください。"
+msgstr ""
+"翻訳サービスが混み合っています。しばらくしてからもう一度お試しください。"
 
 #: ui/translation.slint:80
 msgid ""
@@ -11354,10 +11479,10 @@ msgid ""
 "a paid key, DeepL keeps the text only as long as it needs to translate it "
 "and doesn't use it to improve its services."
 msgstr ""
-"DeepL は API キーを使って翻訳します。無料キーでは、DeepL の利用規約により"
-"テキストが保持され、メールに通常含まれる個人データの送信は認められません。有"
-"料キーでは、DeepL は翻訳に必要な期間だけテキストを保持し、サービス改善には使"
-"用しません。"
+"DeepL は API キーを使って翻訳します。無料キーでは、DeepL の利用規約によりテキ"
+"ストが保持され、メールに通常含まれる個人データの送信は認められません。有料"
+"キーでは、DeepL は翻訳に必要な期間だけテキストを保持し、サービス改善には使用"
+"しません。"
 
 #: ui/translation.slint:313
 msgid ""
@@ -11827,11 +11952,13 @@ msgstr "プレビューするファイルを選択"
 
 #: ui/views/files-view.slint:512
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
-msgstr "PDF、画像、テキストはここに表示されます。その他の形式はダウンロードできます。"
+msgstr ""
+"PDF、画像、テキストはここに表示されます。その他の形式はダウンロードできます。"
 
 #: ui/views/files-view.slint:512
 msgid "Images and text appear here. Other formats can be downloaded."
-msgstr "画像とテキストはここに表示されます。その他の形式はダウンロードできます。"
+msgstr ""
+"画像とテキストはここに表示されます。その他の形式はダウンロードできます。"
 
 #: ui/views/files-view.slint:515
 msgid "Clear displayed activity"
@@ -12564,7 +12691,8 @@ msgstr "レンダリングされたメールを表示"
 
 #: ui/views/mail-reading-pane.slint:1733
 msgid "Copy this HTML into your GitHub rendering issue."
-msgstr "この HTML をコピーして、GitHub のレンダリング issue に貼り付けてください。"
+msgstr ""
+"この HTML をコピーして、GitHub のレンダリング issue に貼り付けてください。"
 
 #: ui/views/mail-reading-pane.slint:1750
 msgid "Show email"
@@ -12721,7 +12849,8 @@ msgstr "サーバーアドレス(省略可)"
 
 #: ui/views/onboarding-view.slint:345
 msgid "Leave blank to discover /.well-known/jmap from your email domain."
-msgstr "空欄にすると、メールアドレスのドメインから /.well-known/jmap を検出します。"
+msgstr ""
+"空欄にすると、メールアドレスのドメインから /.well-known/jmap を検出します。"
 
 #: ui/window-chrome.slint:200 ui/window-chrome.slint:237
 msgid "Minimize"

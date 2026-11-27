@@ -30,7 +30,7 @@ msgstr "AI yanılabilir. İletilerdeki önemli olanı denetle."
 msgid "Close the summary"
 msgstr "Özeti kapat"
 
-#: ui/ai-summary.slint:110 ui/app.slint:659
+#: ui/ai-summary.slint:110 ui/app.slint:662
 msgid "Asking the AI server…"
 msgstr "AI sunucusuna soruluyor…"
 
@@ -38,7 +38,7 @@ msgstr "AI sunucusuna soruluyor…"
 msgid "Summarizing the conversation…"
 msgstr "Görüşme özetleniyor…"
 
-#: ui/ai-summary.slint:119 ui/app.slint:653
+#: ui/ai-summary.slint:119 ui/app.slint:656
 msgid "Set up an AI server in Settings to use AI features."
 msgstr "AI özelliklerini kullanmak için Ayarlar'da bir AI sunucusu kur."
 
@@ -178,7 +178,7 @@ msgstr "Anahtarı kaldır"
 msgid "API key, if the server asks for one"
 msgstr "API anahtarı, sunucu istiyorsa"
 
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:344
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:410
 #: ui/dialogs/folder-dialog.slint:135 ui/network.slint:313
 #: ui/translation.slint:378 ui/views/files-view.slint:660
 msgid "Save"
@@ -223,7 +223,7 @@ msgstr "Ne istediği"
 msgid "Make it shorter, keeping what matters."
 msgstr "Önemli olanı koruyarak daha kısa yap."
 
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:195
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:234
 #: ui/dialogs/settings-dialog.slint:77 ui/translation.slint:252
 msgid "Remove"
 msgstr "Kaldır"
@@ -659,7 +659,7 @@ msgstr "Konuşma geçmişi mevcut"
 msgid "New address-book entry"
 msgstr "Yeni adres defteri kaydı"
 
-#: ui/app.slint:259 ui/app.slint:1533 ui/components/composer-fields.slint:91
+#: ui/app.slint:259 ui/app.slint:1536 ui/components/composer-fields.slint:91
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
 msgstr "Bağlı hesap yok"
@@ -725,7 +725,7 @@ msgstr[1] "{n} okunmamış görüşme"
 msgid "Archive"
 msgstr "Arşivle"
 
-#: ui/app.slint:282 ui/components/account-mail-preferences.slint:243
+#: ui/app.slint:282 ui/components/account-mail-preferences.slint:309
 #: ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:620
 msgid "Delete"
 msgstr "Sil"
@@ -747,11 +747,11 @@ msgstr "Yeni e-posta denetleniyor"
 msgid "Last contacted {}"
 msgstr "Son iletişim: {}"
 
-#: ui/app.slint:289 ui/app.slint:683
+#: ui/app.slint:289 ui/app.slint:686
 msgid "Loading local data…"
 msgstr "Yerel veriler yükleniyor…"
 
-#: ui/app.slint:290 ui/app.slint:684
+#: ui/app.slint:290 ui/app.slint:687
 msgid "Local data ready."
 msgstr "Yerel veriler hazır."
 
@@ -1786,259 +1786,272 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV bağlantısı kesilemedi: {}"
 
 #: ui/app.slint:576
+#, fuzzy
+#| msgid "Prompts saved."
+msgid "Copies saved."
+msgstr "İstemler kaydedildi."
+
+#: ui/app.slint:577
+#, fuzzy
+#| msgid "Could not save the file: {}"
+msgid "Could not save the copies: {}"
+msgstr "Dosya kaydedilemedi: {}"
+
+#: ui/app.slint:579
 msgctxt "special folder"
 msgid "No folder"
 msgstr "Klasör yok"
 
-#: ui/app.slint:577
+#: ui/app.slint:580
 msgid "Could not read the folders: {}"
 msgstr "Klasörler okunamadı: {}"
 
-#: ui/app.slint:578
+#: ui/app.slint:581
 msgid "Could not choose the folder: {}"
 msgstr "Klasör seçilemedi: {}"
 
-#: ui/app.slint:583
+#: ui/app.slint:586
 msgid "Connect an account before creating a backup."
 msgstr "Yedek oluşturmadan önce bir hesap bağlayın."
 
-#: ui/app.slint:584
+#: ui/app.slint:587
 msgid "Export Flectar Mail account backup"
 msgstr "Flectar Mail hesap yedeğini dışa aktar"
 
-#: ui/app.slint:585
+#: ui/app.slint:588
 msgid "Flectar Mail backup"
 msgstr "Flectar Mail yedeği"
 
-#: ui/app.slint:586 ui/dialogs/import-dialog.slint:406
+#: ui/app.slint:589 ui/dialogs/import-dialog.slint:406
 #: ui/views/onboarding-view.slint:243
 msgid "Import accounts and mail"
 msgstr "Hesapları ve e-postayı içe aktar"
 
-#: ui/app.slint:587
+#: ui/app.slint:590
 msgid "Choose a Thunderbird profile or a folder of mail"
 msgstr "Bir Thunderbird profili ya da e-posta klasörü seç"
 
-#: ui/app.slint:588
+#: ui/app.slint:591
 msgid "Imported messages"
 msgstr "İçe aktarılan iletiler"
 
-#: ui/app.slint:589
+#: ui/app.slint:592
 msgid "Choose where to export the database snapshot"
 msgstr "Veritabanı anlık görüntüsünün nereye aktarılacağını seçin"
 
-#: ui/app.slint:590
+#: ui/app.slint:593
 msgid "Backup exported. Passwords and OAuth tokens were not included."
 msgstr "Yedek dışa aktarıldı. Parolalar ve OAuth belirteçleri dahil edilmedi."
 
-#: ui/app.slint:591
+#: ui/app.slint:594
 msgid "Could not export backup: {}"
 msgstr "Yedek dışa aktarılamadı: {}"
 
-#: ui/app.slint:592
+#: ui/app.slint:595
 msgid "Local data storage is unavailable. Retry startup."
 msgstr "Yerel veri deposu kullanılamıyor. Başlatmayı yeniden deneyin."
 
-#: ui/app.slint:593
+#: ui/app.slint:596
 msgid "Creating verified database snapshot…"
 msgstr "Doğrulanmış veritabanı anlık görüntüsü oluşturuluyor…"
 
-#: ui/app.slint:594
+#: ui/app.slint:597
 msgid "All local Flectar Mail data was deleted."
 msgstr "Tüm yerel Flectar Mail verileri silindi."
 
-#: ui/app.slint:595
+#: ui/app.slint:598
 msgid "Could not delete all local data: {}"
 msgstr "Tüm yerel veriler silinemedi: {}"
 
-#: ui/app.slint:596
+#: ui/app.slint:599
 msgid "Deleting local accounts and cached data…"
 msgstr "Yerel hesaplar ve önbellek verileri siliniyor…"
 
-#: ui/app.slint:601
+#: ui/app.slint:604
 msgid "Background mail refresh failed: {}"
 msgstr "Arka plan e-posta yenilemesi başarısız: {}"
 
-#: ui/app.slint:602
+#: ui/app.slint:605
 msgid "No conversations in this folder"
 msgstr "Bu klasörde konuşma yok"
 
-#: ui/app.slint:603
+#: ui/app.slint:606
 msgid "No conversations match this search"
 msgstr "Bu aramayla eşleşen konuşma yok"
 
-#: ui/app.slint:604
+#: ui/app.slint:607
 msgid "Mail core is ready for account synchronization and message actions."
 msgstr "E-posta çekirdeği hesap eşitlemesi ve ileti işlemleri için hazır."
 
-#: ui/app.slint:605
+#: ui/app.slint:608
 msgid "Large message rendered in compatibility mode."
 msgstr "Büyük ileti uyumluluk modunda görüntülendi."
 
-#: ui/app.slint:606
+#: ui/app.slint:609
 msgid "Software email render failed: {}"
 msgstr "E-postanın yazılımla görüntülenmesi başarısız oldu: {}"
 
-#: ui/app.slint:607
+#: ui/app.slint:610
 msgid "Rendered with software fallback after GPU error: {}"
 msgstr "GPU hatasından sonra yazılım yedeğiyle görüntülendi: {}"
 
-#: ui/app.slint:608
+#: ui/app.slint:611
 msgid "Blitz render failed (GPU: {}; software: {})"
 msgstr "Blitz oluşturması başarısız (GPU: {}; yazılım: {})"
 
-#: ui/app.slint:613
+#: ui/app.slint:616
 msgid "Enter a name, email address, or phone number, then save."
 msgstr "Bir ad, e-posta adresi veya telefon numarası girin, ardından kaydedin."
 
-#: ui/app.slint:614
+#: ui/app.slint:617
 msgid "Could not save: contact storage is unavailable."
 msgstr "Kaydedilemedi: kişi deposu kullanılamıyor."
 
-#: ui/app.slint:615
+#: ui/app.slint:618
 msgid "Could not save contact: {}"
 msgstr "Kişi kaydedilemedi: {}"
 
-#: ui/app.slint:616
+#: ui/app.slint:619
 msgid "Contact saved."
 msgstr "Kişi kaydedildi."
 
-#: ui/app.slint:617
+#: ui/app.slint:620
 msgid "Saved to contacts."
 msgstr "Kişilere kaydedildi."
 
-#: ui/app.slint:618
+#: ui/app.slint:621
 msgid "Could not delete: contact storage is unavailable."
 msgstr "Silinemedi: kişi deposu kullanılamıyor."
 
-#: ui/app.slint:619
+#: ui/app.slint:622
 msgid "Could not delete contact: {}"
 msgstr "Kişi silinemedi: {}"
 
-#: ui/app.slint:620
+#: ui/app.slint:623
 msgid "Contact deleted."
 msgstr "Kişi silindi."
 
-#: ui/app.slint:621
+#: ui/app.slint:624
 msgid "Could not load contacts: {}"
 msgstr "Kişiler yüklenemedi: {}"
 
-#: ui/app.slint:622
+#: ui/app.slint:625
 msgid "Local contact storage is still starting…"
 msgstr "Yerel kişi deposu hâlâ başlıyor…"
 
-#: ui/app.slint:623
+#: ui/app.slint:626
 msgid "Loading contacts…"
 msgstr "Kişiler yükleniyor…"
 
-#: ui/app.slint:628 ui/components/calendar-agenda.slint:247
+#: ui/app.slint:631 ui/components/calendar-agenda.slint:247
 msgid "Local calendar"
 msgstr "Yerel takvim"
 
-#: ui/app.slint:629 ui/components/calendar.slint:325
+#: ui/app.slint:632 ui/components/calendar.slint:325
 #: ui/components/calendar.slint:373 ui/components/calendar.slint:528
 msgid "Calendar"
 msgstr "Takvim"
 
-#: ui/app.slint:630
+#: ui/app.slint:633
 msgid "Could not load calendar: {}"
 msgstr "Takvim yüklenemedi: {}"
 
-#: ui/app.slint:631
+#: ui/app.slint:634
 msgid "Calendar shown and syncing."
 msgstr "Takvim gösteriliyor ve eşitleniyor."
 
-#: ui/app.slint:632
+#: ui/app.slint:635
 msgid "Calendar hidden and sync paused."
 msgstr "Takvim gizlendi ve eşitleme duraklatıldı."
 
-#: ui/app.slint:633
+#: ui/app.slint:636
 msgid "Calendar update failed: {}"
 msgstr "Takvim güncellemesi başarısız: {}"
 
-#: ui/app.slint:634
+#: ui/app.slint:637
 msgid "Only events created in Flectar Mail can be edited."
 msgstr "Yalnızca Flectar Mail'de oluşturulan etkinlikler düzenlenebilir."
 
-#: ui/app.slint:635
+#: ui/app.slint:638
 msgid "Only events created in Flectar Mail can be deleted."
 msgstr "Yalnızca Flectar Mail'de oluşturulan etkinlikler silinebilir."
 
-#: ui/app.slint:636
+#: ui/app.slint:639
 msgid "Calendar storage is unavailable."
 msgstr "Takvim deposu kullanılamıyor."
 
-#: ui/app.slint:637
+#: ui/app.slint:640
 msgid "Could not delete event: {}"
 msgstr "Etkinlik silinemedi: {}"
 
-#: ui/app.slint:638
+#: ui/app.slint:641
 msgid "Event deleted, but refresh failed: {}"
 msgstr "Etkinlik silindi, ancak yenileme başarısız: {}"
 
-#: ui/app.slint:639
+#: ui/app.slint:642
 msgid "Event deleted."
 msgstr "Etkinlik silindi."
 
-#: ui/app.slint:640
+#: ui/app.slint:643
 msgid "Removed from your calendar."
 msgstr "Takviminden kaldırıldı."
 
-#: ui/app.slint:641
+#: ui/app.slint:644
 msgid "Could not answer: {}"
 msgstr "Yanıt verilemedi: {}"
 
-#: ui/app.slint:642
+#: ui/app.slint:645
 msgid "Could not remove the event: {}"
 msgstr "Etkinlik kaldırılamadı: {}"
 
-#: ui/app.slint:643
+#: ui/app.slint:646
 msgid "Could not add the event: {}"
 msgstr "Etkinlik eklenemedi: {}"
 
-#: ui/app.slint:644
+#: ui/app.slint:647
 msgid "Calendar invitations preference saved."
 msgstr "Takvim davetiyeleri tercihi kaydedildi."
 
-#: ui/app.slint:645
+#: ui/app.slint:648
 msgid "Could not save the calendar invitations preference: {}"
 msgstr "Takvim davetiyeleri tercihi kaydedilemedi: {}"
 
-#: ui/app.slint:646
+#: ui/app.slint:649
 msgid "Read receipt preference saved."
 msgstr "Okundu bilgisi tercihi kaydedildi."
 
-#: ui/app.slint:647
+#: ui/app.slint:650
 msgid "Could not save the read receipt preference: {}"
 msgstr "Okundu bilgisi tercihi kaydedilemedi: {}"
 
-#: ui/app.slint:648
+#: ui/app.slint:651
 msgid "Could not answer the read receipt request: {}"
 msgstr "Okundu bilgisi isteği yanıtlanamadı: {}"
 
-#: ui/app.slint:649
+#: ui/app.slint:652
 msgid "Could not show the message: {}"
 msgstr "İleti gösterilemedi: {}"
 
-#: ui/app.slint:650
+#: ui/app.slint:653
 msgid "Could not save the translation setting: {}"
 msgstr "Çeviri ayarı kaydedilemedi: {}"
 
-#: ui/app.slint:651
+#: ui/app.slint:654
 msgid "Could not remove the key: {}"
 msgstr "Anahtar kaldırılamadı: {}"
 
-#: ui/app.slint:652
+#: ui/app.slint:655
 msgid "Could not save the prompts: {}"
 msgstr "İstemler kaydedilemedi: {}"
 
-#: ui/app.slint:654
+#: ui/app.slint:657
 msgid ""
 "The AI server can't be reached. Check its address in Settings and that it's "
 "running."
-msgstr "AI sunucusuna ulaşılamıyor. Ayarlar'da adresini ve çalıştığını denetle."
+msgstr ""
+"AI sunucusuna ulaşılamıyor. Ayarlar'da adresini ve çalıştığını denetle."
 
-#: ui/app.slint:655
+#: ui/app.slint:658
 msgid ""
 "The AI server's address in Settings has to start with https://, or with "
 "http://localhost for a server on this computer."
@@ -2046,86 +2059,86 @@ msgstr ""
 "Ayarlar'daki AI sunucusu adresi https:// ile başlamalı; bu bilgisayardaki "
 "bir sunucu için http://localhost ile başlamalı."
 
-#: ui/app.slint:656
+#: ui/app.slint:659
 msgid "The AI server didn't accept the key in Settings."
 msgstr "AI sunucusu, Ayarlar'daki anahtarı kabul etmedi."
 
-#: ui/app.slint:657
+#: ui/app.slint:660
 msgid "The AI server didn't answer as expected. It said: {}"
 msgstr "AI sunucusu beklenildiği gibi yanıt vermedi. Şunu söyledi: {}"
 
-#: ui/app.slint:658
+#: ui/app.slint:661
 msgid "Write something to improve first."
 msgstr "Önce iyileştirilecek bir şey yaz."
 
-#: ui/app.slint:660
+#: ui/app.slint:663
 msgid "The AI server sent back no text, so the message stays as it is."
 msgstr "AI sunucusu metin döndürmedi; bu yüzden ileti olduğu gibi kalır."
 
-#: ui/app.slint:661
+#: ui/app.slint:664
 msgid "The text changed while the AI server worked, so it stays as it is."
 msgstr "AI sunucusu çalışırken metin değişti; bu yüzden olduğu gibi kalır."
 
-#: ui/app.slint:662
+#: ui/app.slint:665
 msgid "Changed by AI. Check it before you send it. Undo restores your text."
 msgstr ""
 "AI tarafından değiştirildi. Göndermeden önce denetle. Geri al, metnini geri "
 "getirir."
 
-#: ui/app.slint:663
+#: ui/app.slint:666
 msgid "The AI server found nothing to change."
 msgstr "AI sunucusu değiştirilecek bir şey bulamadı."
 
-#: ui/app.slint:665
+#: ui/app.slint:668
 msgid "Automatic ({})"
 msgstr "Otomatik ({})"
 
-#: ui/app.slint:666
+#: ui/app.slint:669
 msgid "Could not mark all as read: {}"
 msgstr "Tümü okundu olarak işaretlenemedi: {}"
 
-#: ui/app.slint:667
+#: ui/app.slint:670
 msgid "Use YYYY-MM-DD for the date and a time such as {}."
 msgstr "Tarih için YYYY-AA-GG biçimini ve {} gibi bir saat kullanın."
 
-#: ui/app.slint:668
+#: ui/app.slint:671
 msgid "Event duration must be a number of minutes."
 msgstr "Etkinlik süresi dakika cinsinden bir sayı olmalıdır."
 
-#: ui/app.slint:669
+#: ui/app.slint:672
 msgid "Add a title and choose a duration from 15 to 1440 minutes."
 msgstr "Bir başlık ekleyin ve 15 ile 1440 dakika arasında bir süre seçin."
 
-#: ui/app.slint:670
+#: ui/app.slint:673
 msgid "That local time does not exist in the current time zone."
 msgstr "Bu yerel saat geçerli saat diliminde mevcut değil."
 
-#: ui/app.slint:671
+#: ui/app.slint:674
 msgid "Could not save event: {}"
 msgstr "Etkinlik kaydedilemedi: {}"
 
-#: ui/app.slint:672
+#: ui/app.slint:675
 msgid "Event saved, but refresh failed: {}"
 msgstr "Etkinlik kaydedildi, ancak yenileme başarısız: {}"
 
-#: ui/app.slint:673
+#: ui/app.slint:676
 msgid "Event saved. Provider sync will run when enabled."
 msgstr ""
 "Etkinlik kaydedildi. Sağlayıcı eşitlemesi etkinleştirildiğinde çalışacak."
 
-#: ui/app.slint:678
+#: ui/app.slint:681
 msgid "Email resource render failed: {}"
 msgstr "E-posta kaynağı görüntülenemedi: {}"
 
-#: ui/app.slint:679
+#: ui/app.slint:682
 msgid "Message refresh failed: {}"
 msgstr "İleti yenilemesi başarısız: {}"
 
-#: ui/app.slint:680
+#: ui/app.slint:683
 msgid "Message load failed: {}"
 msgstr "İleti yüklenemedi: {}"
 
-#: ui/app.slint:681
+#: ui/app.slint:684
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
@@ -2133,169 +2146,169 @@ msgstr ""
 "Yerel posta kutunuz açılamadı. Hiçbir hesap işlemi başlatılmadı. Yeniden "
 "deneyin veya destek için tanılama bilgilerini kopyalayın."
 
-#: ui/app.slint:682
+#: ui/app.slint:685
 msgid "Local storage startup failed."
 msgstr "Yerel depolama başlatılamadı."
 
-#: ui/app.slint:689
+#: ui/app.slint:692
 msgid "Could not identify the dragged account."
 msgstr "Sürüklenen hesap tanımlanamadı."
 
-#: ui/app.slint:690
+#: ui/app.slint:693
 msgid "Account ordering requires local mail data."
 msgstr "Hesap sıralaması yerel e-posta verisi gerektirir."
 
-#: ui/app.slint:691
+#: ui/app.slint:694
 msgid "Could not find the account to reorder."
 msgstr "Yeniden sıralanacak hesap bulunamadı."
 
-#: ui/app.slint:692
+#: ui/app.slint:695
 msgid "Saving account order…"
 msgstr "Hesap sırası kaydediliyor…"
 
-#: ui/app.slint:693
+#: ui/app.slint:696
 msgid "Sent copy settings require local mail data."
 msgstr "Gönderilen kopya ayarları yerel posta verileri gerektirir."
 
-#: ui/app.slint:694
+#: ui/app.slint:697
 msgid "Updating Sent copy settings…"
 msgstr "Gönderilen kopya ayarları güncelleniyor…"
 
-#: ui/app.slint:695
+#: ui/app.slint:698
 msgid "Sent copy settings updated."
 msgstr "Gönderilen kopya ayarları güncellendi."
 
-#: ui/app.slint:696
+#: ui/app.slint:699
 msgid "Could not update Sent copy settings: {}"
 msgstr "Gönderilen kopya ayarları güncellenemedi: {}"
 
-#: ui/app.slint:697
+#: ui/app.slint:700
 msgid "Server mail settings require local mail data."
 msgstr "Sunucu e-posta ayarları yerel e-posta verisi gerektirir."
 
-#: ui/app.slint:698
+#: ui/app.slint:701
 msgid "Updating server mail settings…"
 msgstr "Sunucu e-posta ayarları güncelleniyor…"
 
-#: ui/app.slint:699
+#: ui/app.slint:702
 msgid "Server mail settings updated."
 msgstr "Sunucu e-posta ayarları güncellendi."
 
-#: ui/app.slint:700
+#: ui/app.slint:703
 msgid "Could not update server mail settings: {}"
 msgstr "Sunucu e-posta ayarları güncellenemedi: {}"
 
-#: ui/app.slint:701
+#: ui/app.slint:704
 msgid "Folder settings require local mail data."
 msgstr "Klasör ayarları yerel e-posta verisi gerektirir."
 
-#: ui/app.slint:702
+#: ui/app.slint:705
 msgid "Updating folder settings…"
 msgstr "Klasör ayarları güncelleniyor…"
 
-#: ui/app.slint:703
+#: ui/app.slint:706
 msgid "Folder settings updated."
 msgstr "Klasör ayarları güncellendi."
 
-#: ui/app.slint:704
+#: ui/app.slint:707
 msgid "Could not update folder settings: {}"
 msgstr "Klasör ayarları güncellenemedi: {}"
 
-#: ui/app.slint:705
+#: ui/app.slint:708
 msgid "Sync settings require local mail data."
 msgstr "Eşitleme ayarları yerel e-posta verisi gerektirir."
 
-#: ui/app.slint:706
+#: ui/app.slint:709
 msgid "Updating sync settings…"
 msgstr "Eşitleme ayarları güncelleniyor…"
 
-#: ui/app.slint:707
+#: ui/app.slint:710
 msgid "Sync settings updated."
 msgstr "Eşitleme ayarları güncellendi."
 
-#: ui/app.slint:708
+#: ui/app.slint:711
 msgid "Could not update sync settings: {}"
 msgstr "Eşitleme ayarları güncellenemedi: {}"
 
-#: ui/app.slint:709
+#: ui/app.slint:712
 msgid "Mail history requires local mail data."
 msgstr "E-posta geçmişi yerel e-posta verisi gerektirir."
 
-#: ui/app.slint:710
+#: ui/app.slint:713
 msgid "Updating mail history…"
 msgstr "E-posta geçmişi güncelleniyor…"
 
-#: ui/app.slint:711
+#: ui/app.slint:714
 msgid "Remote images are unavailable in this minimal build."
 msgstr "Uzak görseller bu minimal derlemede kullanılamıyor."
 
-#: ui/app.slint:712
+#: ui/app.slint:715
 msgid "Could not save remote-image setting: {}"
 msgstr "Uzak görsel ayarı kaydedilemedi: {}"
 
-#: ui/app.slint:713
+#: ui/app.slint:716
 msgid "Remote sender icons unavailable: {}"
 msgstr "Uzak gönderen simgeleri kullanılamıyor: {}"
 
-#: ui/app.slint:714
+#: ui/app.slint:717
 msgid "Remote images unavailable: {}"
 msgstr "Uzak görseller kullanılamıyor: {}"
 
-#: ui/app.slint:715
+#: ui/app.slint:718
 msgid "Remote body images and sender favicons enabled."
 msgstr "Gövde içi uzak görseller ve gönderen favikonları etkinleştirildi."
 
-#: ui/app.slint:716
+#: ui/app.slint:719
 msgid "Remote images blocked."
 msgstr "Uzak görseller engellendi."
 
-#: ui/app.slint:717
+#: ui/app.slint:720
 msgid "Could not refresh message images: {}"
 msgstr "İleti görselleri yenilenemedi: {}"
 
-#: ui/app.slint:718
+#: ui/app.slint:721
 msgid "Remote-image loading is disabled."
 msgstr "Uzak görsel yükleme devre dışı."
 
-#: ui/app.slint:719
+#: ui/app.slint:722
 msgid "Could not load message images: {}"
 msgstr "İleti görselleri yüklenemedi: {}"
 
-#: ui/app.slint:720
+#: ui/app.slint:723
 msgid "Sync finished, refresh failed: {}"
 msgstr "Eşitleme tamamlandı, yenileme başarısız: {}"
 
-#: ui/app.slint:721
+#: ui/app.slint:724
 msgid "Sync complete."
 msgstr "Eşitleme tamamlandı."
 
-#: ui/app.slint:722
+#: ui/app.slint:725
 msgid "Sync failed: {}"
 msgstr "Eşitleme başarısız: {}"
 
-#: ui/app.slint:723
+#: ui/app.slint:726
 msgid "Local mail data is unavailable; preview data is read-only."
 msgstr "Yerel e-posta verisi kullanılamıyor; önizleme verisi salt okunur."
 
-#: ui/app.slint:724
+#: ui/app.slint:727
 msgid "Synchronizing accounts…"
 msgstr "Hesaplar eşitleniyor…"
 
-#: ui/app.slint:729
+#: ui/app.slint:732
 msgid "Message action completed."
 msgstr "İleti işlemi tamamlandı."
 
-#: ui/app.slint:730
+#: ui/app.slint:733
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr ""
 "Kalıcı silme sıraya alındı. E-posta, sunucu onayladıktan sonra kaybolacak."
 
-#: ui/app.slint:731
+#: ui/app.slint:734
 msgid "Message action failed: {}"
 msgstr "İleti işlemi başarısız: {}"
 
-#: ui/app.slint:732
+#: ui/app.slint:735
 msgid ""
 "Your message may have gone out, but the mail server didn't confirm it. Check "
 "Sent before you send it again."
@@ -2303,455 +2316,455 @@ msgstr ""
 "İletin çıkmış olabilir, ancak e-posta sunucusu onu onaylamadı. Yeniden "
 "göndermeden önce Gönderilenler'i denetle."
 
-#: ui/app.slint:733
+#: ui/app.slint:736
 msgid "Message action failed: message is no longer available"
 msgstr "İleti işlemi başarısız: ileti artık mevcut değil"
 
-#: ui/app.slint:734
+#: ui/app.slint:737
 msgid "Label added."
 msgstr "Etiket eklendi."
 
-#: ui/app.slint:735
+#: ui/app.slint:738
 msgid "Label removed."
 msgstr "Etiket kaldırıldı."
 
-#: ui/app.slint:736
+#: ui/app.slint:739
 msgid "Label created and added."
 msgstr "Etiket oluşturuldu ve eklendi."
 
-#: ui/app.slint:737
+#: ui/app.slint:740
 msgid "Label created."
 msgstr "Etiket oluşturuldu."
 
-#: ui/app.slint:738
+#: ui/app.slint:741
 msgid "Label updated."
 msgstr "Etiket güncellendi."
 
-#: ui/app.slint:739
+#: ui/app.slint:742
 msgid "Label deleted."
 msgstr "Etiket silindi."
 
-#: ui/app.slint:740
+#: ui/app.slint:743
 msgid "No other folder to move this mail to."
 msgstr "Bu e-postayı taşımak için başka klasör yok."
 
-#: ui/app.slint:741
+#: ui/app.slint:744
 msgid "Could not move mail: {}"
 msgstr "E-posta taşınamadı: {}"
 
-#: ui/app.slint:742
+#: ui/app.slint:745
 msgid "Snoozed until {}"
 msgstr "{} tarihine kadar ertelendi"
 
-#: ui/app.slint:743
+#: ui/app.slint:746
 msgid "Could not snooze mail: {}"
 msgstr "E-posta ertelenemedi: {}"
 
-#: ui/app.slint:744
+#: ui/app.slint:747
 msgid "Scheduled to send {}"
 msgstr "Gönderim {} için planlandı"
 
-#: ui/app.slint:745
+#: ui/app.slint:748
 msgid "Could not schedule the message: {}"
 msgstr "İleti planlanamadı: {}"
 
-#: ui/app.slint:746
+#: ui/app.slint:749
 msgid "Could not send the message: {}"
 msgstr "İleti gönderilemedi: {}"
 
-#: ui/app.slint:747
+#: ui/app.slint:750
 msgid "Could not cancel the send: {}"
 msgstr "Gönderim iptal edilemedi: {}"
 
-#: ui/app.slint:748
+#: ui/app.slint:751
 msgid "Send cancelled. The message is a draft again."
 msgstr "Gönderim iptal edildi. İleti yeniden taslak."
 
-#: ui/app.slint:749
+#: ui/app.slint:752
 msgid "This message is no longer scheduled."
 msgstr "Bu ileti artık planlı değil."
 
-#: ui/app.slint:750
+#: ui/app.slint:753
 msgid "Choose a reminder after the time the message goes out."
 msgstr "İleti çıktıktan sonraki bir zaman için hatırlatma seç."
 
-#: ui/app.slint:751 ui/components/composer-actions.slint:585
+#: ui/app.slint:754 ui/components/composer-actions.slint:585
 msgid "Reminds you {} if nobody replies"
 msgstr "Kimse yanıt vermezse {} hatırlatır"
 
-#: ui/app.slint:752
+#: ui/app.slint:755
 msgid "Could not set the reminder: {}"
 msgstr "Hatırlatma ayarlanamadı: {}"
 
-#: ui/app.slint:753
+#: ui/app.slint:756
 msgid "Reminder removed."
 msgstr "Hatırlatma kaldırıldı."
 
-#: ui/app.slint:754
+#: ui/app.slint:757
 msgid "Save recovery code"
 msgstr "Kurtarma kodunu kaydet"
 
-#: ui/app.slint:755
+#: ui/app.slint:758
 msgid "Text files"
 msgstr "Metin dosyaları"
 
-#: ui/app.slint:756
+#: ui/app.slint:759
 msgid "No folder to copy this mail to."
 msgstr "Bu e-postayı kopyalamak için klasör yok."
 
-#: ui/app.slint:757
+#: ui/app.slint:760
 msgid "Attaching the original's files…"
 msgstr "Özgün iletinin dosyaları ekleniyor…"
 
-#: ui/app.slint:758
+#: ui/app.slint:761
 msgid "Could not attach the original's files: {}"
 msgstr "Özgün iletinin dosyaları eklenemedi: {}"
 
-#: ui/app.slint:759
+#: ui/app.slint:762
 msgid "Some of the original's files are over the 25 MB limit for attachments."
 msgstr "Özgün iletinin bazı dosyaları, ekler için 25 MB sınırının üzerinde."
 
-#: ui/app.slint:760
+#: ui/app.slint:763
 msgid "Could not copy mail: {}"
 msgstr "E-posta kopyalanamadı: {}"
 
-#: ui/app.slint:761
+#: ui/app.slint:764
 msgid "Moving mail to the other account…"
 msgstr "E-posta diğer hesaba taşınıyor…"
 
-#: ui/app.slint:762
+#: ui/app.slint:765
 msgid "Copying mail to the other account…"
 msgstr "E-posta diğer hesaba kopyalanıyor…"
 
-#: ui/app.slint:763
+#: ui/app.slint:766
 msgid "Conversation archived."
 msgid_plural "{0} conversations archived."
 msgstr[0] "Görüşme arşivlendi."
 msgstr[1] "{0} görüşme arşivlendi."
 
-#: ui/app.slint:764
+#: ui/app.slint:767
 msgid "Message archived."
 msgid_plural "{0} messages archived."
 msgstr[0] "İleti arşivlendi."
 msgstr[1] "{0} ileti arşivlendi."
 
-#: ui/app.slint:765
+#: ui/app.slint:768
 msgid "Conversation moved to Trash."
 msgid_plural "{0} conversations moved to Trash."
 msgstr[0] "Görüşme Çöp Kutusu'na taşındı."
 msgstr[1] "{0} görüşme Çöp Kutusu'na taşındı."
 
-#: ui/app.slint:766
+#: ui/app.slint:769
 msgid "Message moved to Trash."
 msgid_plural "{0} messages moved to Trash."
 msgstr[0] "İleti Çöp Kutusu'na taşındı."
 msgstr[1] "{0} ileti Çöp Kutusu'na taşındı."
 
-#: ui/app.slint:767
+#: ui/app.slint:770
 msgid "Conversation marked as spam."
 msgid_plural "{0} conversations marked as spam."
 msgstr[0] "Görüşme spam olarak işaretlendi."
 msgstr[1] "{0} görüşme spam olarak işaretlendi."
 
-#: ui/app.slint:768
+#: ui/app.slint:771
 msgid "Message marked as spam."
 msgid_plural "{0} messages marked as spam."
 msgstr[0] "İleti spam olarak işaretlendi."
 msgstr[1] "{0} ileti spam olarak işaretlendi."
 
-#: ui/app.slint:769
+#: ui/app.slint:772
 msgid "Conversation moved."
 msgid_plural "{0} conversations moved."
 msgstr[0] "Görüşme taşındı."
 msgstr[1] "{0} görüşme taşındı."
 
-#: ui/app.slint:770
+#: ui/app.slint:773
 msgid "Message moved."
 msgid_plural "{0} messages moved."
 msgstr[0] "İleti taşındı."
 msgstr[1] "{0} ileti taşındı."
 
-#: ui/app.slint:771
+#: ui/app.slint:774
 msgid "Conversation marked as read."
 msgid_plural "{0} conversations marked as read."
 msgstr[0] "Görüşme okundu olarak işaretlendi."
 msgstr[1] "{0} görüşme okundu olarak işaretlendi."
 
-#: ui/app.slint:772
+#: ui/app.slint:775
 msgid "Message marked as read."
 msgid_plural "{0} messages marked as read."
 msgstr[0] "İleti okundu olarak işaretlendi."
 msgstr[1] "{0} ileti okundu olarak işaretlendi."
 
-#: ui/app.slint:773
+#: ui/app.slint:776
 msgid "Conversation marked as unread."
 msgid_plural "{0} conversations marked as unread."
 msgstr[0] "Görüşme okunmadı olarak işaretlendi."
 msgstr[1] "{0} görüşme okunmadı olarak işaretlendi."
 
-#: ui/app.slint:774
+#: ui/app.slint:777
 msgid "Message marked as unread."
 msgid_plural "{0} messages marked as unread."
 msgstr[0] "İleti okunmadı olarak işaretlendi."
 msgstr[1] "{0} ileti okunmadı olarak işaretlendi."
 
-#: ui/app.slint:775
+#: ui/app.slint:778
 msgid "Conversation starred."
 msgid_plural "{0} conversations starred."
 msgstr[0] "Görüşme yıldızlandı."
 msgstr[1] "{0} görüşme yıldızlandı."
 
-#: ui/app.slint:776
+#: ui/app.slint:779
 msgid "Message starred."
 msgid_plural "{0} messages starred."
 msgstr[0] "İleti yıldızlandı."
 msgstr[1] "{0} ileti yıldızlandı."
 
-#: ui/app.slint:777
+#: ui/app.slint:780
 msgid "Conversation unstarred."
 msgid_plural "{0} conversations unstarred."
 msgstr[0] "Görüşmenin yıldızı kaldırıldı."
 msgstr[1] "{0} görüşmenin yıldızı kaldırıldı."
 
-#: ui/app.slint:778
+#: ui/app.slint:781
 msgid "Message unstarred."
 msgid_plural "{0} messages unstarred."
 msgstr[0] "İletinin yıldızı kaldırıldı."
 msgstr[1] "{0} iletinin yıldızı kaldırıldı."
 
-#: ui/app.slint:779
+#: ui/app.slint:782
 msgid "This can no longer be undone."
 msgstr "Bu artık geri alınamaz."
 
-#: ui/app.slint:780
+#: ui/app.slint:783
 msgid "Could not undo: {}"
 msgstr "Geri alınamadı: {}"
 
-#: ui/app.slint:781
+#: ui/app.slint:784
 msgid "This message names no way to unsubscribe."
 msgstr "Bu ileti, abonelikten çıkma yolu belirtmiyor."
 
-#: ui/app.slint:782
+#: ui/app.slint:785
 msgid "Could not unsubscribe: {}"
 msgstr "Abonelikten çıkılamadı: {}"
 
-#: ui/app.slint:783
+#: ui/app.slint:786
 msgid "Unsubscribed from {}."
 msgstr "{} aboneliğinden çıkıldı."
 
-#: ui/app.slint:784
+#: ui/app.slint:787
 msgid "Unsubscribe request sent to {}."
 msgstr "Abonelikten çıkma isteği {} adresine gönderildi."
 
-#: ui/app.slint:785
+#: ui/app.slint:788
 msgid "Blocked {}."
 msgstr "{} engellendi."
 
-#: ui/app.slint:786
+#: ui/app.slint:789
 msgid "Unblocked {}."
 msgstr "{} engeli kaldırıldı."
 
-#: ui/app.slint:787
+#: ui/app.slint:790
 msgid "Could not block: {}"
 msgstr "Engellenemedi: {}"
 
-#: ui/app.slint:788
+#: ui/app.slint:791
 msgid "Could not unblock: {}"
 msgstr "Engel kaldırılamadı: {}"
 
-#: ui/app.slint:789
+#: ui/app.slint:792
 msgid "Moved one message to the other account."
 msgid_plural "Moved {0} messages to the other account."
 msgstr[0] "Bir ileti diğer hesaba taşındı."
 msgstr[1] "{0} ileti diğer hesaba taşındı."
 
-#: ui/app.slint:790
+#: ui/app.slint:793
 msgid "Copied one message to the other account."
 msgid_plural "Copied {0} messages to the other account."
 msgstr[0] "Bir ileti diğer hesaba kopyalandı."
 msgstr[1] "{0} ileti diğer hesaba kopyalandı."
 
-#: ui/app.slint:791
+#: ui/app.slint:794
 msgid "Moved or copied one message to the other account."
 msgid_plural "Moved or copied {0} messages to the other account."
 msgstr[0] "Bir ileti diğer hesaba taşındı ya da kopyalandı."
 msgstr[1] "{0} ileti diğer hesaba taşındı ya da kopyalandı."
 
-#: ui/app.slint:792
+#: ui/app.slint:795
 msgid "The other account had that message already."
 msgid_plural "The other account had those {0} messages already."
 msgstr[0] "Diğer hesapta bu ileti zaten vardı."
 msgstr[1] "Diğer hesapta bu {0} ileti zaten vardı."
 
-#: ui/app.slint:793
+#: ui/app.slint:796
 msgid "Could not move or copy one message: {1}"
 msgid_plural "Could not move or copy {0} messages: {1}"
 msgstr[0] "Bir ileti taşınamadı ya da kopyalanamadı: {1}"
 msgstr[1] "{0} ileti taşınamadı ya da kopyalanamadı: {1}"
 
-#: ui/app.slint:794
+#: ui/app.slint:797
 msgid "Could not update label: {}"
 msgstr "Etiket güncellenemedi: {}"
 
-#: ui/app.slint:795
+#: ui/app.slint:798
 msgid "Could not save label: {}"
 msgstr "Etiket kaydedilemedi: {}"
 
-#: ui/app.slint:796
+#: ui/app.slint:799
 msgid "Could not delete label: {}"
 msgstr "Etiket silinemedi: {}"
 
-#: ui/app.slint:797
+#: ui/app.slint:800
 msgid "Folder created."
 msgstr "Klasör oluşturuldu."
 
-#: ui/app.slint:798
+#: ui/app.slint:801
 msgid "Folder renamed."
 msgstr "Klasör yeniden adlandırıldı."
 
-#: ui/app.slint:799
+#: ui/app.slint:802
 msgid "Folder deleted."
 msgstr "Klasör silindi."
 
-#: ui/app.slint:800
+#: ui/app.slint:803
 msgid "Could not create folder: {}"
 msgstr "Klasör oluşturulamadı: {}"
 
-#: ui/app.slint:801
+#: ui/app.slint:804
 msgid "Could not rename folder: {}"
 msgstr "Klasör yeniden adlandırılamadı: {}"
 
-#: ui/app.slint:802
+#: ui/app.slint:805
 msgid "Could not delete folder: {}"
 msgstr "Klasör silinemedi: {}"
 
-#: ui/app.slint:803
+#: ui/app.slint:806
 msgid "Could not close preview: {}"
 msgstr "Önizleme kapatılamadı: {}"
 
-#: ui/app.slint:804
+#: ui/app.slint:807
 msgid "Opened the system print view."
 msgstr "Sistem yazdırma görünümü açıldı."
 
-#: ui/app.slint:805
+#: ui/app.slint:808
 msgid "Could not print message: {}"
 msgstr "İleti yazdırılamadı: {}"
 
-#: ui/app.slint:806
+#: ui/app.slint:809
 msgid "Opened the message in your browser."
 msgstr "İleti tarayıcınızda açıldı."
 
-#: ui/app.slint:807
+#: ui/app.slint:810
 msgid "Could not open message in browser: {}"
 msgstr "İleti tarayıcıda açılamadı: {}"
 
-#: ui/app.slint:808
+#: ui/app.slint:811
 msgid "Connect an account before replying or forwarding."
 msgstr "Yanıtlamadan veya iletmeden önce bir hesap bağlayın."
 
-#: ui/app.slint:809
+#: ui/app.slint:812
 msgid "Choose a message first."
 msgstr "Önce bir ileti seçin."
 
-#: ui/app.slint:810
+#: ui/app.slint:813
 msgid "Only drafts can be reopened for editing."
 msgstr "Yalnızca taslaklar düzenlenmek üzere yeniden açılabilir."
 
-#: ui/app.slint:811
+#: ui/app.slint:814
 msgid "Could not open draft: {}"
 msgstr "Taslak açılamadı: {}"
 
-#: ui/app.slint:812
+#: ui/app.slint:815
 msgid "Could not open draft: invalid account identifier"
 msgstr "Taslak açılamadı: geçersiz hesap tanımlayıcısı"
 
-#: ui/app.slint:813
+#: ui/app.slint:816
 msgid "Connected account"
 msgstr "Bağlı hesap"
 
-#: ui/app.slint:814
+#: ui/app.slint:817
 msgid "Could not open composer: {}"
 msgstr "Oluşturucu açılamadı: {}"
 
-#: ui/app.slint:815
+#: ui/app.slint:818
 msgid "Add an account to send mail."
 msgstr "E-posta göndermek için bir hesap ekle."
 
-#: ui/app.slint:816 ui/components/sidebar.slint:686
+#: ui/app.slint:819 ui/components/sidebar.slint:686
 #: ui/dialogs/settings-dialog.slint:2525
 msgid "On this device"
 msgstr "Bu cihazda"
 
-#: ui/app.slint:817
+#: ui/app.slint:820
 msgid "Could not open composer: invalid account identifier"
 msgstr "Oluşturucu açılamadı: geçersiz hesap tanımlayıcısı"
 
 #. Reply and forward quotation headers, written into the draft.
-#: ui/app.slint:823
+#: ui/app.slint:826
 msgid "On {}, {} wrote:"
 msgstr "{} tarihinde {} şunu yazdı:"
 
-#: ui/app.slint:824
+#: ui/app.slint:827
 msgid "{} wrote:"
 msgstr "{} şunu yazdı:"
 
-#: ui/app.slint:825 ui/components/email-composer.slint:944
+#: ui/app.slint:828 ui/components/email-composer.slint:944
 msgid "Forwarded message"
 msgstr "İletilen ileti"
 
-#: ui/app.slint:826
+#: ui/app.slint:829
 msgid "All profiles"
 msgstr "Tüm profiller"
 
-#: ui/app.slint:827
+#: ui/app.slint:830
 msgid "A saved search named “{}” already exists."
 msgstr "“{}” adında kayıtlı bir arama zaten var."
 
-#: ui/app.slint:828
+#: ui/app.slint:831
 msgid "Couldn't save the search: {}"
 msgstr "Arama kaydedilemedi: {}"
 
-#: ui/app.slint:829
+#: ui/app.slint:832
 msgctxt "forwarded message header"
 msgid "From: {}"
 msgstr "Kimden: {}"
 
-#: ui/app.slint:830
+#: ui/app.slint:833
 msgctxt "forwarded message header"
 msgid "Date: {}"
 msgstr "Tarih: {}"
 
-#: ui/app.slint:831
+#: ui/app.slint:834
 msgctxt "forwarded message header"
 msgid "Subject: {}"
 msgstr "Konu: {}"
 
-#: ui/app.slint:832
+#: ui/app.slint:835
 msgctxt "forwarded message header"
 msgid "To: {}"
 msgstr "Kime: {}"
 
-#: ui/app.slint:833
+#: ui/app.slint:836
 msgid "Attach files to this email"
 msgstr "Bu e-postaya dosya ekleyin"
 
-#: ui/app.slint:834
+#: ui/app.slint:837
 msgid "Could not add attachments: {}"
 msgstr "Ekler eklenemedi: {}"
 
-#: ui/app.slint:835
+#: ui/app.slint:838
 msgid "Could not show the quoted message: {}"
 msgstr "Alıntılanan ileti gösterilemedi: {}"
 
-#: ui/app.slint:836
+#: ui/app.slint:839
 msgid "Added 1 attachment."
 msgstr "1 ek eklendi."
 
-#: ui/app.slint:837
+#: ui/app.slint:840
 msgid "Added {} attachments."
 msgstr "{} ek eklendi."
 
-#: ui/app.slint:838
+#: ui/app.slint:841
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
@@ -2759,213 +2772,213 @@ msgstr ""
 "Eklenen ekler: {}. Atlananlar: {} (yinelenen, okunamayan veya toplam 25 MB "
 "sınırını aşan)."
 
-#: ui/app.slint:839
+#: ui/app.slint:842
 msgid "Attachment removed."
 msgstr "Ek kaldırıldı."
 
-#: ui/app.slint:840
+#: ui/app.slint:843
 msgid "Insert images in this email"
 msgstr "Bu e-postaya görselleri yerleştir"
 
-#: ui/app.slint:841
+#: ui/app.slint:844
 msgid "Images"
 msgstr "Görseller"
 
-#: ui/app.slint:842
+#: ui/app.slint:845
 msgid "Could not add images: {}"
 msgstr "Görseller eklenemedi: {}"
 
-#: ui/app.slint:843
+#: ui/app.slint:846
 msgid "Attaching the message…"
 msgid_plural "Attaching {0} messages…"
 msgstr[0] "İleti ekleniyor…"
 msgstr[1] "{0} ileti ekleniyor…"
 
-#: ui/app.slint:844
+#: ui/app.slint:847
 msgid "Could not attach a forwarded message: {}"
 msgstr "İletilen ileti eklenemedi: {}"
 
-#: ui/app.slint:845
+#: ui/app.slint:848
 msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr "{} bir PNG, JPEG, GIF ya da WebP görseli değil."
 
-#: ui/app.slint:846
+#: ui/app.slint:849
 msgid "Images and attachments can take up to 25 MB in all."
 msgstr "Görseller ve ekler toplamda 25 MB'ye kadar yer kaplayabilir."
 
-#: ui/app.slint:847
+#: ui/app.slint:850
 msgid "At full size, the photos would take the message over 25 MB."
 msgstr "Tam boyutlarında fotoğraflar, iletiyi 25 MB'nin üzerine çıkarır."
 
-#: ui/app.slint:848
+#: ui/app.slint:851
 msgid "Formatting and pictures removed. Undo restores them."
 msgstr "Biçimlendirme ve resimler kaldırıldı. Geri al bunları kurtarır."
 
-#: ui/app.slint:849
+#: ui/app.slint:852
 msgid "Give the signature a name."
 msgstr "İmzaya bir ad ver."
 
-#: ui/app.slint:850
+#: ui/app.slint:853
 msgid "A signature can hold pictures, but not attachments."
 msgstr "Bir imza resim içerebilir ama ek içeremez."
 
-#: ui/app.slint:851
+#: ui/app.slint:854
 msgid "Choose the account this message should be sent from."
 msgstr "Bu iletinin hangi hesaptan gönderileceğini seçin."
 
-#: ui/app.slint:852
+#: ui/app.slint:855
 msgid "Choose a verified sender identity for this message."
 msgstr "Bu ileti için doğrulanmış bir gönderen kimliği seçin."
 
-#: ui/app.slint:853
+#: ui/app.slint:856
 msgid "Connect an account before saving or sending mail."
 msgstr "E-posta kaydetmeden veya göndermeden önce bir hesap bağlayın."
 
-#: ui/app.slint:854
+#: ui/app.slint:857
 msgid "Message queued for delivery (action {})."
 msgstr "İleti gönderilmek üzere kuyruğa alındı (eylem {})."
 
-#: ui/app.slint:855
+#: ui/app.slint:858
 msgid "Sending message…"
 msgstr "İleti gönderiliyor…"
 
-#: ui/app.slint:856
+#: ui/app.slint:859
 msgid "This message has already been sent."
 msgstr "Bu ileti zaten gönderildi."
 
-#: ui/app.slint:857
+#: ui/app.slint:860
 msgid "Could not take the message back: {}"
 msgstr "İleti geri alınamadı: {}"
 
-#: ui/app.slint:858
+#: ui/app.slint:861
 msgid "Message sent."
 msgstr "İleti gönderildi."
 
-#: ui/app.slint:859
+#: ui/app.slint:862
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "İleti gönderilemedi: {} Taslağınız korunuyor."
 
-#: ui/app.slint:860
+#: ui/app.slint:863
 msgid "Draft saved locally (#{})."
 msgstr "Taslak yerel olarak kaydedildi (#{})."
 
-#: ui/app.slint:861
+#: ui/app.slint:864
 msgid "Compose failed: {}"
 msgstr "Oluşturma başarısız: {}"
 
-#: ui/app.slint:862
+#: ui/app.slint:865
 msgid "Could not open the message in its own window."
 msgstr "İleti kendi penceresinde açılamadı."
 
-#: ui/app.slint:863
+#: ui/app.slint:866
 msgid ""
 "Could not open the message in its own window, so it was saved to Drafts."
 msgstr "İleti kendi penceresinde açılamadı; bu yüzden Taslaklar'a kaydedildi."
 
-#: ui/app.slint:864
+#: ui/app.slint:867
 msgid "Connect an account before managing email templates."
 msgstr "E-posta şablonlarını yönetmeden önce bir hesap bağlayın."
 
-#: ui/app.slint:865
+#: ui/app.slint:868
 msgid "Could not load email templates: {}"
 msgstr "E-posta şablonları yüklenemedi: {}"
 
-#: ui/app.slint:866
+#: ui/app.slint:869
 msgid "Enter a template name."
 msgstr "Bir şablon adı girin."
 
-#: ui/app.slint:867
+#: ui/app.slint:870
 msgid "Add a subject or message to the template."
 msgstr "Şablona bir konu veya ileti ekleyin."
 
-#: ui/app.slint:868
+#: ui/app.slint:871
 msgid "Email template saved."
 msgstr "E-posta şablonu kaydedildi."
 
-#: ui/app.slint:869
+#: ui/app.slint:872
 msgid "Could not save email template: {}"
 msgstr "E-posta şablonu kaydedilemedi: {}"
 
-#: ui/app.slint:870
+#: ui/app.slint:873
 msgid "Email template deleted."
 msgstr "E-posta şablonu silindi."
 
-#: ui/app.slint:871
+#: ui/app.slint:874
 msgid "Could not delete email template: {}"
 msgstr "E-posta şablonu silinemedi: {}"
 
-#: ui/app.slint:872
+#: ui/app.slint:875
 msgid "Email template is no longer available."
 msgstr "E-posta şablonu artık mevcut değil."
 
-#: ui/app.slint:873
+#: ui/app.slint:876
 msgid "Email template inserted."
 msgstr "E-posta şablonu eklendi."
 
-#: ui/app.slint:874 ui/components/composer-actions.slint:978
+#: ui/app.slint:877 ui/components/composer-actions.slint:978
 msgid "Share files by link"
 msgstr "Dosyaları bağlantıyla paylaş"
 
-#: ui/app.slint:875
+#: ui/app.slint:878
 msgid "Connect a storage service in Settings to send files by link."
 msgstr ""
 "Dosyaları bağlantıyla göndermek için Ayarlar'da bir depolama hizmeti bağla."
 
-#: ui/app.slint:876
+#: ui/app.slint:879
 msgid "{} asks for the password {}. Pass it on another way."
 msgstr "{} {} parolasını istiyor. Parolayı başka bir yolla ilet."
 
-#: ui/app.slint:877
+#: ui/app.slint:880
 msgid "{} couldn't go up: {}"
 msgstr "{} yukarı çıkamadı: {}"
 
-#: ui/app.slint:878
+#: ui/app.slint:881
 msgid "Uploading… {}%"
 msgstr "Yükleniyor… %{}"
 
-#: ui/app.slint:879 ui/app.slint:912
+#: ui/app.slint:882 ui/app.slint:915
 msgid "{} · until {}"
 msgstr "{} · {} tarihine kadar"
 
-#: ui/app.slint:880
+#: ui/app.slint:883
 msgid "1 file shared by link"
 msgid_plural "{0} files shared by link"
 msgstr[0] "Bağlantıyla paylaşılan 1 dosya"
 msgstr[1] "Bağlantıyla paylaşılan {0} dosya"
 
-#: ui/app.slint:881
+#: ui/app.slint:884
 msgid "available until {}"
 msgstr "{} tarihine kadar kullanılabilir"
 
-#: ui/app.slint:882
+#: ui/app.slint:885
 msgid "password protected"
 msgstr "parola korumalı"
 
-#: ui/app.slint:883
+#: ui/app.slint:886
 msgid "Remove {} to send the message."
 msgstr "İletiyi göndermek için {} kaldır."
 
-#: ui/app.slint:884
+#: ui/app.slint:887
 msgid "Files over the 25 MB limit go as links."
 msgstr "25 MB sınırının üzerindeki dosyalar bağlantı olarak gider."
 
-#: ui/app.slint:885
+#: ui/app.slint:888
 msgid "Large files preference saved."
 msgstr "Büyük dosyalar tercihi kaydedildi."
 
-#: ui/app.slint:886
+#: ui/app.slint:889
 msgid "Could not save the large files preference: {}"
 msgstr "Büyük dosyalar tercihi kaydedilemedi: {}"
 
-#: ui/app.slint:887
+#: ui/app.slint:890
 msgid "Fill in {} before sending."
 msgstr "Göndermeden önce {} doldur."
 
-#: ui/app.slint:888
+#: ui/app.slint:891
 msgid "Fill in {} or send again."
 msgstr "{} doldur ya da yeniden gönder."
 
-#: ui/app.slint:889
+#: ui/app.slint:892
 msgctxt ""
 "Comma-separated words that suggest a message has a file attached. Keep the "
 "English ones out: they always count."
@@ -2975,43 +2988,43 @@ msgid ""
 "letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
 msgstr "ek, ekli, eke, ekte, eklerini, özgeçmiş, özgeçmişi, ön yazı, ön yazısı"
 
-#: ui/app.slint:890
+#: ui/app.slint:893
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "E-posta şablonu eklendi, ancak kullanımı kaydedilemedi: {}"
 
-#: ui/app.slint:891
+#: ui/app.slint:894
 msgid "Choose a supported account type and connection security."
 msgstr "Desteklenen bir hesap türü ve bağlantı güvenliği seç."
 
-#: ui/app.slint:892
+#: ui/app.slint:895
 msgid "IMAP port must be between 1 and 65535."
 msgstr "IMAP bağlantı noktası 1 ile 65535 arasında olmalıdır."
 
-#: ui/app.slint:893
+#: ui/app.slint:896
 msgid "POP3 port must be between 1 and 65535."
 msgstr "POP3 bağlantı noktası 1 ile 65535 arasında olmalı."
 
-#: ui/app.slint:894
+#: ui/app.slint:897
 msgid "SMTP port must be between 1 and 65535."
 msgstr "SMTP bağlantı noktası 1 ile 65535 arasında olmalıdır."
 
-#: ui/app.slint:895
+#: ui/app.slint:898
 msgid "Local mail data is unavailable. Retry startup."
 msgstr "Yerel e-posta verisi kullanılamıyor. Başlatmayı yeniden deneyin."
 
-#: ui/app.slint:896
+#: ui/app.slint:899
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "JMAP keşfediliyor ve yetenekler denetleniyor…"
 
-#: ui/app.slint:897
+#: ui/app.slint:900
 msgid "Certificate imported. Connect to verify the server."
 msgstr "Sertifika içe aktarıldı. Sunucuyu doğrulamak için bağlanın."
 
-#: ui/app.slint:898
+#: ui/app.slint:901
 msgid "Could not load account preferences: {}"
 msgstr "Hesap tercihleri yüklenemedi: {}"
 
-#: ui/app.slint:899
+#: ui/app.slint:902
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -3019,27 +3032,27 @@ msgstr ""
 "Düzenlediğiniz imza korundu. Başka birini eklemeden önce onu ileti metni "
 "olarak tutmak için İmza yok'u seçin."
 
-#: ui/app.slint:900
+#: ui/app.slint:903
 msgid "Certificate import failed: {}"
 msgstr "Sertifika içe aktarılamadı: {}"
 
-#: ui/app.slint:901
+#: ui/app.slint:904
 msgid "Testing IMAP and SMTP connections…"
 msgstr "IMAP ve SMTP bağlantıları sınanıyor…"
 
-#: ui/app.slint:902
+#: ui/app.slint:905
 msgid "Testing POP3 and SMTP connections…"
 msgstr "POP3 ve SMTP bağlantıları sınanıyor…"
 
-#: ui/app.slint:903
+#: ui/app.slint:906
 msgid "Testing the IMAP connection…"
 msgstr "IMAP bağlantısı sınanıyor…"
 
-#: ui/app.slint:904
+#: ui/app.slint:907
 msgid "Testing the POP3 connection…"
 msgstr "POP3 bağlantısı sınanıyor…"
 
-#: ui/app.slint:909
+#: ui/app.slint:912
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
@@ -3047,17 +3060,17 @@ msgstr ""
 "Başka bir tarayıcı yetkilendirmesi zaten sürüyor; onu bitirin veya İptal'i "
 "seçin."
 
-#: ui/app.slint:910
+#: ui/app.slint:913
 msgid "{n} account"
 msgid_plural "{n} accounts"
 msgstr[0] "{n} hesap"
 msgstr[1] "{n} hesap"
 
-#: ui/app.slint:911
+#: ui/app.slint:914
 msgid "{} · from {}"
 msgstr "{} · {} adresinden"
 
-#: ui/app.slint:913
+#: ui/app.slint:916
 msgid ""
 "POP3 accounts can't have automatic replies from Flectar Mail. Your "
 "provider's webmail may offer them."
@@ -3065,7 +3078,7 @@ msgstr ""
 "POP3 hesapları Flectar Mail'den otomatik yanıt alamaz. Sağlayıcının webmail "
 "hizmeti bunları sunabilir."
 
-#: ui/app.slint:914
+#: ui/app.slint:917
 msgid ""
 "Flectar Mail can't set this account's automatic replies yet. Your provider's "
 "webmail can."
@@ -3073,7 +3086,7 @@ msgstr ""
 "Flectar Mail bu hesabın otomatik yanıtlarını henüz ayarlayamıyor. "
 "Sağlayıcının webmail hizmeti ayarlayabilir."
 
-#: ui/app.slint:915
+#: ui/app.slint:918
 msgid ""
 "Gmail answers each sender once, and again after four days. Mailing lists and "
 "spam get no reply."
@@ -3081,18 +3094,18 @@ msgstr ""
 "Gmail, her gönderene bir kez yanıt verir ve dört gün sonra yeniden verir. E-"
 "posta listeleri ve spam yanıt almaz."
 
-#: ui/app.slint:916
+#: ui/app.slint:919
 msgid "Outlook answers each sender once while replies are on."
 msgstr "Outlook, yanıtlar açıkken her gönderene bir kez yanıt verir."
 
-#: ui/app.slint:917
+#: ui/app.slint:920
 msgid ""
 "Your server answers each sender once every few days, and never mailing lists."
 msgstr ""
 "Sunucun, her gönderene birkaç günde bir yanıt verir ve e-posta listelerine "
 "hiç yanıt vermez."
 
-#: ui/app.slint:918
+#: ui/app.slint:921
 msgid ""
 "Your server answers each sender once, and again after four days. Mailing "
 "lists and spam get no reply."
@@ -3100,7 +3113,7 @@ msgstr ""
 "Sunucun, her gönderene bir kez yanıt verir ve dört gün sonra yeniden verir. "
 "E-posta listeleri ve spam yanıt almaz."
 
-#: ui/app.slint:919
+#: ui/app.slint:922
 msgid ""
 "Flectar Mail found no way to set automatic replies on this account's server. "
 "Your provider's webmail may offer them."
@@ -3108,230 +3121,230 @@ msgstr ""
 "Flectar Mail, bu hesabın sunucusunda otomatik yanıt ayarlamanın bir yolunu "
 "bulamadı. Sağlayıcının webmail hizmeti bunları sunabilir."
 
-#: ui/app.slint:920
+#: ui/app.slint:923
 msgid "Checking whether this account's server can send automatic replies…"
 msgstr ""
 "Bu hesabın sunucusunun otomatik yanıt gönderip gönderemeyeceği denetleniyor…"
 
-#: ui/app.slint:921
+#: ui/app.slint:924
 msgid "Couldn't check this account's server: {}"
 msgstr "Bu hesabın sunucusu denetlenemedi: {}"
 
-#: ui/app.slint:922
+#: ui/app.slint:925
 msgid "Outlook needs a last day with a first day."
 msgstr "Outlook, ilk günle birlikte bir son gün gerektirir."
 
-#: ui/app.slint:923
+#: ui/app.slint:926
 msgid "Senders who aren't in your contacts get no reply."
 msgstr "Kişilerinde olmayan gönderenler yanıt almaz."
 
-#: ui/app.slint:924
+#: ui/app.slint:927
 msgid ""
 "Senders outside your organization who aren't in your contacts get no reply."
 msgstr ""
 "Kuruluşunun dışında olan ve kişilerinde bulunmayan gönderenler yanıt almaz."
 
-#: ui/app.slint:925
+#: ui/app.slint:928
 msgid "Write the first day as YYYY-MM-DD."
 msgstr "İlk günü YYYY-MM-DD biçiminde yaz."
 
-#: ui/app.slint:926
+#: ui/app.slint:929
 msgid "Write the last day as YYYY-MM-DD."
 msgstr "Son günü YYYY-MM-DD biçiminde yaz."
 
-#: ui/app.slint:927
+#: ui/app.slint:930
 msgid "The last day comes before the first."
 msgstr "Son gün, ilk günden önce geliyor."
 
-#: ui/app.slint:928
+#: ui/app.slint:931
 msgid "Write the message to send."
 msgstr "Gönderilecek iletiyi yaz."
 
-#: ui/app.slint:929
+#: ui/app.slint:932
 msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr "Tarayıcında Flectar Mail'in Gmail ayarlarını değiştirmesine izin ver."
 
-#: ui/app.slint:930 ui/network.slint:194
+#: ui/app.slint:933 ui/network.slint:194
 msgid "Saved."
 msgstr "Kaydedildi."
 
-#: ui/app.slint:931
+#: ui/app.slint:934
 msgid "Could not save automatic replies: {}"
 msgstr "Otomatik yanıtlar kaydedilemedi: {}"
 
-#: ui/app.slint:932 ui/dialogs/settings-dialog.slint:2790
+#: ui/app.slint:935 ui/dialogs/settings-dialog.slint:2790
 #: ui/dialogs/settings-dialog.slint:2833 ui/views/onboarding-view.slint:174
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "Bu sağlayıcıyı etkinleştirmek için Oturum açma ayarlarında uygulama "
 "anahtarları ekleyin."
 
-#: ui/app.slint:933
+#: ui/app.slint:936
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Gmail veya Outlook OAuth seçin."
 
-#: ui/app.slint:934
+#: ui/app.slint:937
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr "Oturum açmayı tarayıcınızda tamamlayın veya burada İptal'i seçin."
 
-#: ui/app.slint:935
+#: ui/app.slint:938
 msgid "Cancelling browser sign-in…"
 msgstr "Tarayıcıyla oturum açma iptal ediliyor…"
 
-#: ui/app.slint:936
+#: ui/app.slint:939
 msgid "Finishing browser sign-in…"
 msgstr "Tarayıcıyla oturum açma tamamlanıyor…"
 
-#: ui/app.slint:937
+#: ui/app.slint:940
 msgid "Could not use that browser address: {}"
 msgstr "O tarayıcı adresi kullanılamadı: {}"
 
-#: ui/app.slint:938
+#: ui/app.slint:941
 msgid "Calendar core is unavailable."
 msgstr "Takvim çekirdeği kullanılamıyor."
 
-#: ui/app.slint:939
+#: ui/app.slint:942
 msgid "Account no longer exists."
 msgstr "Hesap artık yok."
 
-#: ui/app.slint:940
+#: ui/app.slint:943
 msgid "Authorize calendar access in your browser."
 msgstr "Takvim erişimini tarayıcınızda yetkilendirin."
 
-#: ui/app.slint:941
+#: ui/app.slint:944
 msgid "OAuth app keys saved."
 msgstr "OAuth uygulama anahtarları kaydedildi."
 
-#: ui/app.slint:942
+#: ui/app.slint:945
 msgid "{} OAuth settings saved."
 msgstr "{} OAuth ayarları kaydedildi."
 
-#: ui/app.slint:943
+#: ui/app.slint:946
 msgid "OAuth settings failed: {}"
 msgstr "OAuth ayarları başarısız: {}"
 
-#: ui/app.slint:944
+#: ui/app.slint:947
 msgid "Mail refresh failed: {}"
 msgstr "E-posta yenilemesi başarısız: {}"
 
-#: ui/app.slint:945
+#: ui/app.slint:948
 msgid "Mail filter failed: {}"
 msgstr "E-posta filtresi başarısız: {}"
 
-#: ui/app.slint:946
+#: ui/app.slint:949
 msgid "Mail pagination failed: {}"
 msgstr "E-posta sayfalaması başarısız: {}"
 
-#: ui/app.slint:947
+#: ui/app.slint:950
 msgid "Could not mark message as read: {}"
 msgstr "İleti okundu olarak işaretlenemedi: {}"
 
-#: ui/app.slint:948 ui/views/mail-reading-pane.slint:199
+#: ui/app.slint:951 ui/views/mail-reading-pane.slint:199
 #: ui/views/mail-reading-pane.slint:1462
 msgid "Loading message…"
 msgstr "İleti yükleniyor…"
 
-#: ui/app.slint:1019 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:1022 ui/components/workspace-navigation.slint:787
 #: ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26
 #: ui/views/onboarding-view.slint:140
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1752 ui/app.slint:1765
+#: ui/app.slint:1755 ui/app.slint:1768
 msgid "Global Labels (local only)"
 msgstr "Genel Etiketler (yalnızca yerel)"
 
-#: ui/app.slint:2686
+#: ui/app.slint:2689
 msgid "Drop to start a new message"
 msgstr "Yeni ileti başlatmak için bırak"
 
-#: ui/app.slint:2694 ui/components/email-composer.slint:1245
+#: ui/app.slint:2697 ui/components/email-composer.slint:1245
 msgid "Pictures go in the text, and other files are attached."
 msgstr "Resimler metne girer, diğer dosyalar ek olarak eklenir."
 
-#: ui/app.slint:2762
+#: ui/app.slint:2765
 msgid "Empty Trash?"
 msgstr "Çöp Kutusu boşaltılsın mı?"
 
-#: ui/app.slint:2762 ui/views/files-view.slint:578
+#: ui/app.slint:2765 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "Kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2766
+#: ui/app.slint:2769
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 "Bağlı tüm hesapların Çöp Kutusu'ndaki iletiler kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2767
+#: ui/app.slint:2770
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "Bu hesabın Çöp Kutusu'ndaki tüm iletiler kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2769
+#: ui/app.slint:2772
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "Çöp Kutusu'ndaki seçili görüşmeler kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2770
+#: ui/app.slint:2773
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Bu görüşme Çöp Kutusu'ndan kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2771 ui/app.slint:2797 ui/components/calendar.slint:1261
+#: ui/app.slint:2774 ui/app.slint:2800 ui/components/calendar.slint:1261
 msgid "This action cannot be undone."
 msgstr "Bu işlem geri alınamaz."
 
-#: ui/app.slint:2772 ui/dialogs/settings-dialog.slint:2592
+#: ui/app.slint:2775 ui/dialogs/settings-dialog.slint:2592
 msgid "Empty Trash"
 msgstr "Çöp Kutusunu Boşalt"
 
-#: ui/app.slint:2772 ui/views/files-view.slint:660
+#: ui/app.slint:2775 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "Kalıcı olarak sil"
 
-#: ui/app.slint:2794
+#: ui/app.slint:2797
 msgid "Mark all as read?"
 msgstr "Tümü okundu olarak işaretlensin mi?"
 
-#: ui/app.slint:2796
+#: ui/app.slint:2799
 msgid "All unread messages in {} will be marked as read."
 msgstr "{} içindeki tüm okunmamış iletiler okundu olarak işaretlenecek."
 
-#: ui/app.slint:2798
+#: ui/app.slint:2801
 msgid "Mark all as read"
 msgstr "Tümünü okundu olarak işaretle"
 
-#: ui/app.slint:2816
+#: ui/app.slint:2819
 msgid "Run this rule on the Inbox?"
 msgstr "Bu kural Gelen Kutusu'nda çalıştırılsın mı?"
 
-#: ui/app.slint:2818
+#: ui/app.slint:2821
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] "Şu anda orada bir iletiyle eşleşiyor."
 msgstr[1] "Şu anda orada {n} iletiyle eşleşiyor."
 
-#: ui/app.slint:2820
+#: ui/app.slint:2823
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] "Bir tane daha yalnızca gövdesi indirildiğinde denetlenebilir."
 msgstr[1] "{n} tane daha yalnızca gövdeleri indirildiğinde denetlenebilir."
 
-#: ui/app.slint:2821
+#: ui/app.slint:2824
 msgid "Undo takes it back."
 msgstr "Geri al, onu geri getirir."
 
-#: ui/app.slint:2822
+#: ui/app.slint:2825
 msgid "Run rule"
 msgstr "Kuralı çalıştır"
 
-#: ui/app.slint:2841
+#: ui/app.slint:2844
 msgid "Replace changes made elsewhere?"
 msgstr "Başka yerde yapılan değişiklikler değiştirilsin mi?"
 
-#: ui/app.slint:2842
+#: ui/app.slint:2845
 msgid "Run replies before your filters?"
 msgstr "Yanıtlar filtrelerinden önce mi çalışsın?"
 
-#: ui/app.slint:2845
+#: ui/app.slint:2848
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
@@ -3339,7 +3352,7 @@ msgstr ""
 "Flectar Mail'in sunucunda tuttuğu otomatik yanıt betiği, Flectar Mail "
 "dışında değiştirildi."
 
-#: ui/app.slint:2846
+#: ui/app.slint:2849
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
@@ -3347,43 +3360,43 @@ msgstr ""
 "Sunucun, senin bu filtre betiğini çalıştırıyor. Flectar Mail önce otomatik "
 "yanıtları, sonra değiştirilmeden senin betiğini çalıştırır."
 
-#: ui/app.slint:2848
+#: ui/app.slint:2851
 msgid "Saving replaces those changes with what you set here."
 msgstr "Kaydetmek, o değişiklikleri burada ayarladıklarınla değiştirir."
 
-#: ui/app.slint:2849
+#: ui/app.slint:2852
 msgid "Your filters keep running, also once replies are off."
 msgstr "Filtrelerin çalışmaya devam eder; yanıtlar kapatıldığında bile."
 
-#: ui/app.slint:2850
+#: ui/app.slint:2853
 msgid "Replace changes"
 msgstr "Değişiklikleri değiştir"
 
-#: ui/app.slint:2850
+#: ui/app.slint:2853
 msgid "Run both"
 msgstr "İkisini de çalıştır"
 
-#: ui/app.slint:3053
+#: ui/app.slint:3056
 msgid "Mailbox startup failed"
 msgstr "Posta kutusu başlatılamadı"
 
-#: ui/app.slint:3059
+#: ui/app.slint:3062
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail yerel depolamayı açamadı"
 
-#: ui/app.slint:3072
+#: ui/app.slint:3075
 msgid "Diagnostic ID: {}"
 msgstr "Tanılama kimliği: {}"
 
-#: ui/app.slint:3075
+#: ui/app.slint:3078
 msgid "Diagnostic ID {}"
 msgstr "Tanılama kimliği {}"
 
-#: ui/app.slint:3080
+#: ui/app.slint:3083
 msgid "Retry"
 msgstr "Yeniden dene"
 
-#: ui/app.slint:3088 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3091 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Tanılama bilgilerini kopyala"
 
@@ -3477,59 +3490,91 @@ msgstr ""
 msgid "Add CalDAV calendar"
 msgstr "CalDAV takvimi ekle"
 
-#: ui/components/account-mail-preferences.slint:137
+#: ui/components/account-mail-preferences.slint:146
+msgid "Cc"
+msgstr "Cc"
+
+#: ui/components/account-mail-preferences.slint:147
+msgid "Addresses that get a copy (optional)"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:150
+msgid "Bcc"
+msgstr "Bcc"
+
+#: ui/components/account-mail-preferences.slint:151
+msgid "Addresses that get a hidden copy (optional)"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:167
+#, fuzzy
+#| msgid "Sync {}"
+msgid "Cc {}"
+msgstr "{} için eşitle"
+
+#: ui/components/account-mail-preferences.slint:168
+#, fuzzy
+#| msgid "Sync {}"
+msgid "Bcc {}"
+msgstr "{} için eşitle"
+
+#: ui/components/account-mail-preferences.slint:169
+msgid "Bcc {} from your provider"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:175
 msgid "Server allows any address at this domain"
 msgstr "Sunucu bu etki alanındaki tüm adreslere izin veriyor"
 
-#: ui/components/account-mail-preferences.slint:140
+#: ui/components/account-mail-preferences.slint:178
 msgid "Awaiting verification by the provider; cannot be selected yet"
 msgstr "Sağlayıcı doğrulaması bekleniyor; henüz seçilemez"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:181
 msgid "The server refused the last message from this address: {}"
 msgstr "Sunucu bu adresten gönderilen son iletiyi reddetti: {}"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:181
 msgid "The server refused the last message from this address"
 msgstr "Sunucu bu adresten gönderilen son iletiyi reddetti"
 
-#: ui/components/account-mail-preferences.slint:146
+#: ui/components/account-mail-preferences.slint:184
 msgid "Sign-in address · replies go to {}"
 msgstr "Oturum açma adresi · yanıtlar {} adresine gider"
 
-#: ui/components/account-mail-preferences.slint:146
+#: ui/components/account-mail-preferences.slint:184
 msgid "Sign-in address"
 msgstr "Oturum açma adresi"
 
-#: ui/components/account-mail-preferences.slint:150
+#: ui/components/account-mail-preferences.slint:188
 msgid "Added by you · accepted by the server · replies go to {}"
 msgstr "Senin eklediğin · sunucu kabul etti · yanıtlar {} adresine gider"
 
-#: ui/components/account-mail-preferences.slint:150
+#: ui/components/account-mail-preferences.slint:188
 msgid "Added by you · accepted by the server"
 msgstr "Senin eklediğin · sunucu kabul etti"
 
-#: ui/components/account-mail-preferences.slint:152
+#: ui/components/account-mail-preferences.slint:190
 msgid "Added by you · not used yet · replies go to {}"
 msgstr "Senin eklediğin · henüz kullanılmadı · yanıtlar {} adresine gider"
 
-#: ui/components/account-mail-preferences.slint:152
+#: ui/components/account-mail-preferences.slint:190
 msgid "Added by you · not used yet"
 msgstr "Senin eklediğin · henüz kullanılmadı"
 
-#: ui/components/account-mail-preferences.slint:154
+#: ui/components/account-mail-preferences.slint:192
 msgid "Provided by the server · replies go to {}"
 msgstr "Sunucu tarafından sağlanıyor · yanıtlar {} adresine gider"
 
-#: ui/components/account-mail-preferences.slint:154
+#: ui/components/account-mail-preferences.slint:192
 msgid "Provided by the server"
 msgstr "Sunucu tarafından sağlanıyor"
 
-#: ui/components/account-mail-preferences.slint:158
+#: ui/components/account-mail-preferences.slint:196
 msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgstr "Gönderen kimlikleri, imzalar, OpenPGP ve otomatik yanıtlar"
 
-#: ui/components/account-mail-preferences.slint:159
+#: ui/components/account-mail-preferences.slint:197
 msgid ""
 "Choose an account to manage its sender identity, signature, message "
 "protection and automatic replies."
@@ -3537,40 +3582,40 @@ msgstr ""
 "Gönderen kimliğini, imzasını, ileti korumasını ve otomatik yanıtlarını "
 "yönetmek için bir hesap seç."
 
-#: ui/components/account-mail-preferences.slint:170
+#: ui/components/account-mail-preferences.slint:208
 msgid "Signatures"
 msgstr "İmzalar"
 
-#: ui/components/account-mail-preferences.slint:171
+#: ui/components/account-mail-preferences.slint:209
 msgid "OpenPGP"
 msgstr "OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:172
+#: ui/components/account-mail-preferences.slint:210
 msgid "Automatic replies"
 msgstr "Otomatik yanıtlar"
 
-#: ui/components/account-mail-preferences.slint:177
+#: ui/components/account-mail-preferences.slint:215
 msgid "Default sender identity"
 msgstr "Varsayılan gönderen kimliği"
 
-#: ui/components/account-mail-preferences.slint:177
+#: ui/components/account-mail-preferences.slint:215
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr "Yeni iletiler için önceden seçilir. Oturum açma adresiniz değişmez."
 
-#: ui/components/account-mail-preferences.slint:183
+#: ui/components/account-mail-preferences.slint:221
 msgid "Save sender default"
 msgstr "Varsayılan göndereni kaydet"
 
-#: ui/components/account-mail-preferences.slint:184
+#: ui/components/account-mail-preferences.slint:222
 msgid "Refresh sender identities"
 msgstr "Gönderen kimliklerini yenile"
 
-#: ui/components/account-mail-preferences.slint:194
+#: ui/components/account-mail-preferences.slint:233
 #: ui/dialogs/settings-dialog.slint:3006
 msgid "Edit"
 msgstr "Düzenle"
 
-#: ui/components/account-mail-preferences.slint:198
+#: ui/components/account-mail-preferences.slint:237
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
@@ -3579,15 +3624,25 @@ msgstr ""
 "Hesaplar › Posta olarak gönder bölümüne bir adres ekle, ardından gönderen "
 "kimliklerini yenile."
 
-#: ui/components/account-mail-preferences.slint:201
+#: ui/components/account-mail-preferences.slint:242
+msgid "Copies of mail from {}"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:243
 msgid "Edit sender address"
 msgstr "Gönderen adresini düzenle"
 
-#: ui/components/account-mail-preferences.slint:201
+#: ui/components/account-mail-preferences.slint:243
 msgid "Add a sender address"
 msgstr "Gönderen adresi ekle"
 
-#: ui/components/account-mail-preferences.slint:205
+#: ui/components/account-mail-preferences.slint:248
+msgid ""
+"Your provider sets this address's name and reply-to address. Mail you write "
+"from it starts with these copies too."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:250
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
@@ -3595,7 +3650,7 @@ msgstr ""
 "Sunucun, joker karakter olarak gösterilen etki alanlarındaki tüm adreslerden "
 "göndermene izin veriyor. Arasından seçim yapmak istediğin adresleri ekle."
 
-#: ui/components/account-mail-preferences.slint:206
+#: ui/components/account-mail-preferences.slint:251
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
 "server decides when you send; Flectar Mail shows whether it accepted the "
@@ -3605,40 +3660,46 @@ msgstr ""
 "ekle. Sunucu, gönderdiğinde karar verir; Flectar Mail son iletiyi kabul edip "
 "etmediğini gösterir."
 
-#: ui/components/account-mail-preferences.slint:208
+#: ui/components/account-mail-preferences.slint:253
 #: ui/dialogs/settings-dialog.slint:4446 ui/views/onboarding-view.slint:287
 msgid "Email address"
 msgstr "E-posta adresi"
 
-#: ui/components/account-mail-preferences.slint:208
+#: ui/components/account-mail-preferences.slint:253
 msgid "alias@example.com"
 msgstr "alias@example.com"
 
-#: ui/components/account-mail-preferences.slint:209
+#: ui/components/account-mail-preferences.slint:254
 msgid "Sender name"
 msgstr "Gönderen adı"
 
-#: ui/components/account-mail-preferences.slint:209
+#: ui/components/account-mail-preferences.slint:254
 msgid "Name shown to recipients (optional)"
 msgstr "Alıcılara görünen ad (isteğe bağlı)"
 
-#: ui/components/account-mail-preferences.slint:210
+#: ui/components/account-mail-preferences.slint:255
 msgid "Reply-to address"
 msgstr "Yanıt adresi"
 
-#: ui/components/account-mail-preferences.slint:210
+#: ui/components/account-mail-preferences.slint:255
 msgid "Where replies should go (optional)"
 msgstr "Yanıtların gönderileceği adres (isteğe bağlı)"
 
-#: ui/components/account-mail-preferences.slint:214
+#: ui/components/account-mail-preferences.slint:262
+#, fuzzy
+#| msgid "Sent copies"
+msgid "Save copies"
+msgstr "Gönderilen kopyalar"
+
+#: ui/components/account-mail-preferences.slint:263
 msgid "Save sender address"
 msgstr "Gönderen adresini kaydet"
 
-#: ui/components/account-mail-preferences.slint:214
+#: ui/components/account-mail-preferences.slint:263
 msgid "Add sender address"
 msgstr "Gönderen adresi ekle"
 
-#: ui/components/account-mail-preferences.slint:215
+#: ui/components/account-mail-preferences.slint:268
 #: ui/components/rule-editor.slint:516 ui/device-sync.slint:1373
 #: ui/dialogs/block-sender-dialog.slint:120 ui/dialogs/folder-dialog.slint:128
 #: ui/dialogs/oauth-setup-dialog.slint:130
@@ -3649,19 +3710,31 @@ msgstr "Gönderen adresi ekle"
 msgid "Cancel"
 msgstr "İptal"
 
-#: ui/components/account-mail-preferences.slint:220
+#: ui/components/account-mail-preferences.slint:275
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic Cc and Bcc"
+msgstr "Otomatik"
+
+#: ui/components/account-mail-preferences.slint:276
+msgid ""
+"Every message you write from this account starts with these copies, and "
+"shows them so you can take them out. Each sender address can add its own."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:286
 msgid "Signature"
 msgstr "İmza"
 
-#: ui/components/account-mail-preferences.slint:220
+#: ui/components/account-mail-preferences.slint:286
 msgid "Saved separately for each account."
 msgstr "Her hesap için ayrı kaydedilir."
 
-#: ui/components/account-mail-preferences.slint:236
+#: ui/components/account-mail-preferences.slint:302
 msgid "Signature preview"
 msgstr "İmza önizlemesi"
 
-#: ui/components/account-mail-preferences.slint:239
+#: ui/components/account-mail-preferences.slint:305
 msgid ""
 "Signatures can have formatting and pictures. They open in the composer to "
 "write."
@@ -3669,67 +3742,67 @@ msgstr ""
 "İmzalar biçimlendirme ve resim içerebilir. Yazmak için ileti oluşturucuda "
 "açılırlar."
 
-#: ui/components/account-mail-preferences.slint:241
+#: ui/components/account-mail-preferences.slint:307
 msgid "Edit signature"
 msgstr "İmzayı düzenle"
 
-#: ui/components/account-mail-preferences.slint:242
+#: ui/components/account-mail-preferences.slint:308
 msgid "New signature"
 msgstr "Yeni imza"
 
-#: ui/components/account-mail-preferences.slint:246
+#: ui/components/account-mail-preferences.slint:312
 msgid "New messages"
 msgstr "Yeni iletiler"
 
-#: ui/components/account-mail-preferences.slint:246
+#: ui/components/account-mail-preferences.slint:312
 msgid "Signature inserted when you start a message."
 msgstr "İleti yazmaya başladığınızda imza eklenir."
 
-#: ui/components/account-mail-preferences.slint:252
+#: ui/components/account-mail-preferences.slint:318
 msgid "Replies & forwards"
 msgstr "Yanıtlar ve iletmeler"
 
-#: ui/components/account-mail-preferences.slint:252
+#: ui/components/account-mail-preferences.slint:318
 msgid "Placed above the quoted message."
 msgstr "Alıntılanan iletinin üstüne eklenir."
 
-#: ui/components/account-mail-preferences.slint:257
+#: ui/components/account-mail-preferences.slint:323
 msgid "Save signature defaults"
 msgstr "Varsayılan imzaları kaydet"
 
-#: ui/components/account-mail-preferences.slint:260
+#: ui/components/account-mail-preferences.slint:326
 msgid "Message format"
 msgstr "İleti biçimi"
 
-#: ui/components/account-mail-preferences.slint:260
+#: ui/components/account-mail-preferences.slint:326
 msgid "How new messages start. Each message can change it."
 msgstr "Yeni iletilerin nasıl başlayacağı. Her ileti bunu değiştirebilir."
 
-#: ui/components/account-mail-preferences.slint:261
+#: ui/components/account-mail-preferences.slint:327
 msgctxt "message format"
 msgid "Formatted text"
 msgstr "Biçimlendirilmiş metin"
 
-#: ui/components/account-mail-preferences.slint:261
+#: ui/components/account-mail-preferences.slint:327
 msgctxt "message format"
 msgid "Plain text"
 msgstr "Düz metin"
 
-#: ui/components/account-mail-preferences.slint:270
+#: ui/components/account-mail-preferences.slint:336
 msgid "Plain text in replies to plain text"
 msgstr "Düz metne verilen yanıtlarda düz metin"
 
-#: ui/components/account-mail-preferences.slint:270
+#: ui/components/account-mail-preferences.slint:336
 msgid "Replies and forwards to plain-text messages start as plain text."
 msgstr ""
 "Düz metin iletilere verilen yanıtlar ve iletilen iletiler düz metin olarak "
 "başlar."
 
-#: ui/components/account-mail-preferences.slint:277
+#: ui/components/account-mail-preferences.slint:343
 msgid "Request read receipts"
 msgstr "Okundu bilgisi iste"
 
-#: ui/components/account-mail-preferences.slint:277
+#: ui/components/account-mail-preferences.slint:343
 msgid ""
 "New messages ask to be told when they're read. Each message can change it "
 "under More options."
@@ -3737,70 +3810,70 @@ msgstr ""
 "Yeni iletiler, okunduklarında haber verilmesini ister. Her ileti bunu Diğer "
 "seçenekler altında değiştirebilir."
 
-#: ui/components/account-mail-preferences.slint:292
+#: ui/components/account-mail-preferences.slint:358
 msgid "Send automatic replies"
 msgstr "Otomatik yanıt gönder"
 
-#: ui/components/account-mail-preferences.slint:301
+#: ui/components/account-mail-preferences.slint:367
 msgid "FIRST DAY (OPTIONAL)"
 msgstr "İLK GÜN (İSTEĞE BAĞLI)"
 
-#: ui/components/account-mail-preferences.slint:302
+#: ui/components/account-mail-preferences.slint:368
 msgid "First day"
 msgstr "İlk gün"
 
-#: ui/components/account-mail-preferences.slint:302
+#: ui/components/account-mail-preferences.slint:368
 #: ui/views/contacts-view.slint:786
 msgid "YYYY-MM-DD"
 msgstr "YYYY-AA-GG"
 
-#: ui/components/account-mail-preferences.slint:306
+#: ui/components/account-mail-preferences.slint:372
 msgid "LAST DAY (OPTIONAL)"
 msgstr "SON GÜN (İSTEĞE BAĞLI)"
 
-#: ui/components/account-mail-preferences.slint:307
+#: ui/components/account-mail-preferences.slint:373
 msgid "Last day"
 msgstr "Son gün"
 
-#: ui/components/account-mail-preferences.slint:312
+#: ui/components/account-mail-preferences.slint:378
 msgid "SUBJECT"
 msgstr "KONU"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:379
 msgid "Subject"
 msgstr "Konu"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:379
 msgid "Such as Out of office"
 msgstr "Örneğin Ofis dışındayım"
 
-#: ui/components/account-mail-preferences.slint:315
+#: ui/components/account-mail-preferences.slint:381
 msgid "MESSAGE"
 msgstr "İLETİ"
 
-#: ui/components/account-mail-preferences.slint:319
+#: ui/components/account-mail-preferences.slint:385
 msgid "Message, such as I'm away until Monday and will answer when I'm back."
 msgstr ""
 "İleti, örneğin: Pazartesi'ye kadar ofis dışındayım, döndüğümde yanıt "
 "vereceğim."
 
-#: ui/components/account-mail-preferences.slint:323
+#: ui/components/account-mail-preferences.slint:389
 msgid "Only reply to my contacts"
 msgstr "Yalnızca kişilerime yanıt ver"
 
-#: ui/components/account-mail-preferences.slint:329
+#: ui/components/account-mail-preferences.slint:395
 msgid "Only reply inside my organization"
 msgstr "Yalnızca kuruluşum içinde yanıt ver"
 
-#: ui/components/account-mail-preferences.slint:329
+#: ui/components/account-mail-preferences.slint:395
 msgid "Senders from other domains get no reply."
 msgstr "Diğer etki alanlarından gelen gönderenler yanıt almaz."
 
-#: ui/components/account-mail-preferences.slint:344 ui/network.slint:191
+#: ui/components/account-mail-preferences.slint:410 ui/network.slint:191
 msgid "Saving…"
 msgstr "Kaydediliyor…"
 
-#: ui/components/account-mail-preferences.slint:353
+#: ui/components/account-mail-preferences.slint:419
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
@@ -3808,7 +3881,7 @@ msgstr ""
 "OpenPGP, ileti gövdelerini ve ekleri korur. Dijital imzalar alıcıların bir "
 "iletiyi kimin imzaladığını denetlemesini sağlar."
 
-#: ui/components/account-mail-preferences.slint:354
+#: ui/components/account-mail-preferences.slint:420
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
@@ -3816,7 +3889,7 @@ msgstr ""
 "Yüklü GnuPG 2.x'i ve onun güvenli anahtar deposunu kullanır. Parolalar "
 "GnuPG'nin kilit açma penceresinde girilir."
 
-#: ui/components/account-mail-preferences.slint:354
+#: ui/components/account-mail-preferences.slint:420
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
@@ -3824,11 +3897,11 @@ msgstr ""
 "OpenPGP bu mobil derlemede kullanılamıyor. Desteklenen bir şifreleme motoru "
 "olmadan korumalı hesaplar gönderim yapamaz."
 
-#: ui/components/account-mail-preferences.slint:355
+#: ui/components/account-mail-preferences.slint:421
 msgid "Create a new key"
 msgstr "Yeni anahtar oluştur"
 
-#: ui/components/account-mail-preferences.slint:356
+#: ui/components/account-mail-preferences.slint:422
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
@@ -3836,37 +3909,37 @@ msgstr ""
 "Yeni anahtarların süresi iki yılda dolar. GnuPG, özel anahtarı bir parolayla "
 "korumanızı ister."
 
-#: ui/components/account-mail-preferences.slint:357
+#: ui/components/account-mail-preferences.slint:423
 msgid "Your full OpenPGP fingerprint"
 msgstr "OpenPGP parmak izinizin tamamı"
 
-#: ui/components/account-mail-preferences.slint:357
+#: ui/components/account-mail-preferences.slint:423
 msgid "Your full OpenPGP key fingerprint"
 msgstr "OpenPGP anahtar parmak izinizin tamamı"
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:425
 msgid "Digitally sign messages"
 msgstr "İletileri dijital olarak imzala"
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:425
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr "Özel anahtarınıza sahip olduğunuzu kanıtlar; iletiyi şifrelemez."
 
-#: ui/components/account-mail-preferences.slint:364
+#: ui/components/account-mail-preferences.slint:430
 msgid "Require encryption"
 msgstr "Şifrelemeyi zorunlu kıl"
 
-#: ui/components/account-mail-preferences.slint:364
+#: ui/components/account-mail-preferences.slint:430
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 "Her alıcının doğrulanmış, kullanılabilir bir anahtarı olmadıkça gönderimi "
 "engeller."
 
-#: ui/components/account-mail-preferences.slint:368
+#: ui/components/account-mail-preferences.slint:434
 msgid "Verified recipient keys"
 msgstr "Doğrulanmış alıcı anahtarları"
 
-#: ui/components/account-mail-preferences.slint:369
+#: ui/components/account-mail-preferences.slint:435
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
@@ -3876,31 +3949,31 @@ msgstr ""
 "ardından her satıra bir tane olacak şekilde e-posta=parmak_izi girin. "
 "Yalnızca anahtar içe aktarmak onu doğrulamaz."
 
-#: ui/components/account-mail-preferences.slint:370
+#: ui/components/account-mail-preferences.slint:436
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr "kisi@ornek.org=TAM_PARMAK_İZİ"
 
-#: ui/components/account-mail-preferences.slint:371
+#: ui/components/account-mail-preferences.slint:437
 msgid "Save OpenPGP settings"
 msgstr "OpenPGP ayarlarını kaydet"
 
-#: ui/components/account-mail-preferences.slint:373
+#: ui/components/account-mail-preferences.slint:439
 msgid "Import key"
 msgstr "Anahtar içe aktar"
 
-#: ui/components/account-mail-preferences.slint:374
+#: ui/components/account-mail-preferences.slint:440
 msgid "Export public key"
 msgstr "Genel anahtarı dışa aktar"
 
-#: ui/components/account-mail-preferences.slint:375
+#: ui/components/account-mail-preferences.slint:441
 msgid "Show keys"
 msgstr "Anahtarları göster"
 
-#: ui/components/account-mail-preferences.slint:383
+#: ui/components/account-mail-preferences.slint:449
 msgid "Open message file (.eml)"
 msgstr "İleti dosyası aç (.eml)"
 
-#: ui/components/account-mail-preferences.slint:385
+#: ui/components/account-mail-preferences.slint:451
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
@@ -3908,7 +3981,7 @@ msgstr ""
 "Süre sonu, iptal ve özel anahtar yedeklerini GnuPG'de yönetin. Burada "
 "yalnızca genel anahtarlar dışa aktarılır."
 
-#: ui/components/account-mail-preferences.slint:386
+#: ui/components/account-mail-preferences.slint:452
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
@@ -3918,15 +3991,15 @@ msgstr ""
 "Sunucudaki mevcut taslaklar geriye dönük olarak korunmaz. S/MIME "
 "sertifikaları desteklenmez."
 
-#: ui/components/account-mail-preferences.slint:389
+#: ui/components/account-mail-preferences.slint:455
 msgid "Working…"
 msgstr "Çalışıyor…"
 
-#: ui/components/account-mail-preferences.slint:401
+#: ui/components/account-mail-preferences.slint:467
 msgid "OpenPGP message"
 msgstr "OpenPGP iletisi"
 
-#: ui/components/account-mail-preferences.slint:404
+#: ui/components/account-mail-preferences.slint:470
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
@@ -3934,11 +4007,11 @@ msgstr ""
 "Şifresi çözülmüş içerik, uzak içerik olmadan metin olarak gösterilir. "
 "Aramaya eklenmez ve e-posta veritabanına kaydedilmez."
 
-#: ui/components/account-mail-preferences.slint:405
+#: ui/components/account-mail-preferences.slint:471
 msgid "Export decrypted message"
 msgstr "Şifresi çözülmüş iletiyi dışa aktar"
 
-#: ui/components/account-mail-preferences.slint:406
+#: ui/components/account-mail-preferences.slint:472
 #: ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
 #: ui/components/rule-editor.slint:349
 #: ui/dialogs/attachment-preview-dialog.slint:40
@@ -4903,17 +4976,9 @@ msgstr "Kime"
 msgid "name@example.com · separate with commas"
 msgstr "ad@ornek.com · virgülle ayırın"
 
-#: ui/components/composer-fields.slint:392
-msgid "Cc"
-msgstr "Cc"
-
 #: ui/components/composer-fields.slint:393
 msgid "Carbon copy"
 msgstr "Karbon kopya"
-
-#: ui/components/composer-fields.slint:403
-msgid "Bcc"
-msgstr "Bcc"
 
 #: ui/components/composer-fields.slint:404
 msgid "Blind carbon copy"
@@ -8957,7 +9022,8 @@ msgstr "İleti önizlemesi"
 
 #: ui/dialogs/settings-dialog.slint:1474
 msgid "How many lines of each message's text the list shows below its subject."
-msgstr "Listenin, her iletinin metninden konunun altında kaç satır göstereceği."
+msgstr ""
+"Listenin, her iletinin metninden konunun altında kaç satır göstereceği."
 
 #: ui/dialogs/settings-dialog.slint:1488
 msgid "Keep several mailboxes, conversations and other places open in tabs."
