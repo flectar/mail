@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 01:31+0000\n"
+"PO-Revision-Date: 2026-11-23 15:22+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Danish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/da/>\n"
@@ -2258,86 +2258,60 @@ msgid "Could not save the account name: {}"
 msgstr "Kunne ikke gemme kontonavnet: {}"
 
 #: ui/app.slint:730 ui/dialogs/contact-import-dialog.slint:22
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Import contacts"
-msgstr "Importér én konto"
+msgstr "Importér kontakter"
 
 #: ui/app.slint:731
-#, fuzzy
-#| msgid "Local contacts"
 msgid "Export contacts"
-msgstr "Lokale kontakter"
+msgstr "Eksportér kontakter"
 
 #: ui/app.slint:732
-#, fuzzy
-#| msgid "Searched contacts"
 msgid "vCard contacts"
-msgstr "Søgte kontakter"
+msgstr "vCard-kontakter"
 
 #: ui/app.slint:733
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not read the contacts file: {}"
-msgstr "Kunne ikke indlæse kontakter: {}"
+msgstr "Kunne ikke læse kontaktfilen: {}"
 
 #: ui/app.slint:734
-#, fuzzy
-#| msgid "The settings file is too large."
 msgid "This file is larger than 64 MB."
-msgstr "Indstillingsfilen er for stor."
+msgstr "Denne fil er større end 64 MB."
 
 #: ui/app.slint:735
 msgid "This file has more than 25,000 contacts."
-msgstr ""
+msgstr "Denne fil indeholder mere end 25.000 kontakter."
 
 #: ui/app.slint:736
-#, fuzzy
-#| msgid "No mail was found in this folder."
 msgid "No contacts found in this file."
-msgstr "Der blev ikke fundet e-mail i denne mappe."
+msgstr "Der blev ikke fundet kontakter i denne fil."
 
 #: ui/app.slint:737
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Imported one contact."
 msgid_plural "Imported {0} contacts."
-msgstr[0] "Importér én konto"
-msgstr[1] "Importér {n} konti"
+msgstr[0] "Importerede én kontakt."
+msgstr[1] "Importerede {0} kontakter."
 
 #: ui/app.slint:738
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No new contacts to import."
-msgstr "Vælg konti at importere"
+msgstr "Ingen nye kontakter at importere."
 
 #: ui/app.slint:739
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not import contacts: {}"
-msgstr "Kunne ikke indlæse kontakter: {}"
+msgstr "Kunne ikke importere kontakter: {}"
 
 #: ui/app.slint:740
-#, fuzzy
-#| msgid "Saved to contacts."
 msgid "Exported one contact."
 msgid_plural "Exported {0} contacts."
-msgstr[0] "Gemt i kontakter."
-msgstr[1] "Gemt i kontakter."
+msgstr[0] "Eksporterede én kontakt."
+msgstr[1] "Eksporterede {0} kontakter."
 
 #: ui/app.slint:741
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No saved contacts to export."
-msgstr "Vælg konti at importere"
+msgstr "Ingen gemte kontakter at eksportere."
 
 #: ui/app.slint:742
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not export contacts: {}"
-msgstr "Kunne ikke indlæse kontakter: {}"
+msgstr "Kunne ikke eksportere kontakter: {}"
 
 #: ui/app.slint:743
 msgid "Mail history requires local mail data."
@@ -2857,12 +2831,9 @@ msgid "To: {}"
 msgstr "Til: {}"
 
 #: ui/app.slint:867
-#, fuzzy
-#| msgctxt "forwarded message header"
-#| msgid "To: {}"
 msgctxt "forwarded message header"
 msgid "Cc: {}"
-msgstr "Til: {}"
+msgstr "Cc: {}"
 
 #: ui/app.slint:868
 msgid "Attach files to this email"
@@ -7657,60 +7628,50 @@ msgid "Create"
 msgstr "Opret"
 
 #: ui/dialogs/contact-import-dialog.slint:101
-#, fuzzy
-#| msgid "New contact"
 msgid "{n} new contact"
 msgid_plural "{n} new contacts"
-msgstr[0] "Ny kontakt"
-msgstr[1] "Ny kontakt"
+msgstr[0] "{n} ny kontakt"
+msgstr[1] "{n} nye kontakter"
 
 #: ui/dialogs/contact-import-dialog.slint:108
 msgid "{n} contact you already have"
 msgid_plural "{n} contacts you already have"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} kontakt, du allerede har"
+msgstr[1] "{n} kontakter, du allerede har"
 
 #: ui/dialogs/contact-import-dialog.slint:115
 msgid "{n} card can't be read and is left out"
 msgid_plural "{n} cards can't be read and are left out"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} kort kan ikke læses og udelades"
+msgstr[1] "{n} kort kan ikke læses og udelades"
 
 #: ui/dialogs/contact-import-dialog.slint:125
-#, fuzzy
-#| msgid "Connect a domain you already own"
 msgid "Contacts you already have"
-msgstr "Forbind et domæne, du allerede ejer"
+msgstr "Kontakter, du allerede har"
 
 #: ui/dialogs/contact-import-dialog.slint:134
 msgid "Leave them as they are"
-msgstr ""
+msgstr "Lad dem være, som de er"
 
 #: ui/dialogs/contact-import-dialog.slint:135
 msgid "Add what's new to them"
-msgstr ""
+msgstr "Tilføj det nye til dem"
 
 #: ui/dialogs/contact-import-dialog.slint:136
 msgid "Import them again as copies"
-msgstr ""
+msgstr "Importér dem igen som kopier"
 
 #: ui/dialogs/contact-import-dialog.slint:144
-#, fuzzy
-#| msgid "New contact"
 msgid "New contacts go to {}."
-msgstr "Ny kontakt"
+msgstr "Nye kontakter gemmes i {}."
 
 #: ui/dialogs/contact-import-dialog.slint:145
-#, fuzzy
-#| msgid "Account removed from this device."
 msgid "New contacts are saved on this device."
-msgstr "Kontoen er fjernet fra denne enhed."
+msgstr "Nye kontakter gemmes på denne enhed."
 
 #: ui/dialogs/contact-import-dialog.slint:170
-#, fuzzy
-#| msgid "Importing mail…"
 msgid "Importing…"
-msgstr "Importerer e-mail…"
+msgstr "Importerer…"
 
 #: ui/dialogs/contact-import-dialog.slint:170
 #: ui/dialogs/settings-dialog.slint:3548
@@ -11950,22 +11911,16 @@ msgid "Reload contacts"
 msgstr "Genindlæs kontakter"
 
 #: ui/views/contacts-view.slint:351
-#, fuzzy
-#| msgid "More message actions"
 msgid "More contact actions"
-msgstr "Flere beskedhandlinger"
+msgstr "Flere kontakthandlinger"
 
 #: ui/views/contacts-view.slint:358
-#, fuzzy
-#| msgid "Importing accounts…"
 msgid "Import contacts…"
-msgstr "Importerer konti…"
+msgstr "Importér kontakter…"
 
 #: ui/views/contacts-view.slint:362
-#, fuzzy
-#| msgid "Loading contacts…"
 msgid "Export contacts…"
-msgstr "Indlæser kontakter…"
+msgstr "Eksportér kontakter…"
 
 #: ui/views/contacts-view.slint:443 ui/views/contacts-view.slint:726
 msgid "Local contacts"
@@ -12818,7 +12773,7 @@ msgstr "Dig"
 
 #: ui/views/mail-reading-pane.slint:232
 msgid "Show who it was sent to"
-msgstr ""
+msgstr "Vis, hvem den blev sendt til"
 
 #: ui/views/mail-reading-pane.slint:281
 msgid "Verified brand with BIMI authority evidence"

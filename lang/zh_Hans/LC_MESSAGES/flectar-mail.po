@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 01:31+0000\n"
+"PO-Revision-Date: 2026-11-23 15:22+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -2219,84 +2219,58 @@ msgid "Could not save the account name: {}"
 msgstr "无法保存账户名称：{}"
 
 #: ui/app.slint:730 ui/dialogs/contact-import-dialog.slint:22
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Import contacts"
-msgstr "导入 {n} 个账户"
+msgstr "导入联系人"
 
 #: ui/app.slint:731
-#, fuzzy
-#| msgid "Local contacts"
 msgid "Export contacts"
-msgstr "本地联系人"
+msgstr "导出联系人"
 
 #: ui/app.slint:732
-#, fuzzy
-#| msgid "Searched contacts"
 msgid "vCard contacts"
-msgstr "搜索到的联系人"
+msgstr "vCard 联系人"
 
 #: ui/app.slint:733
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not read the contacts file: {}"
-msgstr "无法加载联系人：{}"
+msgstr "无法读取联系人文件：{}"
 
 #: ui/app.slint:734
-#, fuzzy
-#| msgid "The settings file is too large."
 msgid "This file is larger than 64 MB."
-msgstr "设置文件过大。"
+msgstr "此文件超过 64 MB。"
 
 #: ui/app.slint:735
 msgid "This file has more than 25,000 contacts."
-msgstr ""
+msgstr "此文件包含超过 25,000 个联系人。"
 
 #: ui/app.slint:736
-#, fuzzy
-#| msgid "No mail was found in this folder."
 msgid "No contacts found in this file."
-msgstr "在此文件夹中未找到邮件。"
+msgstr "此文件中未找到联系人。"
 
 #: ui/app.slint:737
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Imported one contact."
 msgid_plural "Imported {0} contacts."
-msgstr[0] "导入 {n} 个账户"
+msgstr[0] "已导入 {0} 个联系人。"
 
 #: ui/app.slint:738
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No new contacts to import."
-msgstr "选择要导入的账户"
+msgstr "没有可导入的新联系人。"
 
 #: ui/app.slint:739
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not import contacts: {}"
-msgstr "无法加载联系人：{}"
+msgstr "无法导入联系人：{}"
 
 #: ui/app.slint:740
-#, fuzzy
-#| msgid "Saved to contacts."
 msgid "Exported one contact."
 msgid_plural "Exported {0} contacts."
-msgstr[0] "已保存到联系人。"
+msgstr[0] "已导出 {0} 个联系人。"
 
 #: ui/app.slint:741
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No saved contacts to export."
-msgstr "选择要导入的账户"
+msgstr "没有可导出的已保存联系人。"
 
 #: ui/app.slint:742
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not export contacts: {}"
-msgstr "无法加载联系人：{}"
+msgstr "无法导出联系人：{}"
 
 #: ui/app.slint:743
 msgid "Mail history requires local mail data."
@@ -2789,12 +2763,9 @@ msgid "To: {}"
 msgstr "收件人：{}"
 
 #: ui/app.slint:867
-#, fuzzy
-#| msgctxt "forwarded message header"
-#| msgid "To: {}"
 msgctxt "forwarded message header"
 msgid "Cc: {}"
-msgstr "收件人：{}"
+msgstr "抄送：{}"
 
 #: ui/app.slint:868
 msgid "Attach files to this email"
@@ -7450,57 +7421,47 @@ msgid "Create"
 msgstr "创建"
 
 #: ui/dialogs/contact-import-dialog.slint:101
-#, fuzzy
-#| msgid "New contact"
 msgid "{n} new contact"
 msgid_plural "{n} new contacts"
-msgstr[0] "新建联系人"
+msgstr[0] "{n} 个新联系人"
 
 #: ui/dialogs/contact-import-dialog.slint:108
 msgid "{n} contact you already have"
 msgid_plural "{n} contacts you already have"
-msgstr[0] ""
+msgstr[0] "{n} 个您已有的联系人"
 
 #: ui/dialogs/contact-import-dialog.slint:115
 msgid "{n} card can't be read and is left out"
 msgid_plural "{n} cards can't be read and are left out"
-msgstr[0] ""
+msgstr[0] "{n} 张名片无法读取，已跳过"
 
 #: ui/dialogs/contact-import-dialog.slint:125
-#, fuzzy
-#| msgid "Connect a domain you already own"
 msgid "Contacts you already have"
-msgstr "连接您已拥有的域名"
+msgstr "您已有的联系人"
 
 #: ui/dialogs/contact-import-dialog.slint:134
 msgid "Leave them as they are"
-msgstr ""
+msgstr "保持原样"
 
 #: ui/dialogs/contact-import-dialog.slint:135
 msgid "Add what's new to them"
-msgstr ""
+msgstr "将新增内容合并进去"
 
 #: ui/dialogs/contact-import-dialog.slint:136
 msgid "Import them again as copies"
-msgstr ""
+msgstr "作为副本重新导入"
 
 #: ui/dialogs/contact-import-dialog.slint:144
-#, fuzzy
-#| msgid "New contact"
 msgid "New contacts go to {}."
-msgstr "新建联系人"
+msgstr "新联系人将保存到 {}。"
 
 #: ui/dialogs/contact-import-dialog.slint:145
-#, fuzzy
-#| msgid "Account removed from this device."
 msgid "New contacts are saved on this device."
-msgstr "账户已从此设备移除。"
+msgstr "新联系人保存在此设备上。"
 
 #: ui/dialogs/contact-import-dialog.slint:170
-#, fuzzy
-#| msgid "Importing mail…"
 msgid "Importing…"
-msgstr "正在导入邮件…"
+msgstr "正在导入…"
 
 #: ui/dialogs/contact-import-dialog.slint:170
 #: ui/dialogs/settings-dialog.slint:3548
@@ -11510,22 +11471,16 @@ msgid "Reload contacts"
 msgstr "重新加载联系人"
 
 #: ui/views/contacts-view.slint:351
-#, fuzzy
-#| msgid "More message actions"
 msgid "More contact actions"
-msgstr "更多邮件操作"
+msgstr "更多联系人操作"
 
 #: ui/views/contacts-view.slint:358
-#, fuzzy
-#| msgid "Importing accounts…"
 msgid "Import contacts…"
-msgstr "正在导入账户…"
+msgstr "导入联系人…"
 
 #: ui/views/contacts-view.slint:362
-#, fuzzy
-#| msgid "Loading contacts…"
 msgid "Export contacts…"
-msgstr "正在加载联系人…"
+msgstr "导出联系人…"
 
 #: ui/views/contacts-view.slint:443 ui/views/contacts-view.slint:726
 msgid "Local contacts"
@@ -12362,7 +12317,7 @@ msgstr "您"
 
 #: ui/views/mail-reading-pane.slint:232
 msgid "Show who it was sent to"
-msgstr ""
+msgstr "显示发送给了谁"
 
 #: ui/views/mail-reading-pane.slint:281
 msgid "Verified brand with BIMI authority evidence"

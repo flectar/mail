@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 01:31+0000\n"
+"PO-Revision-Date: 2026-11-23 15:22+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Turkish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/tr/>\n"
@@ -2259,86 +2259,60 @@ msgid "Could not save the account name: {}"
 msgstr "Hesap adı kaydedilemedi: {}"
 
 #: ui/app.slint:730 ui/dialogs/contact-import-dialog.slint:22
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Import contacts"
-msgstr "Bir hesabı içe aktar"
+msgstr "Kişileri içe aktar"
 
 #: ui/app.slint:731
-#, fuzzy
-#| msgid "Local contacts"
 msgid "Export contacts"
-msgstr "Yerel kişiler"
+msgstr "Kişileri dışa aktar"
 
 #: ui/app.slint:732
-#, fuzzy
-#| msgid "Searched contacts"
 msgid "vCard contacts"
-msgstr "Aranan kişiler"
+msgstr "vCard kişileri"
 
 #: ui/app.slint:733
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not read the contacts file: {}"
-msgstr "Kişiler yüklenemedi: {}"
+msgstr "Kişi dosyası okunamadı: {}"
 
 #: ui/app.slint:734
-#, fuzzy
-#| msgid "The settings file is too large."
 msgid "This file is larger than 64 MB."
-msgstr "Ayar dosyası çok büyük."
+msgstr "Bu dosya 64 MB'tan büyük."
 
 #: ui/app.slint:735
 msgid "This file has more than 25,000 contacts."
-msgstr ""
+msgstr "Bu dosyada 25.000'den fazla kişi var."
 
 #: ui/app.slint:736
-#, fuzzy
-#| msgid "No mail was found in this folder."
 msgid "No contacts found in this file."
-msgstr "Bu klasörde e-posta bulunamadı."
+msgstr "Bu dosyada kişi bulunamadı."
 
 #: ui/app.slint:737
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Imported one contact."
 msgid_plural "Imported {0} contacts."
-msgstr[0] "Bir hesabı içe aktar"
-msgstr[1] "{n} hesabı içe aktar"
+msgstr[0] "Bir kişi içe aktarıldı."
+msgstr[1] "{0} kişi içe aktarıldı."
 
 #: ui/app.slint:738
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No new contacts to import."
-msgstr "İçe aktarılacak hesapları seçin"
+msgstr "İçe aktarılacak yeni kişi yok."
 
 #: ui/app.slint:739
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not import contacts: {}"
-msgstr "Kişiler yüklenemedi: {}"
+msgstr "Kişiler içe aktarılamadı: {}"
 
 #: ui/app.slint:740
-#, fuzzy
-#| msgid "Saved to contacts."
 msgid "Exported one contact."
 msgid_plural "Exported {0} contacts."
-msgstr[0] "Kişilere kaydedildi."
-msgstr[1] "Kişilere kaydedildi."
+msgstr[0] "Bir kişi dışa aktarıldı."
+msgstr[1] "{0} kişi dışa aktarıldı."
 
 #: ui/app.slint:741
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No saved contacts to export."
-msgstr "İçe aktarılacak hesapları seçin"
+msgstr "Dışa aktarılacak kayıtlı kişi yok."
 
 #: ui/app.slint:742
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not export contacts: {}"
-msgstr "Kişiler yüklenemedi: {}"
+msgstr "Kişiler dışa aktarılamadı: {}"
 
 #: ui/app.slint:743
 msgid "Mail history requires local mail data."
@@ -2855,12 +2829,9 @@ msgid "To: {}"
 msgstr "Kime: {}"
 
 #: ui/app.slint:867
-#, fuzzy
-#| msgctxt "forwarded message header"
-#| msgid "To: {}"
 msgctxt "forwarded message header"
 msgid "Cc: {}"
-msgstr "Kime: {}"
+msgstr "Cc: {}"
 
 #: ui/app.slint:868
 msgid "Attach files to this email"
@@ -7649,60 +7620,50 @@ msgid "Create"
 msgstr "Oluştur"
 
 #: ui/dialogs/contact-import-dialog.slint:101
-#, fuzzy
-#| msgid "New contact"
 msgid "{n} new contact"
 msgid_plural "{n} new contacts"
-msgstr[0] "Yeni kişi"
-msgstr[1] "Yeni kişi"
+msgstr[0] "{n} yeni kişi"
+msgstr[1] "{n} yeni kişi"
 
 #: ui/dialogs/contact-import-dialog.slint:108
 msgid "{n} contact you already have"
 msgid_plural "{n} contacts you already have"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Zaten sahip olduğunuz {n} kişi"
+msgstr[1] "Zaten sahip olduğunuz {n} kişi"
 
 #: ui/dialogs/contact-import-dialog.slint:115
 msgid "{n} card can't be read and is left out"
 msgid_plural "{n} cards can't be read and are left out"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} kart okunamıyor ve atlanıyor"
+msgstr[1] "{n} kart okunamıyor ve atlanıyor"
 
 #: ui/dialogs/contact-import-dialog.slint:125
-#, fuzzy
-#| msgid "Connect a domain you already own"
 msgid "Contacts you already have"
-msgstr "Sahip olduğun bir etki alanını bağla"
+msgstr "Zaten sahip olduğunuz kişiler"
 
 #: ui/dialogs/contact-import-dialog.slint:134
 msgid "Leave them as they are"
-msgstr ""
+msgstr "Olduğu gibi bırak"
 
 #: ui/dialogs/contact-import-dialog.slint:135
 msgid "Add what's new to them"
-msgstr ""
+msgstr "Yenilerini onlara ekle"
 
 #: ui/dialogs/contact-import-dialog.slint:136
 msgid "Import them again as copies"
-msgstr ""
+msgstr "Kopya olarak yeniden içe aktar"
 
 #: ui/dialogs/contact-import-dialog.slint:144
-#, fuzzy
-#| msgid "New contact"
 msgid "New contacts go to {}."
-msgstr "Yeni kişi"
+msgstr "Yeni kişiler {} konumuna gider."
 
 #: ui/dialogs/contact-import-dialog.slint:145
-#, fuzzy
-#| msgid "Account removed from this device."
 msgid "New contacts are saved on this device."
-msgstr "Hesap bu cihazdan kaldırıldı."
+msgstr "Yeni kişiler bu cihaza kaydedilir."
 
 #: ui/dialogs/contact-import-dialog.slint:170
-#, fuzzy
-#| msgid "Importing mail…"
 msgid "Importing…"
-msgstr "E-posta içe aktarılıyor…"
+msgstr "İçe aktarılıyor…"
 
 #: ui/dialogs/contact-import-dialog.slint:170
 #: ui/dialogs/settings-dialog.slint:3548
@@ -11952,22 +11913,16 @@ msgid "Reload contacts"
 msgstr "Kişileri yeniden yükle"
 
 #: ui/views/contacts-view.slint:351
-#, fuzzy
-#| msgid "More message actions"
 msgid "More contact actions"
-msgstr "Diğer ileti işlemleri"
+msgstr "Diğer kişi işlemleri"
 
 #: ui/views/contacts-view.slint:358
-#, fuzzy
-#| msgid "Importing accounts…"
 msgid "Import contacts…"
-msgstr "Hesaplar içe aktarılıyor…"
+msgstr "Kişileri içe aktar…"
 
 #: ui/views/contacts-view.slint:362
-#, fuzzy
-#| msgid "Loading contacts…"
 msgid "Export contacts…"
-msgstr "Kişiler yükleniyor…"
+msgstr "Kişileri dışa aktar…"
 
 #: ui/views/contacts-view.slint:443 ui/views/contacts-view.slint:726
 msgid "Local contacts"
@@ -12818,7 +12773,7 @@ msgstr "Siz"
 
 #: ui/views/mail-reading-pane.slint:232
 msgid "Show who it was sent to"
-msgstr ""
+msgstr "Kime gönderildiğini göster"
 
 #: ui/views/mail-reading-pane.slint:281
 msgid "Verified brand with BIMI authority evidence"

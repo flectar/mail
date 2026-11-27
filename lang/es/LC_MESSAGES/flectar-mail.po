@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 01:31+0000\n"
+"PO-Revision-Date: 2026-11-23 15:22+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
@@ -2292,86 +2292,60 @@ msgid "Could not save the account name: {}"
 msgstr "No se pudo guardar el nombre de la cuenta: {}"
 
 #: ui/app.slint:730 ui/dialogs/contact-import-dialog.slint:22
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Import contacts"
-msgstr "Importar una cuenta"
+msgstr "Importar contactos"
 
 #: ui/app.slint:731
-#, fuzzy
-#| msgid "Local contacts"
 msgid "Export contacts"
-msgstr "Contactos locales"
+msgstr "Exportar contactos"
 
 #: ui/app.slint:732
-#, fuzzy
-#| msgid "Searched contacts"
 msgid "vCard contacts"
-msgstr "Buscó contactos"
+msgstr "Contactos vCard"
 
 #: ui/app.slint:733
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not read the contacts file: {}"
-msgstr "No se pudieron cargar los contactos: {}"
+msgstr "No se pudo leer el archivo de contactos: {}"
 
 #: ui/app.slint:734
-#, fuzzy
-#| msgid "The settings file is too large."
 msgid "This file is larger than 64 MB."
-msgstr "El archivo de configuración es demasiado grande."
+msgstr "Este archivo supera los 64 MB."
 
 #: ui/app.slint:735
 msgid "This file has more than 25,000 contacts."
-msgstr ""
+msgstr "Este archivo tiene más de 25.000 contactos."
 
 #: ui/app.slint:736
-#, fuzzy
-#| msgid "No mail was found in this folder."
 msgid "No contacts found in this file."
-msgstr "No se encontró correo en esta carpeta."
+msgstr "No se encontraron contactos en este archivo."
 
 #: ui/app.slint:737
-#, fuzzy
-#| msgid "Import one account"
-#| msgid_plural "Import {n} accounts"
 msgid "Imported one contact."
 msgid_plural "Imported {0} contacts."
-msgstr[0] "Importar una cuenta"
-msgstr[1] "Importar {n} cuentas"
+msgstr[0] "Se importó un contacto."
+msgstr[1] "Se importaron {0} contactos."
 
 #: ui/app.slint:738
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No new contacts to import."
-msgstr "Elige las cuentas que quieres importar"
+msgstr "No hay contactos nuevos para importar."
 
 #: ui/app.slint:739
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not import contacts: {}"
-msgstr "No se pudieron cargar los contactos: {}"
+msgstr "No se pudieron importar los contactos: {}"
 
 #: ui/app.slint:740
-#, fuzzy
-#| msgid "Saved to contacts."
 msgid "Exported one contact."
 msgid_plural "Exported {0} contacts."
-msgstr[0] "Guardado en contactos."
-msgstr[1] "Guardado en contactos."
+msgstr[0] "Se exportó un contacto."
+msgstr[1] "Se exportaron {0} contactos."
 
 #: ui/app.slint:741
-#, fuzzy
-#| msgid "Choose accounts to import"
 msgid "No saved contacts to export."
-msgstr "Elige las cuentas que quieres importar"
+msgstr "No hay contactos guardados para exportar."
 
 #: ui/app.slint:742
-#, fuzzy
-#| msgid "Could not load contacts: {}"
 msgid "Could not export contacts: {}"
-msgstr "No se pudieron cargar los contactos: {}"
+msgstr "No se pudieron exportar los contactos: {}"
 
 #: ui/app.slint:743
 msgid "Mail history requires local mail data."
@@ -2893,12 +2867,9 @@ msgid "To: {}"
 msgstr "Para: {}"
 
 #: ui/app.slint:867
-#, fuzzy
-#| msgctxt "forwarded message header"
-#| msgid "To: {}"
 msgctxt "forwarded message header"
 msgid "Cc: {}"
-msgstr "Para: {}"
+msgstr "Cc: {}"
 
 #: ui/app.slint:868
 msgid "Attach files to this email"
@@ -7742,60 +7713,50 @@ msgid "Create"
 msgstr "Crear"
 
 #: ui/dialogs/contact-import-dialog.slint:101
-#, fuzzy
-#| msgid "New contact"
 msgid "{n} new contact"
 msgid_plural "{n} new contacts"
-msgstr[0] "Nuevo contacto"
-msgstr[1] "Nuevo contacto"
+msgstr[0] "{n} contacto nuevo"
+msgstr[1] "{n} contactos nuevos"
 
 #: ui/dialogs/contact-import-dialog.slint:108
 msgid "{n} contact you already have"
 msgid_plural "{n} contacts you already have"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} contacto que ya tienes"
+msgstr[1] "{n} contactos que ya tienes"
 
 #: ui/dialogs/contact-import-dialog.slint:115
 msgid "{n} card can't be read and is left out"
 msgid_plural "{n} cards can't be read and are left out"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} tarjeta no se puede leer y se omite"
+msgstr[1] "{n} tarjetas no se pueden leer y se omiten"
 
 #: ui/dialogs/contact-import-dialog.slint:125
-#, fuzzy
-#| msgid "Connect a domain you already own"
 msgid "Contacts you already have"
-msgstr "Conecta un dominio que ya tengas"
+msgstr "Contactos que ya tienes"
 
 #: ui/dialogs/contact-import-dialog.slint:134
 msgid "Leave them as they are"
-msgstr ""
+msgstr "Déjalos como están"
 
 #: ui/dialogs/contact-import-dialog.slint:135
 msgid "Add what's new to them"
-msgstr ""
+msgstr "Añade lo nuevo a ellos"
 
 #: ui/dialogs/contact-import-dialog.slint:136
 msgid "Import them again as copies"
-msgstr ""
+msgstr "Impórtalos de nuevo como copias"
 
 #: ui/dialogs/contact-import-dialog.slint:144
-#, fuzzy
-#| msgid "New contact"
 msgid "New contacts go to {}."
-msgstr "Nuevo contacto"
+msgstr "Los contactos nuevos se guardan en {}."
 
 #: ui/dialogs/contact-import-dialog.slint:145
-#, fuzzy
-#| msgid "Account removed from this device."
 msgid "New contacts are saved on this device."
-msgstr "Cuenta eliminada de este dispositivo."
+msgstr "Los contactos nuevos se guardan en este dispositivo."
 
 #: ui/dialogs/contact-import-dialog.slint:170
-#, fuzzy
-#| msgid "Importing mail…"
 msgid "Importing…"
-msgstr "Importando el correo…"
+msgstr "Importando…"
 
 #: ui/dialogs/contact-import-dialog.slint:170
 #: ui/dialogs/settings-dialog.slint:3548
@@ -12085,22 +12046,16 @@ msgid "Reload contacts"
 msgstr "Recargar contactos"
 
 #: ui/views/contacts-view.slint:351
-#, fuzzy
-#| msgid "More message actions"
 msgid "More contact actions"
-msgstr "Más acciones del mensaje"
+msgstr "Más acciones de contactos"
 
 #: ui/views/contacts-view.slint:358
-#, fuzzy
-#| msgid "Importing accounts…"
 msgid "Import contacts…"
-msgstr "Importando cuentas…"
+msgstr "Importar contactos…"
 
 #: ui/views/contacts-view.slint:362
-#, fuzzy
-#| msgid "Loading contacts…"
 msgid "Export contacts…"
-msgstr "Cargando contactos…"
+msgstr "Exportar contactos…"
 
 #: ui/views/contacts-view.slint:443 ui/views/contacts-view.slint:726
 msgid "Local contacts"
@@ -12958,7 +12913,7 @@ msgstr "Tú"
 
 #: ui/views/mail-reading-pane.slint:232
 msgid "Show who it was sent to"
-msgstr ""
+msgstr "Mostrar a quién se envió"
 
 #: ui/views/mail-reading-pane.slint:281
 msgid "Verified brand with BIMI authority evidence"
