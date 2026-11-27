@@ -39,6 +39,7 @@ prepare = release_assets.prepare
 android_signing = load_script("verify-android-signing")
 verify_android_signing = android_signing.verify
 android_version_code = load_script("android-version-code").version_code
+android_certificates = load_script("android-certificate-identities")
 linux_metadata = load_script("stage-linux-metadata")
 ios_release = load_script("ios-release")
 flathub = load_script("flathub-manifest")
@@ -74,6 +75,37 @@ def git(root, *args):
     return result.stdout.strip()
 
 
+def fake_keytool_environment(root, github_env):
+    """Put a stand-in keytool on PATH that exports a keystore's bytes as its
+    public certificate, so no private keys live in fixtures."""
+    keytool = root / "keytool"
+    keytool.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "if sys.argv[1] == '-list':\n"
+        "    print('Keystore type: JKS')\n"
+        "    sys.exit(0)\n"
+        "assert sys.argv[1] in ('-exportcert', '-certreq')\n"
+        "assert sys.argv[2] == '-keystore'\n"
+        "assert sys.argv[4:8] == ['-alias', 'release-key', '-storepass:env', 'FLECTAR_ANDROID_KEYSTORE_PASSWORD']\n"
+        "if os.environ['FLECTAR_ANDROID_KEYSTORE_PASSWORD'] != 'fixture store password': sys.exit(1)\n"
+        "if sys.argv[1] == '-certreq':\n"
+        "    assert sys.argv[8:] == ['-keypass:env', 'FLECTAR_ANDROID_KEY_PASSWORD']\n"
+        "    sys.exit(0 if os.environ['FLECTAR_ANDROID_KEY_PASSWORD'] == 'fixture key password' else 1)\n"
+        "data = pathlib.Path(sys.argv[3]).read_bytes()\n"
+        "if data == b'unreadable keystore': sys.exit(1)\n"
+        "sys.stdout.buffer.write(data)\n"
+    )
+    keytool.chmod(0o755)
+    return {
+        **os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(root), "GITHUB_ENV": str(github_env),
+        "FLECTAR_ANDROID_KEY_ALIAS": "release-key",
+        "FLECTAR_ANDROID_KEYSTORE_PASSWORD": "fixture store password",
+        "FLECTAR_ANDROID_KEY_PASSWORD": "fixture key password",
+    }
+
+
 class ReleaseTests(unittest.TestCase):
     def test_android_ci_never_generates_a_release_key(self):
         for ci_variable in ("CI", "GITHUB_ACTIONS"):
@@ -106,33 +138,8 @@ class ReleaseTests(unittest.TestCase):
             pin.write_text(digest + "\n")
             for name in ("verify-android-keystore.sh", "restore-android-keystore.sh"):
                 shutil.copyfile(SCRIPTS / name, root / "scripts" / name)
-            keytool = root / "keytool"
-            keytool.write_text(
-                "#!/usr/bin/env python3\n"
-                "import os, pathlib, sys\n"
-                "if sys.argv[1] == '-list':\n"
-                "    print('Keystore type: JKS')\n"
-                "    sys.exit(0)\n"
-                "assert sys.argv[1] in ('-exportcert', '-certreq')\n"
-                "assert sys.argv[2] == '-keystore'\n"
-                "assert sys.argv[4:8] == ['-alias', 'release-key', '-storepass:env', 'FLECTAR_ANDROID_KEYSTORE_PASSWORD']\n"
-                "if os.environ['FLECTAR_ANDROID_KEYSTORE_PASSWORD'] != 'fixture store password': sys.exit(1)\n"
-                "if sys.argv[1] == '-certreq':\n"
-                "    assert sys.argv[8:] == ['-keypass:env', 'FLECTAR_ANDROID_KEY_PASSWORD']\n"
-                "    sys.exit(0 if os.environ['FLECTAR_ANDROID_KEY_PASSWORD'] == 'fixture key password' else 1)\n"
-                "data = pathlib.Path(sys.argv[3]).read_bytes()\n"
-                "if data == b'unreadable keystore': sys.exit(1)\n"
-                "sys.stdout.buffer.write(data)\n"
-            )
-            keytool.chmod(0o755)
             output = root / "github-env"
-            environment = {
-                **os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}",
-                "RUNNER_TEMP": str(root), "GITHUB_ENV": str(output),
-                "FLECTAR_ANDROID_KEY_ALIAS": "release-key",
-                "FLECTAR_ANDROID_KEYSTORE_PASSWORD": "fixture store password",
-                "FLECTAR_ANDROID_KEY_PASSWORD": "fixture key password",
-            }
+            environment = fake_keytool_environment(root, output)
             for encoded, success, message in (
                 ("", False, "FLECTAR_ANDROID_KEYSTORE_BASE64 is required"),
                 ("not base64!", False, ""),
@@ -186,6 +193,63 @@ class ReleaseTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("pinned Android app signing certificate SHA-256 is invalid", result.stderr)
+
+    def test_android_upload_key_restore_uses_its_own_pin(self):
+        # Google Play builds restore the upload key, which has a pin of its own.
+        app_certificate = b"original public certificate"
+        upload_certificate = b"upload public certificate"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            android = root / "platform/android"
+            android.mkdir(parents=True)
+            (android / "app-signing-certificate.sha256").write_text(hashlib.sha256(app_certificate).hexdigest() + "\n")
+            (android / "play-upload-certificate.sha256").write_text(
+                hashlib.sha256(upload_certificate).hexdigest() + "\n"
+            )
+            for name in ("verify-android-keystore.sh", "restore-android-keystore.sh"):
+                shutil.copyfile(SCRIPTS / name, root / "scripts" / name)
+            output = root / "github-env"
+            environment = {**fake_keytool_environment(root, output), "FLECTAR_ANDROID_SIGNING_KEY": "upload"}
+            for key, encoded, success, message in (
+                ("upload", "", False, "required in the google-play environment"),
+                ("upload", base64.b64encode(app_certificate).decode(), False,
+                 "differs from the pinned Google Play upload identity"),
+                ("other", base64.b64encode(upload_certificate).decode(), False, "Unknown Android signing key: other"),
+                ("upload", base64.b64encode(upload_certificate).decode(), True,
+                 hashlib.sha256(upload_certificate).hexdigest()),
+            ):
+                with self.subTest(key=key, encoded=encoded):
+                    output.unlink(missing_ok=True)
+                    result = subprocess.run(
+                        ["bash", str(root / "scripts/restore-android-keystore.sh")], cwd=root,
+                        env={**environment, "FLECTAR_ANDROID_SIGNING_KEY": key,
+                             "FLECTAR_ANDROID_KEYSTORE_BASE64": encoded},
+                        capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode == 0, success, result.stderr)
+                    self.assertIn(message, result.stdout + result.stderr)
+                    if success:
+                        keystore = Path(output.read_text().strip().split("=", 1)[1])
+                        self.assertTrue(keystore.name.startswith("flectar-play-upload."))
+                        self.assertEqual(keystore.stat().st_mode & 0o777, 0o600)
+                    else:
+                        self.assertFalse(output.exists())
+                        self.assertFalse(list(root.glob("flectar-*.keystore")))
+
+    def test_android_app_certificate_matches_its_pin(self):
+        # Builds signed with the upload key take the app's identities from
+        # this certificate, so it must be the pinned app signing key's.
+        android = SCRIPTS.parent / "platform/android"
+        der = android_certificates.certificate_der((android / "app-signing-certificate.pem").read_text())
+        pin = (android / "app-signing-certificate.sha256").read_text().strip()
+        self.assertEqual(hashlib.sha256(der).hexdigest(), pin)
+        # The redirect registered in Entra for Android.
+        self.assertEqual(dict(android_certificates.identities(der))["Microsoft redirect URI"],
+                         "msauth://com.flectar.mail/RS9TNniFStgBaA%2FfPjtiGDV2PGQ%3D")
+        upload_pin = (android / "play-upload-certificate.sha256").read_text()
+        self.assertRegex(upload_pin, r"\A[0-9a-f]{64}\n\Z")
+        self.assertNotEqual(upload_pin.strip(), pin)
 
     def test_android_version_codes_order_all_release_channels(self):
         versions = (
