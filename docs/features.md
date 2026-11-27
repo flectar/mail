@@ -285,8 +285,8 @@ over HTTPS. Only servers that use TLS are filled in, and the DNS step is skipped
 while a proxy is set. A DNS record that points to a server outside the
 address's domain could have been forged, so **Connect** waits until you tick
 **I checked this server and trust it**. Google and Microsoft accounts reach
-their own calendars and contacts through their sign-in, so their dialogs stay
-empty.
+their own calendars through their sign-in, and Google accounts their contacts
+as well, so their dialogs stay empty.
 
 ## Advanced account settings
 
@@ -529,7 +529,9 @@ storage, searches mail attachments, keeps files offline, and previews PDFs,
 images and text. [Contacts and CardDAV](carddav-contacts.md) describes how
 contacts are stored and synced. To sync an account's contacts with a CardDAV
 server, open its card in Settings → Accounts and choose **Connect** under
-Contacts.
+Contacts. A Gmail account that signs in with Google can sync its Google
+Contacts instead. Choose **Connect Google Contacts** there and allow contacts
+access when Google asks in the browser.
 
 To bring contacts from another address book, a phone or Google Contacts,
 export them there as a vCard file and choose **Import contacts…** in the menu
