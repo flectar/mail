@@ -145,6 +145,8 @@ fn collapse_new_account_label_sections(
     for account_id in account_ids {
         if initialized.insert(account_id) {
             collapsed.insert(format!("account-labels:{account_id}"));
+            // A Gmail account's labels under More, as in Gmail (#253).
+            collapsed.insert(format!("account-labels-more:{account_id}"));
         }
     }
 }
@@ -332,6 +334,12 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         .filter(|mailbox| mailbox.is_account)
         .map(|mailbox| (mailbox.account_id, mailbox.label.clone()))
         .collect::<HashMap<_, _>>();
+    let gmail_account_ids = state
+        .connected_accounts
+        .iter()
+        .filter(|account| account.mail_protocol == MailProtocol::Gmail)
+        .filter_map(|account| i32::try_from(account.id).ok())
+        .collect::<HashSet<_>>();
     let mut labels = make_label_rows(&state.labels, None, "");
     for label in &mut labels {
         if let Some(name) = account_names.get(&label.account_id) {
@@ -339,13 +347,8 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         } else if label.is_global {
             label.account_name = "All accounts".into();
         }
+        label.gmail = gmail_account_ids.contains(&label.account_id);
     }
-    let gmail_account_ids = state
-        .connected_accounts
-        .iter()
-        .filter(|account| account.mail_protocol == MailProtocol::Gmail)
-        .filter_map(|account| i32::try_from(account.id).ok())
-        .collect::<HashSet<_>>();
     let mut rows = if filtering {
         MAILBOX_NAMES.with_borrow(|names| {
             make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids, names)
@@ -593,6 +596,75 @@ fn account_label_rows(
             })
             .collect();
     }
+
+    // As Gmail's label list shows them (#253): the labels it hides, and those
+    // it shows only while they have unread mail when they have none, wait
+    // under More with the labels in them.
+    let more = labels_under_more(&account_labels);
+    let (under_more, listed): (Vec<_>, Vec<_>) = account_labels
+        .into_iter()
+        .partition(|label| more.contains(&label.id));
+    let mut rows = label_tree_rows(listed, account_id, collapsed);
+    if !under_more.is_empty() {
+        // Shut at first, and below the labels it shows, as in Gmail.
+        let key = format!("account-labels-more:{account_id}");
+        let open = !collapsed.contains(&key);
+        if open {
+            rows.extend(label_tree_rows(under_more, account_id, collapsed));
+        }
+        rows.push(SidebarRow {
+            open,
+            mailbox: MailboxRow {
+                account_id,
+                ..Default::default()
+            },
+            ..row(Kind::AccountLabelsMore, &key)
+        });
+    }
+    rows
+}
+
+/// The labels of one Gmail account that Gmail's label list doesn't show
+/// now, with the labels in them (#253).
+fn labels_under_more(labels: &[MailLabelRow]) -> HashSet<i32> {
+    let has_unread = |label: &MailLabelRow| !label.count.is_empty() && label.count != "0";
+    let not_shown = labels
+        .iter()
+        .filter(|label| {
+            label.gmail
+                && match label.listing {
+                    LabelListing::Shown => false,
+                    LabelListing::ShownIfUnread => !has_unread(label),
+                    LabelListing::Hidden => true,
+                }
+        })
+        .map(|label| label.name.as_str())
+        .collect::<HashSet<_>>();
+    labels
+        .iter()
+        .filter(|label| {
+            let mut name = label.name.as_str();
+            loop {
+                if not_shown.contains(name) {
+                    return true;
+                }
+                match name.rsplit_once('/') {
+                    Some((parent, _)) => name = parent,
+                    None => return false,
+                }
+            }
+        })
+        .map(|label| label.id)
+        .collect()
+}
+
+/// One account's labels as a tree, a label in the one its name is in.
+fn label_tree_rows(
+    account_labels: Vec<MailLabelRow>,
+    account_id: i32,
+    collapsed: &HashSet<String>,
+) -> Vec<SidebarRow> {
+    use SidebarRowKind as Kind;
 
     let ids_by_name = account_labels
         .iter()
@@ -938,6 +1010,7 @@ mod tests {
             position: 0,
             owner_account_id,
             is_auto: false,
+            list_visibility: Default::default(),
         };
         let labels = vec![
             Label {
@@ -1452,6 +1525,92 @@ mod tests {
                 .label
                 .expanded
         );
+    }
+
+    #[test]
+    fn gmail_labels_its_label_list_hides_wait_under_more() {
+        let label = |id, name: &str, listing, count: &str| MailLabelRow {
+            id,
+            account_id: 1,
+            name: name.into(),
+            display_name: name.into(),
+            gmail: true,
+            listing,
+            count: count.into(),
+            ..Default::default()
+        };
+        let labels = vec![
+            label(1, "Work", LabelListing::Shown, ""),
+            label(2, "Old", LabelListing::Hidden, ""),
+            label(3, "Old/2019", LabelListing::Shown, "3"),
+            label(4, "Receipts", LabelListing::ShownIfUnread, ""),
+            label(5, "Travel", LabelListing::ShownIfUnread, "2"),
+        ];
+        let rows = |collapsed: &HashSet<String>| {
+            make_sidebar_rows(
+                SidebarLayout::SingleAccount,
+                accounts(1, 0),
+                vec![],
+                labels.clone(),
+                &HashSet::from([1]),
+                collapsed,
+                None,
+            )
+            .into_iter()
+            .filter(|row| matches!(row.kind, Kind::AccountLabel | Kind::AccountLabelsMore))
+            .map(|row| match row.kind {
+                Kind::AccountLabel => row.label.display_name.to_string(),
+                _ => format!("{} open={}", row.key, row.open),
+            })
+            .collect::<Vec<_>>()
+        };
+        // Shut, More follows the labels Gmail shows: one with unread mail
+        // that shows only then, and not the labels in a hidden one.
+        assert_eq!(
+            rows(&HashSet::from(["account-labels-more:1".to_owned()])),
+            ["Work", "Travel", "account-labels-more:1 open=false"]
+        );
+        // Open, the rest show above it, as a tree of their own.
+        assert_eq!(
+            rows(&HashSet::new()),
+            [
+                "Work",
+                "Travel",
+                "Old",
+                "2019",
+                "Receipts",
+                "account-labels-more:1 open=true"
+            ]
+        );
+        // Other accounts' labels show whatever their listing.
+        let other = vec![MailLabelRow {
+            gmail: false,
+            listing: LabelListing::Hidden,
+            ..label(6, "Kept", LabelListing::Hidden, "")
+        }];
+        let kept = make_sidebar_rows(
+            SidebarLayout::SingleAccount,
+            accounts(1, 0),
+            vec![],
+            other,
+            &HashSet::new(),
+            &HashSet::new(),
+            None,
+        );
+        assert!(kept.iter().any(|row| row.label.id == 6));
+        assert!(!kept.iter().any(|row| row.kind == Kind::AccountLabelsMore));
+    }
+
+    #[test]
+    fn a_new_accounts_more_starts_shut() {
+        let mut initialized = HashSet::new();
+        let mut collapsed = HashSet::new();
+        collapse_new_account_label_sections([1], &mut initialized, &mut collapsed);
+        assert!(collapsed.contains("account-labels-more:1"));
+        // Opened later, it stays open.
+        collapsed.remove("account-labels-more:1");
+        collapse_new_account_label_sections([1], &mut initialized, &mut collapsed);
+        assert!(!collapsed.contains("account-labels-more:1"));
     }
 
     #[test]

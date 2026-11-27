@@ -977,6 +977,9 @@ fn project_label_rows(
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
                 role: label_role(label),
                 count: Default::default(),
+                // The sidebar tells Gmail's labels (#253).
+                gmail: false,
+                listing: label_listing(label.list_visibility),
             })
         })
         .collect()
@@ -1015,9 +1018,23 @@ fn applied_label_rows(
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
                 role: label_role(label),
                 count: Default::default(),
+                // The sidebar tells Gmail's labels (#253).
+                gmail: false,
+                listing: label_listing(label.list_visibility),
             })
         })
         .collect()
+}
+
+/// How the sidebar lists a label, as Gmail's label list shows a Gmail label
+/// (#253).
+fn label_listing(visibility: flectar_mail_core::models::LabelListVisibility) -> LabelListing {
+    use flectar_mail_core::models::LabelListVisibility as Visibility;
+    match visibility {
+        Visibility::Show => LabelListing::Shown,
+        Visibility::ShowIfUnread => LabelListing::ShownIfUnread,
+        Visibility::Hide => LabelListing::Hidden,
+    }
 }
 
 fn label_color(value: &str) -> slint::Color {
@@ -2694,6 +2711,7 @@ mod tests {
                 position: 0,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
             flectar_mail_core::models::Label {
                 id: 4,
@@ -2703,6 +2721,7 @@ mod tests {
                 position: 1,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
         ];
 
@@ -2722,6 +2741,7 @@ mod tests {
                 position: 0,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
             flectar_mail_core::models::Label {
                 id: 4,
@@ -2731,6 +2751,7 @@ mod tests {
                 position: 1,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
         ];
 
@@ -2753,6 +2774,7 @@ mod tests {
             position: id,
             owner_account_id,
             is_auto: false,
+            list_visibility: Default::default(),
         };
         let labels = vec![label(1, Some(7)), label(2, Some(8)), label(3, None)];
 
@@ -2780,6 +2802,7 @@ mod tests {
                 position: 0,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
             flectar_mail_core::models::Label {
                 id: 4,
@@ -2789,6 +2812,7 @@ mod tests {
                 position: 1,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
         ];
 
@@ -2836,6 +2860,7 @@ mod tests {
             position: 0,
             owner_account_id: None,
             is_auto: false,
+            list_visibility: Default::default(),
         }];
 
         let rows = make_mailbox_rows(&mailboxes, &HashMap::new(), &labels, &HashSet::new());
@@ -2969,6 +2994,7 @@ mod tests {
             position: 1000,
             owner_account_id: None,
             is_auto,
+            list_visibility: Default::default(),
         }
     }
 
@@ -3199,6 +3225,7 @@ mod tests {
             position: 0,
             owner_account_id: None,
             is_auto: false,
+            list_visibility: Default::default(),
         }];
         assert!(project_label_rows(&labels, &[1], None, "")[0].name_has_emoji);
     }

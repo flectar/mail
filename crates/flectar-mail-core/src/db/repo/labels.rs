@@ -1,6 +1,6 @@
 use crate::autolabel::Category;
 use crate::error::{CoreError, Result};
-use crate::models::Label;
+use crate::models::{Label, LabelListVisibility};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 const DEFAULT_AUTO_LABELS: [(&str, &str, &str, i64); 4] = [
@@ -39,7 +39,24 @@ fn from_row(row: &Row) -> rusqlite::Result<Label> {
         position: row.get("position")?,
         owner_account_id: row.get("owner_account_id")?,
         is_auto: row.get::<_, i64>("is_auto")? != 0,
+        list_visibility: LabelListVisibility::from_gmail(
+            row.get::<_, Option<String>>("list_visibility")?.as_deref(),
+        ),
     })
+}
+
+/// Selects what [`from_row`] reads of `labels`, with how Gmail's label list
+/// shows a Gmail label (#253).
+macro_rules! label_select {
+    ($rest:literal) => {
+        concat!(
+            "SELECT id, name, color, keyword, position, owner_account_id, is_auto,
+               (SELECT g.list_visibility FROM gmail_labels g
+                 WHERE g.local_label_id = labels.id LIMIT 1) AS list_visibility
+             FROM labels ",
+            $rest
+        )
+    };
 }
 
 /// Derive a valid IMAP keyword atom from a label name. IMAP flag-keywords are
@@ -70,12 +87,10 @@ pub fn keyword_for(name: &str) -> String {
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Label>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
-         FROM labels
-         ORDER BY CASE scope WHEN 'automatic' THEN 0 WHEN 'global' THEN 1 ELSE 2 END,
-                  owner_account_id, position, name",
-    )?;
+    let mut stmt = conn.prepare(label_select!(
+        "ORDER BY CASE scope WHEN 'automatic' THEN 0 WHEN 'global' THEN 1 ELSE 2 END,
+                  owner_account_id, position, name"
+    ))?;
     let rows = stmt
         .query_map([], from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -83,10 +98,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Label>> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Label>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
-         FROM labels WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(label_select!("WHERE id = ?1"))?;
     Ok(stmt.query_row(params![id], from_row).optional()?)
 }
 
@@ -163,10 +175,7 @@ pub fn save(
             conn.last_insert_rowid()
         }
     };
-    let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
-         FROM labels WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(label_select!("WHERE id = ?1"))?;
     Ok(stmt.query_row(params![id], from_row)?)
 }
 

@@ -488,6 +488,7 @@ mod tests {
             position: 0,
             owner_account_id: None,
             is_auto,
+            list_visibility: Default::default(),
         };
         for (category, role) in [
             (Category::Marketing, MailboxRole::Marketing),

@@ -588,6 +588,7 @@ mod tests {
             position: 0,
             owner_account_id: owner,
             is_auto,
+            list_visibility: Default::default(),
         };
         // The categories the app seeds, whose keywords tell them apart.
         let category = |id, name: &str, keyword: &str| Label {
