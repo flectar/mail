@@ -2433,6 +2433,27 @@ impl Core {
         Ok(())
     }
 
+    /// Whether replies from account `account_id` start below the original
+    /// they quote.
+    pub async fn set_account_reply_below_quote(&self, account_id: i64, below: bool) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                config.settings.reply_below_quote = below;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        Ok(())
+    }
+
     /// Whether new messages from account `account_id` ask for a read
     /// receipt (RFC 8098), which each message can still change.
     pub async fn set_account_read_receipt_requests(
