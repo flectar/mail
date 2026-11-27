@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
 mod embedded;
+pub mod flowed;
 
 pub use embedded::{EmbeddedHeaders, is_message_type, message_file_name, message_file_stem};
 pub(crate) use embedded::{planned_messages, shows_in_body, with_messages};
@@ -852,11 +853,14 @@ fn parse_text_entity(mime_header: &[u8], body: &[u8]) -> Result<String> {
     let msg = mail_parser::MessageParser::default()
         .parse(&raw)
         .ok_or_else(|| CoreError::Mime("unparseable MIME section".into()))?;
-    Ok(msg
-        .root_part()
+    let root = msg.root_part();
+    let text = root
         .text_contents()
-        .map(str::to_owned)
-        .unwrap_or_else(|| String::from_utf8_lossy(msg.root_part().contents()).into_owned()))
+        .map(std::borrow::Cow::Borrowed)
+        .unwrap_or_else(|| String::from_utf8_lossy(root.contents()));
+    Ok(flowed::Format::of(root.content_type())
+        .read(&text)
+        .into_owned())
 }
 
 fn decode_text_section_inner(
@@ -1192,6 +1196,43 @@ mod selective_section_tests {
         );
         // A malformed token is left verbatim rather than swallowing the tail.
         assert_eq!(decode_encoded_words("=?utf-8?bogus"), "=?utf-8?bogus");
+    }
+
+    #[test]
+    fn reads_flowed_sections_back_into_paragraphs() {
+        let body = "A paragraph that \r\ngoes on.\r\n> Quoted text that \r\n> flows\r\n";
+        let plain = decode_text_section(
+            TextSectionKind::Plain,
+            Some("7bit"),
+            b"Content-Type: text/plain; charset=utf-8; format=flowed\r\n\r\n",
+            body.as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            plain.content,
+            "A paragraph that goes on.\r\n> Quoted text that flows\r\n"
+        );
+        // A base64 section, here "Mid wo \r\nrd", keeps its format, and
+        // DelSp=yes takes out the space its writer added.
+        let encoded = "TWlkIHdvIA0KcmQ=\r\n";
+        let plain = decode_text_section(
+            TextSectionKind::Plain,
+            Some("base64"),
+            b"Content-Type: text/plain; format=flowed; delsp=yes\r\n\
+              Content-Transfer-Encoding: base64\r\n\r\n",
+            encoded.as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(plain.content, "Mid word");
+        // Fixed text stays as it is.
+        let plain = decode_text_section(
+            TextSectionKind::Plain,
+            Some("7bit"),
+            b"Content-Type: text/plain; charset=utf-8\r\n\r\n",
+            body.as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(plain.content, body);
     }
 
     #[test]
@@ -3267,6 +3308,16 @@ pub fn preview(raw: &[u8], text: &str) -> Vec<u8> {
     out
 }
 
+/// The text of `message`'s first text body, as `body_text(0)` gives it, with
+/// a format=flowed part's paragraphs each back on one line (RFC 3676).
+pub(crate) fn first_body_text(message: &mail_parser::Message<'_>) -> Option<String> {
+    let text = message.body_text(0)?;
+    let format = message.text_part(0).map_or(flowed::Format::Fixed, |part| {
+        flowed::Format::of(part.content_type())
+    });
+    Some(format.read(&text).into_owned())
+}
+
 pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
     let msg = mail_parser::MessageParser::default()
         .parse(raw)
@@ -3274,7 +3325,7 @@ pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
 
     let headers = parse_headers(&msg);
 
-    let text = msg.body_text(0).map(|t| t.into_owned());
+    let text = first_body_text(&msg);
     let html = msg.body_html(0).map(|h| sanitize_html(&h));
     // The messages it carries that the body shows, below its own text (#455).
     let (text, html) = with_messages(text, html, &embedded::shown_in(&msg, 0));
@@ -5209,6 +5260,19 @@ mod tests {
             receipt_to: &[],
             importance: Importance::Normal,
         }
+    }
+
+    #[test]
+    fn reads_flowed_messages_back_into_paragraphs() {
+        let raw = "From: a@example.com\r\nSubject: Hi\r\n\
+                   Content-Type: text/plain; charset=utf-8; format=flowed; delsp=yes\r\n\r\n\
+                   A paragraph that wraps mid wo \r\nrd and  \r\ngoes on.\r\n\
+                   > Quoted text that  \r\n> flows\r\n";
+        let parsed = parse_message(raw.as_bytes()).unwrap();
+        assert_eq!(
+            parsed.text.as_deref(),
+            Some("A paragraph that wraps mid word and goes on.\r\n> Quoted text that flows\r\n")
+        );
     }
 
     #[test]

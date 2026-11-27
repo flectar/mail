@@ -2233,6 +2233,9 @@ async fn request_bodies(
             BodyProperty::Type,
             BodyProperty::Disposition,
             BodyProperty::Cid,
+            // A part's type comes without its parameters (RFC 8621 section
+            // 4.1.4), and format=flowed is one of them.
+            BodyProperty::Header(content_type_header()),
         ])
         .fetch_text_body_values(true)
         .fetch_html_body_values(true)
@@ -2354,9 +2357,24 @@ async fn store_bodies(
     crate::sync::engine::record_content_failure_details(ctx, failed).await
 }
 
+/// A body part's Content-Type field, as it is written.
+fn content_type_header() -> Header {
+    Header::as_raw("Content-Type", false)
+}
+
+/// The format of a text/plain part, from the Content-Type field
+/// [`content_type_header`] asks for.
+fn part_format(part: &jmap_client::email::EmailBodyPart) -> crate::mime::flowed::Format {
+    match part.header(&content_type_header()) {
+        Some(HeaderValue::AsText(value)) => crate::mime::flowed::Format::of_header(value),
+        _ => crate::mime::flowed::Format::Fixed,
+    }
+}
+
 /// An email's text as its body parts give it, plain and sanitized HTML, each
 /// part joined as IMAP's background download joins them; None when a text
-/// part didn't come whole.
+/// part didn't come whole. A format=flowed part's paragraphs are each back
+/// on one line (RFC 3676).
 fn body_text(email: &Email) -> Option<(Option<String>, Option<String>)> {
     let mut seen = HashSet::new();
     let mut plain = Vec::new();
@@ -2382,7 +2400,7 @@ fn body_text(email: &Email) -> Option<(Option<String>, Option<String>)> {
         if is_html {
             html.push(crate::mime::sanitize_html(value.value()));
         } else {
-            plain.push(value.value().to_owned());
+            plain.push(part_format(part).read(value.value()).into_owned());
         }
     }
     Some((

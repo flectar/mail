@@ -94,6 +94,9 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/075_gmail_text_decoded_twice.sql")),
     Migration::Plain(include_str!("migrations/076_gmail_body_downloads.sql")),
     Migration::Plain(include_str!("migrations/077_google_contacts.sql")),
+    Migration::Plain(include_str!(
+        "migrations/078_flowed_bodies_to_read_again.sql"
+    )),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1886,6 +1889,52 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kept, "AtualizaÃ§Ãµes");
+    }
+
+    #[test]
+    fn upgrade_reads_again_bodies_that_could_be_flowed() {
+        let mut conn = staged(77);
+        conn.execute_batch(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (1, 'me@imap.example', 'generic', 'password', 'imap', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO folders (id, account_id, path, role) VALUES (1, 1, 'INBOX', 'inbox');
+             INSERT INTO threads (id, account_id, subject_norm) VALUES (1, 1, 's');
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, uid, subject, from_addr, date,
+               body_state, is_draft
+             ) VALUES
+               (1, 1, 1, 1, 1, 'crlf', 'a@mail.example', 1, 'cached', 0),
+               (2, 1, 1, 1, 2, 'lf', 'a@mail.example', 2, 'cached', 0),
+               (3, 1, 1, 1, 3, 'fixed', 'a@mail.example', 3, 'cached', 0),
+               (4, 1, 1, 1, 4, 'draft', 'a@mail.example', 4, 'cached', 1),
+               (5, 1, 1, 1, 5, 'html only', 'a@mail.example', 5, 'cached', 0),
+               (6, 1, 1, 1, 6, 'not here yet', 'a@mail.example', 6, 'none', 0),
+               (7, 1, 1, 1, 7, 'queued already', 'a@mail.example', 7, 'cached', 0);
+             INSERT INTO message_bodies (message_id, text_body, html_body) VALUES
+               (1, 'A paragraph that goes ' || char(13, 10) || 'on', NULL),
+               (2, 'A paragraph that goes ' || char(10) || 'on', NULL),
+               (3, 'Two' || char(13, 10) || 'lines', NULL),
+               (4, 'A paragraph that goes ' || char(13, 10) || 'on', NULL),
+               (5, NULL, '<p>Hi</p>'),
+               (6, 'A paragraph that goes ' || char(13, 10) || 'on', NULL),
+               (7, 'A paragraph that goes ' || char(13, 10) || 'on', NULL);
+             INSERT INTO bodies_to_read_again (message_id) VALUES (7);",
+        )
+        .unwrap();
+
+        upgrade_to(&mut conn, 78).unwrap();
+
+        let again: Vec<i64> = conn
+            .prepare("SELECT message_id FROM bodies_to_read_again ORDER BY message_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(again, [1, 2, 7]);
     }
 
     #[test]

@@ -8,7 +8,6 @@
 use super::{collect_addrs, find_html_tag, html_document_section, raw_header, sanitize_html};
 use crate::models::Address;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 /// How many messages deep the body shows messages inside messages. Deeper
 /// ones stay files.
@@ -183,7 +182,7 @@ pub(crate) fn shown_in(message: &mail_parser::Message, depth: usize) -> Vec<Embe
         .filter_map(|part| part.message())
         .map(|inner| EmbeddedMessage {
             headers: EmbeddedHeaders::of(inner),
-            text: inner.body_text(0).map(Cow::into_owned),
+            text: super::first_body_text(inner),
             html: inner.body_html(0).map(|html| sanitize_html(&html)),
             messages: shown_in(inner, depth + 1),
         })

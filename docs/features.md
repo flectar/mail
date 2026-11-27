@@ -482,6 +482,10 @@ inbox more room when you need it.
 
 Message appearance can follow the app theme or stay light or dark independently.
 It uses your selected color palette for HTML, plain text, and Reader mode.
+
+Plain-text mail written as format=flowed (RFC 3676) shows each paragraph as
+one, wrapping with the window rather than at the sender's line length. Mail
+downloaded before this was supported reads its text again when it's opened.
 To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.
