@@ -1,0 +1,35 @@
+diff --git a/crates/jmap-client/src/client.rs b/crates/jmap-client/src/client.rs
+index 963024a2..fda813cb 100644
+--- a/crates/jmap-client/src/client.rs
++++ b/crates/jmap-client/src/client.rs
+@@ -232,7 +232,7 @@ impl ClientBuilder {
+         let session_url = format!("{}/.well-known/jmap", url);
+         let session: Session = serde_json::from_slice(
+             &Client::handle_error(
+-                with_tls(with_proxy(HttpClient::builder(), &self.proxy), &self.tls)
++                with_tls(with_proxy(http_client_builder(), &self.proxy), &self.tls)
+                     .timeout(self.timeout)
+                     .danger_accept_invalid_certs(self.accept_invalid_certs)
+                     .redirect(redirect::Policy::custom(move |attempt| {
+@@ -333,7 +333,7 @@ impl Client {
+     /// A builder for an HTTP client of this JMAP client, with its proxy and
+     /// TLS configuration.
+     pub(crate) fn http_builder(&self) -> HttpClientBuilder {
+-        with_tls(with_proxy(HttpClient::builder(), &self.proxy), &self.tls)
++        with_tls(with_proxy(http_client_builder(), &self.proxy), &self.tls)
+     }
+ 
+     pub(crate) fn redirect_policy(&self) -> redirect::Policy {
+@@ -492,6 +492,12 @@ impl From<(String, String)> for Credentials {
+     }
+ }
+ 
++/// A new HTTP client builder. Responses come uncompressed, since some are
++/// read whole and a compressed one could grow without bound.
++fn http_client_builder() -> HttpClientBuilder {
++    HttpClient::builder().no_gzip()
++}
++
+ fn with_proxy(builder: HttpClientBuilder, proxy: &Option<reqwest::Proxy>) -> HttpClientBuilder {
+     match proxy {
+         Some(proxy) => builder.proxy(proxy.clone()),
