@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
-"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
+"PO-Revision-Date: 2026-11-26 13:30+0000\n"
+"Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: Russian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ru/>\n"
 "Language: ru\n"
@@ -1217,10 +1217,8 @@ msgid "Text style preference saved."
 msgstr "Настройка стиля текста сохранена."
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "Настройка рамки окна сохранена."
+msgstr "Настройка окна написания сохранена."
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1239,10 +1237,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "Не удалось сохранить настройку стиля текста: {}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "Не удалось сохранить настройку отмены отправки: {}"
+msgstr "Не удалось сохранить настройку окна написания: {}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -2185,10 +2181,8 @@ msgid "Could not show the message: {}"
 msgstr "Не удалось показать сообщение: {}"
 
 #: ui/app.slint:675
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "Не удалось отправить сообщение: {}"
+msgstr "Не удалось загрузить сообщение: {}"
 
 #: ui/app.slint:676
 msgid "Could not save the translation setting: {}"
@@ -2618,6 +2612,7 @@ msgstr "Отправка отменена. Сообщение снова чер�
 #: ui/app.slint:792
 msgid "Send cancelled here, but another of your devices may still send it."
 msgstr ""
+"Отправка отменена здесь, но другое ваше устройство ещё может его отправить."
 
 #: ui/app.slint:793
 msgid "This message is no longer scheduled."
@@ -2900,19 +2895,15 @@ msgstr "Не удалось удалить папку: {}"
 
 #: ui/app.slint:847
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "Папка скрыта. Снова показать её можно в «Настройки → Учётные записи»."
 
 #: ui/app.slint:848
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "Не удалось удалить папку: {}"
+msgstr "Не удалось скрыть папку: {}"
 
 #: ui/app.slint:849
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "Не удалось выбрать папку: {}"
+msgstr "Не удалось изменить папку: {}"
 
 #: ui/app.slint:850
 msgid "Could not close preview: {}"
@@ -2963,10 +2954,8 @@ msgid "Could not open composer: {}"
 msgstr "Не удалось открыть редактор письма: {}"
 
 #: ui/app.slint:862
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "Не удалось открыть сообщение в отдельном окне."
+msgstr "Не удалось открыть окно переписки: {}"
 
 #: ui/app.slint:863
 msgid "Add an account to send mail."
@@ -4366,7 +4355,7 @@ msgstr "Проверка снова {}"
 
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
-msgstr ""
+msgstr "Войдите снова на этом устройстве, чтобы продолжать получать почту."
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5280,10 +5269,8 @@ msgid "Open in a new window"
 msgstr "Открыть в новом окне"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "Новая подпись"
+msgstr "Без подписи"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:379
 msgid "From"
@@ -5291,23 +5278,19 @@ msgstr "От кого"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP: зашифровано и подписано цифровой подписью"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "Нет (без шифрования)"
+msgstr "OpenPGP: зашифровано"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP: подписано цифровой подписью, не зашифровано"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "Закрыть другие вкладки"
+msgstr "Выбрать другой адрес…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:385
 msgid "To"
@@ -6556,10 +6539,8 @@ msgid "Rename folder"
 msgstr "Переименовать папку"
 
 #: ui/components/sidebar-controls.slint:241
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
-msgstr "Скрыть папки"
+msgstr "Скрыть папку"
 
 #: ui/components/sidebar-controls.slint:245
 msgid "Delete folder"
@@ -7071,24 +7052,17 @@ msgid "Sync"
 msgstr "Синхронизация"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"Держите аккаунты, данные для входа, настройки, шаблоны, отложенные письма и "
-"напоминания об ответе одинаковыми на всех устройствах и позвольте любому из "
-"них отправлять запланированные письма. Всё зашифровано сквозным шифрованием, "
-"так что даже Flectar Mail не может это прочитать. Ваша почта, контакты и "
-"календари продолжают синхронизироваться с почтовым провайдером."
+"Учётные записи, настройки, шаблоны, отложенные письма и напоминания об "
+"ответе будут одинаковыми на всех ваших устройствах, а запланированные письма "
+"сможет отправить любое из них. Всё защищено сквозным шифрованием, поэтому "
+"даже Flectar Mail не может это прочитать. Почта, контакты и календари по-"
+"прежнему синхронизируются с вашим почтовым сервисом."
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7166,18 +7140,14 @@ msgid "{}."
 msgstr "{}."
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"Вы получите код восстановления, который стоит хранить в надёжном месте. "
-"Пароли и данные для входа тоже синхронизируются, так что другие устройства "
-"будут готовы сразу."
+"Вы получите код восстановления, который нужно хранить в надёжном месте. "
+"Пароли тоже синхронизируются, а входы Google и Microsoft и ключи приложения "
+"передаются на ваши устройства того же типа."
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7395,10 +7365,8 @@ msgid "Passwords and sign-ins"
 msgstr "Пароли и данные для входа"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr "Ваш код делает синхронизацию бесплатной на всех ваших устройствах."
+msgstr "Сквозное шифрование для всех ваших устройств."
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7406,29 +7374,27 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"Учётные записи, которые были на этом устройстве до подключения, хранят "
+"пароли и входы здесь, пока вы ими не поделитесь. Делитесь ими, только если "
+"все устройства выше принадлежат вам."
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
 msgstr ""
-"Сквозное шифрование для всех ваших устройств. Любой, у кого есть ваш код "
-"восстановления, может войти в ваши аккаунты."
+"Пароли передаются на все ваши устройства. Входы Google и Microsoft и ключи "
+"приложения передаются на ваши устройства того же типа. Любой, у кого есть "
+"ваш код восстановления, может войти в ваши учётные записи."
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "Синхронизировать пароли и данные для входа"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "Совместная блокировка"
+msgstr "Поделиться"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7458,12 +7424,12 @@ msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
 msgstr ""
+"Разрешите Flectar Mail доступ к камере в настройках телефона, чтобы "
+"сканировать QR-код."
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
-msgstr "Срок кода истёк. Начните заново, чтобы получить новый."
+msgstr "Сканер QR-кодов не запустился. Попробуйте снова или используйте код."
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8731,16 +8697,12 @@ msgid "Google client ID"
 msgstr "Идентификатор клиента Google"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "Идентификатор клиента Google"
+msgstr "Идентификатор клиента Google для Android"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "Идентификатор клиента Google"
+msgstr "Идентификатор клиента Google для iOS"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8751,10 +8713,8 @@ msgid "Microsoft client ID"
 msgstr "Идентификатор клиента Microsoft"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "Идентификатор клиента Microsoft"
+msgstr "Идентификатор клиента Microsoft Entra"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8778,12 +8738,16 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"Создайте клиент Android в Google Cloud для пакета {} с сертификатом подписи "
+"этого приложения и включите Gmail API."
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
 msgstr ""
+"Создайте клиент iOS в Google Cloud для идентификатора пакета {} и включите "
+"Gmail API."
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8799,12 +8763,16 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"В Microsoft Entra добавьте платформу Android для пакета {} с хешем подписи "
+"этого приложения. Секрет клиента не нужен."
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
 msgstr ""
+"В Microsoft Entra добавьте платформу iOS для идентификатора пакета {}. "
+"Секрет клиента не нужен."
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8831,14 +8799,10 @@ msgstr ""
 "умолчанию, если они доступны. Ключи общие с настройками."
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
 msgstr ""
-"Flectar Mail Sync бесплатен на всех ваших устройствах на срок действия кода."
+"С Flectar Mail Sync эти ключи получат и другие ваши устройства этого типа."
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -9820,22 +9784,16 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "Новые сообщения, ответы и пересылки начинаются с этого размера."
 
 #: ui/dialogs/settings-dialog.slint:1879
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "Открыть в новом окне"
+msgstr "Писать в новом окне"
 
 #: ui/dialogs/settings-dialog.slint:1880
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
 msgstr ""
-"Новые сообщения, ответы и пересылки начинаются этим шрифтом. Вариант «По "
-"умолчанию» шрифт не задаёт, и каждый читатель видит свой."
+"Новые сообщения, ответы, пересылки и черновики открываются в отдельном окне, "
+"и ваша почта остаётся на виду."
 
 #: ui/dialogs/settings-dialog.slint:1920
 msgid "Sending"
@@ -10577,11 +10535,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3463
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "Какие папки показывать на боковой панели и синхронизировать"
 
 #: ui/dialogs/settings-dialog.slint:3463
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "Какие папки показывать на боковой панели"
 
 #: ui/dialogs/settings-dialog.slint:3497 ui/dialogs/settings-dialog.slint:4655
 msgid "Sync contacts with a standards-compliant CardDAV server."
@@ -10609,19 +10567,15 @@ msgid "OAuth app credentials"
 msgstr "Ключи приложения OAuth"
 
 #: ui/dialogs/settings-dialog.slint:3594
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "Новые контакты сохраняются на этом устройстве."
+msgstr "Ваши собственные ключи приложения настроены на этом устройстве."
 
 #: ui/dialogs/settings-dialog.slint:3594
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
 msgstr ""
-"Дополнительно: используйте собственную регистрацию настольного приложения "
-"Gmail или Microsoft."
+"Дополнительно: используйте собственную регистрацию приложения Gmail или "
+"Microsoft на этом устройстве."
 
 #: ui/dialogs/settings-dialog.slint:3594
 msgid "Custom desktop app credentials are configured."
@@ -10892,10 +10846,8 @@ msgid "Open message"
 msgstr "Открыть письмо"
 
 #: ui/dialogs/settings-dialog.slint:3912
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "Открыть в новом окне"
+msgstr "Открыть сообщение в новом окне"
 
 #: ui/dialogs/settings-dialog.slint:3913
 msgid "Select message"
@@ -11364,10 +11316,8 @@ msgid "Choose a profile for {}"
 msgstr "Выберите профиль для {}"
 
 #: ui/dialogs/settings-dialog.slint:5160
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "Папка действия {}"
+msgstr "Папки {}"
 
 #: ui/dialogs/settings-dialog.slint:5181
 msgid "Special folders of {}"
@@ -11553,10 +11503,8 @@ msgid "Keep syncing"
 msgstr "Продолжить синхронизацию"
 
 #: ui/dialogs/settings-dialog.slint:5414
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "Удалить изображение"
+msgstr "Убрать устройство?"
 
 #: ui/dialogs/settings-dialog.slint:5418
 msgid ""
@@ -11564,16 +11512,23 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"На нём может сохраняться вход в {}. Если оно потеряно или не ваше, смените "
+"эти пароли и отзовите доступ Flectar Mail в настройках безопасности каждой "
+"учётной записи."
 
 #: ui/dialogs/settings-dialog.slint:5435
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
+"Outlook нужен ваш ключ приложения для входа на этом устройстве. Сохраните "
+"его, чтобы войти."
 
 #: ui/dialogs/settings-dialog.slint:5436
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
+"Gmail нужны ваши ключи приложения для входа на этом устройстве. Сохраните "
+"их, чтобы войти."
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11748,18 +11703,23 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"Выберите, какие папки показывать на боковой панели и в списке «Переместить в"
+"» и какие из них синхронизирует это устройство. Почта скрытой папки "
+"продолжает загружаться, а вложенные в неё папки тоже скрываются. "
+"Несинхронизируемая папка проверяется, когда вы её открываете."
 
 #: ui/folder-visibility.slint:144
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"Выберите, какие папки показывать на боковой панели и в списке «Переместить в"
+"». Почта скрытой папки продолжает загружаться, а вложенные в неё папки тоже "
+"скрываются."
 
 #: ui/folder-visibility.slint:253
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "Показано {} из {} адресов. Введите больше, чтобы сузить список."
+msgstr "Показано папок: {} из {}. Введите больше, чтобы сузить список."
 
 #: ui/link-services.slint:90
 msgid "Large files"
@@ -12077,17 +12037,14 @@ msgid "Every connection goes straight to its server."
 msgstr "Каждое соединение идёт напрямую к своему серверу."
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"Каждое соединение идёт через этот прокси. Если он недоступен, Flectar Mail "
-"без него не подключается."
+"Все подключения Flectar Mail идут через этот прокси. Если он недоступен, "
+"Flectar Mail не подключается без него. Ваша система всё равно может "
+"проверять сертификаты напрямую у их издателей."
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -12150,30 +12107,29 @@ msgid "Change proxy"
 msgstr "Изменить прокси"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "Другие действия с контактами"
+msgstr "Лимитные подключения"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "Скачать"
+msgstr "Приостановить загрузки"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"При лимитном подключении, например через мобильные данные или точку доступа, "
+"учётные записи по-прежнему проверяют новую почту, а сообщения и вложения "
+"загружаются, когда вы их открываете."
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "Это подключение лимитное, поэтому загрузки ждут."
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "Это подключение лимитное."
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -13291,8 +13247,6 @@ msgid "Deselect {}"
 msgstr "Снять выделение: {}"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
 msgstr "Открыть в новом окне"
 

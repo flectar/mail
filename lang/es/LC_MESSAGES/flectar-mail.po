@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
-"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
+"PO-Revision-Date: 2026-11-26 13:30+0000\n"
+"Last-Translator: Admin <admin@flectar.com>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
 "Language: es\n"
@@ -1214,10 +1214,8 @@ msgid "Text style preference saved."
 msgstr "Preferencia de estilo de texto guardada."
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "Preferencia de marco de ventana guardada."
+msgstr "Preferencia de ventana de escritura guardada."
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1236,10 +1234,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "No se pudo guardar la preferencia de estilo de texto: {}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "No se pudo guardar la preferencia de deshacer envío: {}"
+msgstr "No se pudo guardar la preferencia de ventana de escritura: {}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -2205,10 +2201,8 @@ msgid "Could not show the message: {}"
 msgstr "No se pudo mostrar el mensaje: {}"
 
 #: ui/app.slint:675
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "No se pudo enviar el mensaje: {}"
+msgstr "No se pudo cargar el mensaje: {}"
 
 #: ui/app.slint:676
 msgid "Could not save the translation setting: {}"
@@ -2641,6 +2635,7 @@ msgstr "Envío cancelado. El mensaje vuelve a ser un borrador."
 #: ui/app.slint:792
 msgid "Send cancelled here, but another of your devices may still send it."
 msgstr ""
+"Envío cancelado aquí, pero otro de tus dispositivos aún podría enviarlo."
 
 #: ui/app.slint:793
 msgid "This message is no longer scheduled."
@@ -2903,19 +2898,15 @@ msgstr "No se pudo eliminar la carpeta: {}"
 
 #: ui/app.slint:847
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "Carpeta oculta. Vuelve a mostrarla en Ajustes → Cuentas."
 
 #: ui/app.slint:848
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "No se pudo eliminar la carpeta: {}"
+msgstr "No se pudo ocultar la carpeta: {}"
 
 #: ui/app.slint:849
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "No se pudo elegir la carpeta: {}"
+msgstr "No se pudo cambiar la carpeta: {}"
 
 #: ui/app.slint:850
 msgid "Could not close preview: {}"
@@ -2967,10 +2958,8 @@ msgid "Could not open composer: {}"
 msgstr "No se pudo abrir el editor: {}"
 
 #: ui/app.slint:862
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "No se pudo abrir el mensaje en su propia ventana."
+msgstr "No se pudo abrir la ventana de la conversación: {}"
 
 #: ui/app.slint:863
 msgid "Add an account to send mail."
@@ -4376,6 +4365,7 @@ msgstr "Comprobando de nuevo {}"
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
 msgstr ""
+"Vuelve a iniciar sesión en este dispositivo para seguir recibiendo correo."
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5288,10 +5278,8 @@ msgid "Open in a new window"
 msgstr "Abrir en una ventana nueva"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "Nueva firma"
+msgstr "Sin firma"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:379
 msgid "From"
@@ -5299,23 +5287,19 @@ msgstr "De"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP: cifrado y firmado digitalmente"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "Ninguno (sin cifrar)"
+msgstr "OpenPGP: cifrado"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP: firmado digitalmente, sin cifrar"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "Cerrar las demás pestañas"
+msgstr "Elegir otra dirección…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:385
 msgid "To"
@@ -6565,10 +6549,8 @@ msgid "Rename folder"
 msgstr "Renombrar carpeta"
 
 #: ui/components/sidebar-controls.slint:241
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
-msgstr "Ocultar carpetas"
+msgstr "Ocultar carpeta"
 
 #: ui/components/sidebar-controls.slint:245
 msgid "Delete folder"
@@ -7078,25 +7060,17 @@ msgid "Sync"
 msgstr "Sincronizar"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"Mantén tus cuentas con sus inicios de sesión, preferencias, plantillas, "
-"pospuestos y recordatorios de respuesta igual en todos tus dispositivos, y "
-"deja que cualquiera de ellos envíe tus correos programados. Todo va cifrado "
-"de extremo a extremo, así que ni siquiera Flectar Mail puede leerlo. Tu "
-"correo, contactos y calendarios siguen sincronizándose con tu proveedor de "
-"correo."
+"Mantén tus cuentas, preferencias, plantillas, pospuestos y recordatorios de "
+"respuesta iguales en todos tus dispositivos, y deja que cualquiera de ellos "
+"envíe tus correos programados. Todo está cifrado de extremo a extremo, así "
+"que ni siquiera Flectar Mail puede leerlo. Tu correo, tus contactos y tus "
+"calendarios siguen sincronizándose con tu proveedor de correo."
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7176,18 +7150,15 @@ msgid "{}."
 msgstr "{}."
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"Recibirás un código de recuperación para guardar en un lugar seguro. Tus "
-"contraseñas e inicios de sesión también se sincronizan, así que tus otros "
-"dispositivos quedan listos enseguida."
+"Recibirás un código de recuperación para guardar en un lugar seguro. Las "
+"contraseñas también se sincronizan, y los inicios de sesión de Google y "
+"Microsoft y las claves de aplicación llegan a tus dispositivos del mismo "
+"tipo."
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7407,11 +7378,8 @@ msgid "Passwords and sign-ins"
 msgstr "Contraseñas e inicios de sesión"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr ""
-"Tu código hace que la sincronización sea gratis en todos tus dispositivos."
+msgstr "Cifrado de extremo a extremo, para todos tus dispositivos."
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7419,29 +7387,28 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"Las cuentas que ya estaban en este dispositivo antes de conectarlo conservan "
+"aquí sus contraseñas e inicios de sesión hasta que los compartas. "
+"Compártelos solo si todos los dispositivos de arriba son tuyos."
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
 msgstr ""
-"Cifrado de extremo a extremo, para todos tus dispositivos. Cualquiera con tu "
-"código de recuperación puede iniciar sesión en tus cuentas."
+"Las contraseñas llegan a todos tus dispositivos. Los inicios de sesión de "
+"Google y Microsoft y las claves de aplicación llegan a tus dispositivos del "
+"mismo tipo. Cualquiera con tu código de recuperación puede iniciar sesión en "
+"tus cuentas."
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "Sincronizar contraseñas e inicios de sesión"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "Bloqueo compartido"
+msgstr "Compartir"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7471,12 +7438,13 @@ msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
 msgstr ""
+"Activa el acceso a la cámara para Flectar Mail en los ajustes del teléfono "
+"para escanear un código QR."
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
-msgstr "El código caducó. Empieza de nuevo para obtener otro."
+msgstr ""
+"El escáner de códigos QR no se inició. Inténtalo de nuevo o usa un código."
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8725,16 +8693,12 @@ msgid "Google client ID"
 msgstr "ID de cliente de Google"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "ID de cliente de Google"
+msgstr "ID de cliente de Google para Android"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "ID de cliente de Google"
+msgstr "ID de cliente de Google para iOS"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8745,10 +8709,8 @@ msgid "Microsoft client ID"
 msgstr "ID de cliente de Microsoft"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "ID de cliente de Microsoft"
+msgstr "ID de cliente de Microsoft Entra"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8772,12 +8734,16 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"Crea un cliente de Android en Google Cloud para el paquete {} con el "
+"certificado de firma de esta aplicación y activa la API de Gmail."
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
 msgstr ""
+"Crea un cliente de iOS en Google Cloud para el ID de paquete {} y activa la "
+"API de Gmail."
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8793,12 +8759,16 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"En Microsoft Entra, añade una plataforma Android para el paquete {} con el "
+"hash de firma de esta aplicación. No hace falta un secreto de cliente."
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
 msgstr ""
+"En Microsoft Entra, añade una plataforma iOS para el ID de paquete {}. No "
+"hace falta un secreto de cliente."
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8825,15 +8795,11 @@ msgstr ""
 "disponibles. Las claves se comparten con Ajustes."
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
 msgstr ""
-"Flectar Mail Sync es gratis en todos tus dispositivos durante el periodo que "
-"cubre el código."
+"Con Flectar Mail Sync, tus otros dispositivos de este tipo también reciben "
+"estas claves."
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -9825,22 +9791,16 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "Los mensajes nuevos, respuestas y reenvíos empiezan con este tamaño."
 
 #: ui/dialogs/settings-dialog.slint:1879
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "Abrir en una ventana nueva"
+msgstr "Escribir en una ventana nueva"
 
 #: ui/dialogs/settings-dialog.slint:1880
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
 msgstr ""
-"Los mensajes nuevos, respuestas y reenvíos empiezan con esta fuente. "
-"Predeterminada no indica ninguna, así que cada lector ve la suya."
+"Los mensajes nuevos, las respuestas, los reenvíos y los borradores se abren "
+"en su propia ventana, así tu correo sigue a la vista."
 
 #: ui/dialogs/settings-dialog.slint:1920
 msgid "Sending"
@@ -10593,11 +10553,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3463
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "Qué carpetas se muestran en la barra lateral y se sincronizan"
 
 #: ui/dialogs/settings-dialog.slint:3463
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "Qué carpetas se muestran en la barra lateral"
 
 #: ui/dialogs/settings-dialog.slint:3497 ui/dialogs/settings-dialog.slint:4655
 msgid "Sync contacts with a standards-compliant CardDAV server."
@@ -10626,19 +10586,16 @@ msgid "OAuth app credentials"
 msgstr "Credenciales de la aplicación OAuth"
 
 #: ui/dialogs/settings-dialog.slint:3594
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "Los contactos nuevos se guardan en este dispositivo."
+msgstr ""
+"Tus propias claves de aplicación están configuradas en este dispositivo."
 
 #: ui/dialogs/settings-dialog.slint:3594
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
 msgstr ""
-"Avanzado: usa tu propio registro de aplicación de escritorio de Gmail o "
-"Microsoft."
+"Avanzado: usa tu propio registro de aplicación de Gmail o Microsoft en este "
+"dispositivo."
 
 #: ui/dialogs/settings-dialog.slint:3594
 msgid "Custom desktop app credentials are configured."
@@ -10904,10 +10861,8 @@ msgid "Open message"
 msgstr "Abrir mensaje"
 
 #: ui/dialogs/settings-dialog.slint:3912
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "Abrir en una ventana nueva"
+msgstr "Abrir el mensaje en una ventana nueva"
 
 #: ui/dialogs/settings-dialog.slint:3913
 msgid "Select message"
@@ -11372,10 +11327,8 @@ msgid "Choose a profile for {}"
 msgstr "Elegir un perfil para {}"
 
 #: ui/dialogs/settings-dialog.slint:5160
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "Carpeta de la acción {}"
+msgstr "Carpetas de {}"
 
 #: ui/dialogs/settings-dialog.slint:5181
 msgid "Special folders of {}"
@@ -11564,10 +11517,8 @@ msgid "Keep syncing"
 msgstr "Seguir sincronizando"
 
 #: ui/dialogs/settings-dialog.slint:5414
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "Quitar imagen"
+msgstr "¿Quitar el dispositivo?"
 
 #: ui/dialogs/settings-dialog.slint:5418
 msgid ""
@@ -11575,16 +11526,23 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"Puede que siga con la sesión iniciada en {}. Si lo has perdido o no es tuyo, "
+"cambia esas contraseñas y quita el acceso de Flectar Mail en los ajustes de "
+"seguridad de cada cuenta."
 
 #: ui/dialogs/settings-dialog.slint:5435
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
+"Outlook necesita tu clave de aplicación para iniciar sesión en este "
+"dispositivo. Guárdala para iniciar sesión."
 
 #: ui/dialogs/settings-dialog.slint:5436
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
+"Gmail necesita tus claves de aplicación para iniciar sesión en este "
+"dispositivo. Guárdalas para iniciar sesión."
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11758,18 +11716,23 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"Elige qué carpetas se muestran en la barra lateral y en la lista Mover a, y "
+"cuáles sincroniza este dispositivo. El correo de una carpeta oculta se sigue "
+"descargando, y las carpetas que contiene también se ocultan. Una carpeta que "
+"no se sincroniza se comprueba cuando la abres."
 
 #: ui/folder-visibility.slint:144
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"Elige qué carpetas se muestran en la barra lateral y en la lista Mover a. El "
+"correo de una carpeta oculta se sigue descargando, y las carpetas que "
+"contiene también se ocultan."
 
 #: ui/folder-visibility.slint:253
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "Se muestran {} de {} direcciones. Escribe más para reducirlas."
+msgstr "Se muestran {} de {} carpetas. Escribe más para reducirlas."
 
 #: ui/link-services.slint:90
 msgid "Large files"
@@ -12088,17 +12051,14 @@ msgid "Every connection goes straight to its server."
 msgstr "Cada conexión va directa a su servidor."
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"Cada conexión pasa por este proxy. Si no se puede conectar con él, Flectar "
-"Mail no se conecta sin él."
+"Cada conexión que hace Flectar Mail pasa por este proxy. Si no se puede "
+"conectar con él, Flectar Mail no se conecta sin él. Tu sistema puede seguir "
+"comprobando los certificados directamente con sus emisores."
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -12161,30 +12121,29 @@ msgid "Change proxy"
 msgstr "Cambiar el proxy"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "Más acciones de contactos"
+msgstr "Conexiones medidas"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "Descargar"
+msgstr "Pausar descargas"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"En una conexión medida, como los datos móviles o un punto de acceso, las "
+"cuentas siguen comprobando si hay correo nuevo, y los mensajes y adjuntos se "
+"descargan cuando los abres."
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "Esta conexión es medida, así que las descargas esperan."
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "Esta conexión es medida."
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -13302,8 +13261,6 @@ msgid "Deselect {}"
 msgstr "Deseleccionar {}"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
 msgstr "Abrir en una ventana nueva"
 
