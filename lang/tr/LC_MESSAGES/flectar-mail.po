@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 15:10+0000\n"
+"PO-Revision-Date: 2026-11-23 01:31+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Turkish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/tr/>\n"
@@ -1778,40 +1778,28 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV bağlantısı kesilemedi: {}"
 
 #: ui/app.slint:579
-#, fuzzy
-#| msgid "Updating folder settings…"
 msgid "Updating download settings…"
-msgstr "Klasör ayarları güncelleniyor…"
+msgstr "İndirme ayarları güncelleniyor…"
 
 #: ui/app.slint:580
-#, fuzzy
-#| msgid "Folder settings updated."
 msgid "Download settings updated."
-msgstr "Klasör ayarları güncellendi."
+msgstr "İndirme ayarları güncellendi."
 
 #: ui/app.slint:581
-#, fuzzy
-#| msgid "Could not update folder settings: {}"
 msgid "Could not update download settings: {}"
-msgstr "Klasör ayarları güncellenemedi: {}"
+msgstr "İndirme ayarları güncellenemedi: {}"
 
 #: ui/app.slint:583
-#, fuzzy
-#| msgid "Opened the message in your browser."
 msgid "Copied the message source"
-msgstr "İleti tarayıcınızda açıldı."
+msgstr "İleti kaynağı kopyalandı"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not read the message source: {}"
-msgstr "İleti gönderilemedi: {}"
+msgstr "İleti kaynağı okunamadı: {}"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not save the message: {}"
-msgstr "İleti gönderilemedi: {}"
+msgstr "İleti kaydedilemedi: {}"
 
 #: ui/app.slint:587
 msgid "Copies saved."
@@ -2255,28 +2243,20 @@ msgid "Could not update sync settings: {}"
 msgstr "Eşitleme ayarları güncellenemedi: {}"
 
 #: ui/app.slint:723
-#, fuzzy
-#| msgid "Account color changes require local mail data."
 msgid "Account names require local mail data."
-msgstr "Hesap rengi değişiklikleri için yerel posta verileri gereklidir."
+msgstr "Hesap adları yerel e-posta verileri gerektirir."
 
 #: ui/app.slint:724
-#, fuzzy
-#| msgid "Saving account order…"
 msgid "Saving the account name…"
-msgstr "Hesap sırası kaydediliyor…"
+msgstr "Hesap adı kaydediliyor…"
 
 #: ui/app.slint:725
-#, fuzzy
-#| msgid "Account order saved."
 msgid "Account name saved."
-msgstr "Hesap sırası kaydedildi."
+msgstr "Hesap adı kaydedildi."
 
 #: ui/app.slint:726
-#, fuzzy
-#| msgid "Could not save account order: {}"
 msgid "Could not save the account name: {}"
-msgstr "Hesap sırası kaydedilemedi: {}"
+msgstr "Hesap adı kaydedilemedi: {}"
 
 #: ui/app.slint:727
 msgid "Mail history requires local mail data."
@@ -6889,14 +6869,9 @@ msgstr ""
 "kodu gir ya da kurtarma kodunu kullan."
 
 #: ui/device-sync.slint:692
-#, fuzzy
-#| msgid ""
-#| "Scan the QR code your other device shows, enter its code, or use your "
-#| "recovery code."
 msgid "Enter the code your other device shows, or use your recovery code."
 msgstr ""
-"Diğer cihazının gösterdiği QR kodunu tara, kodunu gir ya da kurtarma kodunu "
-"kullan."
+"Diğer cihazınızda gösterilen kodu girin veya kurtarma kodunuzu kullanın."
 
 #: ui/device-sync.slint:705 ui/device-sync.slint:710
 msgid "Enter code"
@@ -7252,16 +7227,13 @@ msgid "QR code for adding a device"
 msgstr "Cihaz ekleme için QR kodu"
 
 #: ui/device-sync.slint:1297
-#, fuzzy
-#| msgid ""
-#| "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
-#| "this device → Enter code, and type:"
 msgid ""
 "On your other device, open Flectar Mail and choose Enter code, on the "
 "welcome screen or in Settings → Sync → Connect this device. Then type:"
 msgstr ""
-"Diğer cihazında Flectar Mail'i aç, Ayarlar → Eşitleme → Bu cihazı bağla → "
-"Kod gir'e git ve şunu yaz:"
+"Diğer cihazınızda Flectar Mail'i açın ve hoş geldiniz ekranında ya da "
+"Ayarlar → Eşitleme → Bu cihazı bağla bölümünde \"Kod gir\" seçeneğini seçin. "
+"Ardından şunu yazın:"
 
 #: ui/device-sync.slint:1318
 msgid ""
@@ -7324,16 +7296,12 @@ msgstr ""
 "Gösterdiği kodu gir:"
 
 #: ui/device-sync.slint:1416
-#, fuzzy
-#| msgid ""
-#| "On your other device, go to Settings → Sync → Add a device → Use a code. "
-#| "Enter the code it shows:"
 msgid ""
 "On your other device, go to Settings → Sync → Add a device. Enter the code "
 "it shows:"
 msgstr ""
-"Diğer cihazında Ayarlar → Eşitleme → Cihaz ekle → Kod kullan'a git. "
-"Gösterdiği kodu gir:"
+"Diğer cihazınızda Ayarlar → Eşitleme → Cihaz ekle bölümüne gidin. Gösterilen "
+"kodu girin:"
 
 #: ui/device-sync.slint:1433
 msgid ""
@@ -8666,20 +8634,16 @@ msgid "All mail"
 msgstr "Tüm e-postalar"
 
 #: ui/dialogs/settings-dialog.slint:809
-#, fuzzy
-#| msgid "Read only"
 msgid "Headers only"
-msgstr "Yalnızca okuma"
+msgstr "Yalnızca başlıklar"
 
 #: ui/dialogs/settings-dialog.slint:810 ui/translation.slint:420
 msgid "Messages"
 msgstr "İletiler"
 
 #: ui/dialogs/settings-dialog.slint:811
-#, fuzzy
-#| msgid "Has attachments"
 msgid "Messages and attachments"
-msgstr "Ek içeriyor"
+msgstr "İletiler ve ekler"
 
 #: ui/dialogs/settings-dialog.slint:815
 msgid "1 minute"
@@ -9935,16 +9899,16 @@ msgid "Mail synchronization error: {}"
 msgstr "E-posta eşitleme hatası: {}"
 
 #: ui/dialogs/settings-dialog.slint:3093
-#, fuzzy
-#| msgid "Account"
 msgid "Account name"
-msgstr "Hesap"
+msgstr "Hesap adı"
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid ""
 "Shown instead of the address in the sidebar and lists. People you email "
 "don't see it."
 msgstr ""
+"Kenar çubuğunda ve listelerde adres yerine gösterilir. E-posta gönderdiğiniz "
+"kişiler bunu görmez."
 
 #: ui/dialogs/settings-dialog.slint:3106
 msgid "Mail history"
@@ -9965,17 +9929,19 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3125
 msgid "Messages download when you open them."
-msgstr ""
+msgstr "İletiler açtığınızda indirilir."
 
 #: ui/dialogs/settings-dialog.slint:3126
 msgid ""
 "Messages and their attachments up to 25 MB download ahead of time, to open "
 "them offline."
 msgstr ""
+"İletiler ve 25 MB'a kadar ekleri, çevrimdışı açabilmeniz için önceden "
+"indirilir."
 
 #: ui/dialogs/settings-dialog.slint:3127
 msgid "Messages download ahead of time, and attachments when you open them."
-msgstr ""
+msgstr "İletiler önceden indirilir, ekler ise açtığınızda indirilir."
 
 #: ui/dialogs/settings-dialog.slint:3142
 msgid "When the app starts, and when you check for new mail."
@@ -10359,10 +10325,8 @@ msgid "Edit a message as new"
 msgstr "Bir iletiyi yeni olarak düzenle"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Show source"
 msgid "Show a message's source"
-msgstr "Kaynağı göster"
+msgstr "Bir iletinin kaynağını göster"
 
 #: ui/dialogs/settings-dialog.slint:3729
 msgid "Take back a message just sent"
@@ -11317,27 +11281,25 @@ msgid "Scheduled"
 msgstr "Planlandı"
 
 #: ui/mailbox-words.slint:21
-#, fuzzy
-#| msgid "Writing"
 msgctxt "category"
 msgid "Marketing"
-msgstr "Yazma"
+msgstr "Pazarlama"
 
 #: ui/mailbox-words.slint:22
 msgctxt "category"
 msgid "News"
-msgstr ""
+msgstr "Haberler"
 
 #: ui/mailbox-words.slint:23
 msgctxt "category"
 msgid "Social"
-msgstr ""
+msgstr "Sosyal"
 
 #. Partnership, sponsorship and similar offers from unknown senders.
 #: ui/mailbox-words.slint:26
 msgctxt "category"
 msgid "Pitch"
-msgstr ""
+msgstr "Sunum"
 
 #: ui/mailbox-words.slint:56
 msgid "Unified Starred"
@@ -12737,17 +12699,13 @@ msgstr "Görüntülenen iletiyi göster"
 
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:381
 #: ui/views/mail-reading-pane.slint:441
-#, fuzzy
-#| msgid "Show source"
 msgid "Show HTML source"
-msgstr "Kaynağı göster"
+msgstr "HTML kaynağını göster"
 
 #: ui/views/mail-reading-pane.slint:364 ui/views/mail-reading-pane.slint:382
 #: ui/views/mail-reading-pane.slint:442
-#, fuzzy
-#| msgid "Show source"
 msgid "Show message source"
-msgstr "Kaynağı göster"
+msgstr "İleti kaynağını göster"
 
 #: ui/views/mail-reading-pane.slint:365 ui/views/mail-reading-pane.slint:383
 #: ui/views/mail-reading-pane.slint:443
@@ -12930,28 +12888,20 @@ msgid "Show email"
 msgstr "E-postayı göster"
 
 #: ui/views/mail-reading-pane.slint:1800
-#, fuzzy
-#| msgid "Attaching the message…"
-#| msgid_plural "Attaching {0} messages…"
 msgid "Reading the message source…"
-msgstr "İleti ekleniyor…"
+msgstr "İleti kaynağı okunuyor…"
 
 #: ui/views/mail-reading-pane.slint:1802
 msgid "Only the start. Save it to see all of it."
-msgstr ""
+msgstr "Yalnızca başlangıcı. Tamamını görmek için kaydedin."
 
 #: ui/views/mail-reading-pane.slint:1803
-#, fuzzy
-#| msgid "Message starred."
-#| msgid_plural "{0} messages starred."
 msgid "The message as it arrived"
-msgstr "İleti yıldızlandı."
+msgstr "İletinin geldiği hali"
 
 #: ui/views/mail-reading-pane.slint:1823
-#, fuzzy
-#| msgid "Save"
 msgid "Save…"
-msgstr "Kaydet"
+msgstr "Kaydet…"
 
 #: ui/views/mail-reading-pane.slint:1850
 msgid "View original plain text"

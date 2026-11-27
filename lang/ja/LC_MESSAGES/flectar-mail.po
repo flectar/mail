@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 15:10+0000\n"
+"PO-Revision-Date: 2026-11-23 01:31+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -1778,40 +1778,28 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV の接続を解除できませんでした：{}"
 
 #: ui/app.slint:579
-#, fuzzy
-#| msgid "Updating folder settings…"
 msgid "Updating download settings…"
-msgstr "フォルダーの設定を更新しています…"
+msgstr "ダウンロード設定を更新しています…"
 
 #: ui/app.slint:580
-#, fuzzy
-#| msgid "Folder settings updated."
 msgid "Download settings updated."
-msgstr "フォルダー設定を更新しました。"
+msgstr "ダウンロード設定を更新しました。"
 
 #: ui/app.slint:581
-#, fuzzy
-#| msgid "Could not update folder settings: {}"
 msgid "Could not update download settings: {}"
-msgstr "フォルダー設定を更新できませんでした：{}"
+msgstr "ダウンロード設定を更新できませんでした: {}"
 
 #: ui/app.slint:583
-#, fuzzy
-#| msgid "Opened the message in your browser."
 msgid "Copied the message source"
-msgstr "メールをブラウザーで開きました。"
+msgstr "メッセージのソースをコピーしました"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not read the message source: {}"
-msgstr "メールを送信できませんでした：{}"
+msgstr "メッセージのソースを読み取れませんでした: {}"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not save the message: {}"
-msgstr "メールを送信できませんでした：{}"
+msgstr "メッセージを保存できませんでした: {}"
 
 #: ui/app.slint:587
 msgid "Copies saved."
@@ -2257,28 +2245,20 @@ msgid "Could not update sync settings: {}"
 msgstr "同期設定を更新できませんでした：{}"
 
 #: ui/app.slint:723
-#, fuzzy
-#| msgid "Account color changes require local mail data."
 msgid "Account names require local mail data."
-msgstr "アカウントの色の変更にはローカルのメールデータが必要です。"
+msgstr "アカウント名にはローカルのメールデータが必要です。"
 
 #: ui/app.slint:724
-#, fuzzy
-#| msgid "Saving account order…"
 msgid "Saving the account name…"
-msgstr "アカウントの順序を保存しています…"
+msgstr "アカウント名を保存しています…"
 
 #: ui/app.slint:725
-#, fuzzy
-#| msgid "Account order saved."
 msgid "Account name saved."
-msgstr "アカウントの順序を保存しました。"
+msgstr "アカウント名を保存しました。"
 
 #: ui/app.slint:726
-#, fuzzy
-#| msgid "Could not save account order: {}"
 msgid "Could not save the account name: {}"
-msgstr "アカウントの順序を保存できませんでした：{}"
+msgstr "アカウント名を保存できませんでした: {}"
 
 #: ui/app.slint:727
 msgid "Mail history requires local mail data."
@@ -6853,14 +6833,10 @@ msgstr ""
 "コードを入力するか、リカバリーコードを使用してください。"
 
 #: ui/device-sync.slint:692
-#, fuzzy
-#| msgid ""
-#| "Scan the QR code your other device shows, enter its code, or use your "
-#| "recovery code."
 msgid "Enter the code your other device shows, or use your recovery code."
 msgstr ""
-"別のデバイスに表示される QR コードをスキャンするか、そのコードを入力するか、"
-"リカバリーコードを使用してください。"
+"もう一方のデバイスに表示されるコードを入力するか、リカバリーコードを使用して"
+"ください。"
 
 #: ui/device-sync.slint:705 ui/device-sync.slint:710
 msgid "Enter code"
@@ -7216,16 +7192,12 @@ msgid "QR code for adding a device"
 msgstr "デバイス追加用の QR コード"
 
 #: ui/device-sync.slint:1297
-#, fuzzy
-#| msgid ""
-#| "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
-#| "this device → Enter code, and type:"
 msgid ""
 "On your other device, open Flectar Mail and choose Enter code, on the "
 "welcome screen or in Settings → Sync → Connect this device. Then type:"
 msgstr ""
-"別のデバイスで Flectar Mail を開き、「設定」→「同期」→「このデバイスを接続」→"
-"「コードを入力」に進んで、以下を入力してください："
+"もう一方のデバイスで Flectar Mail を開き、ようこそ画面または「設定」→「同期」"
+"→「このデバイスを接続」で「コードを入力」を選択します。次に入力してください:"
 
 #: ui/device-sync.slint:1318
 msgid ""
@@ -7293,16 +7265,12 @@ msgstr ""
 "す。表示されたコードを入力してください："
 
 #: ui/device-sync.slint:1416
-#, fuzzy
-#| msgid ""
-#| "On your other device, go to Settings → Sync → Add a device → Use a code. "
-#| "Enter the code it shows:"
 msgid ""
 "On your other device, go to Settings → Sync → Add a device. Enter the code "
 "it shows:"
 msgstr ""
-"別のデバイスで「設定」→「同期」→「デバイスを追加」→「コードを使用」に進みま"
-"す。表示されたコードを入力してください："
+"もう一方のデバイスで「設定」→「同期」→「デバイスを追加」に進みます。表示され"
+"るコードを入力してください:"
 
 #: ui/device-sync.slint:1433
 msgid ""
@@ -8621,20 +8589,16 @@ msgid "All mail"
 msgstr "すべてのメール"
 
 #: ui/dialogs/settings-dialog.slint:809
-#, fuzzy
-#| msgid "Read only"
 msgid "Headers only"
-msgstr "読み取り専用"
+msgstr "ヘッダーのみ"
 
 #: ui/dialogs/settings-dialog.slint:810 ui/translation.slint:420
 msgid "Messages"
 msgstr "メール"
 
 #: ui/dialogs/settings-dialog.slint:811
-#, fuzzy
-#| msgid "Has attachments"
 msgid "Messages and attachments"
-msgstr "添付ファイルあり"
+msgstr "メッセージと添付ファイル"
 
 #: ui/dialogs/settings-dialog.slint:815
 msgid "1 minute"
@@ -9884,16 +9848,16 @@ msgid "Mail synchronization error: {}"
 msgstr "メール同期エラー：{}"
 
 #: ui/dialogs/settings-dialog.slint:3093
-#, fuzzy
-#| msgid "Account"
 msgid "Account name"
-msgstr "アカウント"
+msgstr "アカウント名"
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid ""
 "Shown instead of the address in the sidebar and lists. People you email "
 "don't see it."
 msgstr ""
+"サイドバーと一覧でアドレスの代わりに表示されます。メールの相手には表示されま"
+"せん。"
 
 #: ui/dialogs/settings-dialog.slint:3106
 msgid "Mail history"
@@ -9915,17 +9879,21 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3125
 msgid "Messages download when you open them."
-msgstr ""
+msgstr "メッセージは開いたときにダウンロードされます。"
 
 #: ui/dialogs/settings-dialog.slint:3126
 msgid ""
 "Messages and their attachments up to 25 MB download ahead of time, to open "
 "them offline."
 msgstr ""
+"メッセージと 25 MB までの添付ファイルは事前にダウンロードされ、オフラインで開"
+"けます。"
 
 #: ui/dialogs/settings-dialog.slint:3127
 msgid "Messages download ahead of time, and attachments when you open them."
 msgstr ""
+"メッセージは事前にダウンロードされ、添付ファイルは開いたときにダウンロードさ"
+"れます。"
 
 #: ui/dialogs/settings-dialog.slint:3142
 msgid "When the app starts, and when you check for new mail."
@@ -10301,10 +10269,8 @@ msgid "Edit a message as new"
 msgstr "メールを新規として編集"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Show source"
 msgid "Show a message's source"
-msgstr "ソースを表示"
+msgstr "メッセージのソースを表示"
 
 #: ui/dialogs/settings-dialog.slint:3729
 msgid "Take back a message just sent"
@@ -11256,27 +11222,25 @@ msgid "Scheduled"
 msgstr "送信予定"
 
 #: ui/mailbox-words.slint:21
-#, fuzzy
-#| msgid "Writing"
 msgctxt "category"
 msgid "Marketing"
-msgstr "作成"
+msgstr "マーケティング"
 
 #: ui/mailbox-words.slint:22
 msgctxt "category"
 msgid "News"
-msgstr ""
+msgstr "ニュース"
 
 #: ui/mailbox-words.slint:23
 msgctxt "category"
 msgid "Social"
-msgstr ""
+msgstr "ソーシャル"
 
 #. Partnership, sponsorship and similar offers from unknown senders.
 #: ui/mailbox-words.slint:26
 msgctxt "category"
 msgid "Pitch"
-msgstr ""
+msgstr "売り込み"
 
 #: ui/mailbox-words.slint:56
 msgid "Unified Starred"
@@ -12678,17 +12642,13 @@ msgstr "レンダリングされたメールを表示"
 
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:381
 #: ui/views/mail-reading-pane.slint:441
-#, fuzzy
-#| msgid "Show source"
 msgid "Show HTML source"
-msgstr "ソースを表示"
+msgstr "HTML ソースを表示"
 
 #: ui/views/mail-reading-pane.slint:364 ui/views/mail-reading-pane.slint:382
 #: ui/views/mail-reading-pane.slint:442
-#, fuzzy
-#| msgid "Show source"
 msgid "Show message source"
-msgstr "ソースを表示"
+msgstr "メッセージのソースを表示"
 
 #: ui/views/mail-reading-pane.slint:365 ui/views/mail-reading-pane.slint:383
 #: ui/views/mail-reading-pane.slint:443
@@ -12872,28 +12832,20 @@ msgid "Show email"
 msgstr "メールを表示"
 
 #: ui/views/mail-reading-pane.slint:1800
-#, fuzzy
-#| msgid "Attaching the message…"
-#| msgid_plural "Attaching {0} messages…"
 msgid "Reading the message source…"
-msgstr "{0}件のメールを添付中…"
+msgstr "メッセージのソースを読み取り中…"
 
 #: ui/views/mail-reading-pane.slint:1802
 msgid "Only the start. Save it to see all of it."
-msgstr ""
+msgstr "先頭のみです。保存すると全体を確認できます。"
 
 #: ui/views/mail-reading-pane.slint:1803
-#, fuzzy
-#| msgid "Message starred."
-#| msgid_plural "{0} messages starred."
 msgid "The message as it arrived"
-msgstr "{0}件のメールにスターを付けました。"
+msgstr "受信したままのメッセージ"
 
 #: ui/views/mail-reading-pane.slint:1823
-#, fuzzy
-#| msgid "Save"
 msgid "Save…"
-msgstr "保存"
+msgstr "保存…"
 
 #: ui/views/mail-reading-pane.slint:1850
 msgid "View original plain text"

@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 15:10+0000\n"
+"PO-Revision-Date: 2026-11-23 01:31+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
@@ -1813,40 +1813,28 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "La déconnexion de CardDAV a échoué : {}"
 
 #: ui/app.slint:579
-#, fuzzy
-#| msgid "Updating folder settings…"
 msgid "Updating download settings…"
-msgstr "Mise à jour des réglages du dossier…"
+msgstr "Mise à jour des paramètres de téléchargement…"
 
 #: ui/app.slint:580
-#, fuzzy
-#| msgid "Folder settings updated."
 msgid "Download settings updated."
-msgstr "Réglages du dossier mis à jour."
+msgstr "Paramètres de téléchargement mis à jour."
 
 #: ui/app.slint:581
-#, fuzzy
-#| msgid "Could not update folder settings: {}"
 msgid "Could not update download settings: {}"
-msgstr "Impossible de mettre à jour les réglages du dossier : {}"
+msgstr "Impossible de mettre à jour les paramètres de téléchargement : {}"
 
 #: ui/app.slint:583
-#, fuzzy
-#| msgid "Opened the message in your browser."
 msgid "Copied the message source"
-msgstr "Le message a été ouvert dans votre navigateur."
+msgstr "Source du message copiée"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not read the message source: {}"
-msgstr "Impossible d’envoyer le message : {}"
+msgstr "Impossible de lire la source du message : {}"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not save the message: {}"
-msgstr "Impossible d’envoyer le message : {}"
+msgstr "Impossible d'enregistrer le message : {}"
 
 #: ui/app.slint:587
 msgid "Copies saved."
@@ -2306,29 +2294,20 @@ msgid "Could not update sync settings: {}"
 msgstr "Impossible de mettre à jour les réglages de synchronisation : {}"
 
 #: ui/app.slint:723
-#, fuzzy
-#| msgid "Account color changes require local mail data."
 msgid "Account names require local mail data."
-msgstr ""
-"Modifier la couleur d’un compte nécessite les données locales des messages."
+msgstr "Les noms de compte nécessitent des données de messagerie locales."
 
 #: ui/app.slint:724
-#, fuzzy
-#| msgid "Saving account order…"
 msgid "Saving the account name…"
-msgstr "Enregistrement de l’ordre des comptes en cours…"
+msgstr "Enregistrement du nom du compte…"
 
 #: ui/app.slint:725
-#, fuzzy
-#| msgid "Account order saved."
 msgid "Account name saved."
-msgstr "L’ordre des comptes a été enregistré."
+msgstr "Nom du compte enregistré."
 
 #: ui/app.slint:726
-#, fuzzy
-#| msgid "Could not save account order: {}"
 msgid "Could not save the account name: {}"
-msgstr "Échec de l’enregistrement de l’ordre des comptes : {}"
+msgstr "Impossible d'enregistrer le nom du compte : {}"
 
 #: ui/app.slint:727
 msgid "Mail history requires local mail data."
@@ -7017,14 +6996,10 @@ msgstr ""
 "qu’affiche votre autre appareil, ou utilisez votre code de récupération."
 
 #: ui/device-sync.slint:692
-#, fuzzy
-#| msgid ""
-#| "Scan the QR code your other device shows, enter its code, or use your "
-#| "recovery code."
 msgid "Enter the code your other device shows, or use your recovery code."
 msgstr ""
-"Scannez le code QR qu’affiche votre autre appareil, saisissez son code, ou "
-"utilisez votre code de récupération."
+"Saisissez le code affiché sur votre autre appareil ou utilisez votre code de "
+"récupération."
 
 #: ui/device-sync.slint:705 ui/device-sync.slint:710
 msgid "Enter code"
@@ -7392,16 +7367,13 @@ msgid "QR code for adding a device"
 msgstr "Code QR d’ajout d’appareil"
 
 #: ui/device-sync.slint:1297
-#, fuzzy
-#| msgid ""
-#| "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
-#| "this device → Enter code, and type:"
 msgid ""
 "On your other device, open Flectar Mail and choose Enter code, on the "
 "welcome screen or in Settings → Sync → Connect this device. Then type:"
 msgstr ""
-"Sur votre autre appareil, ouvrez Flectar Mail, allez dans Paramètres → "
-"Synchronisation → Connecter cet appareil → Saisir le code, et saisissez :"
+"Sur votre autre appareil, ouvrez Flectar Mail et choisissez Saisir le code, "
+"sur l'écran d'accueil ou dans Paramètres → Synchronisation → Connecter cet "
+"appareil. Saisissez ensuite :"
 
 #: ui/device-sync.slint:1318
 msgid ""
@@ -7470,16 +7442,12 @@ msgstr ""
 "un appareil → Utiliser un code. Saisissez le code qu’il affiche :"
 
 #: ui/device-sync.slint:1416
-#, fuzzy
-#| msgid ""
-#| "On your other device, go to Settings → Sync → Add a device → Use a code. "
-#| "Enter the code it shows:"
 msgid ""
 "On your other device, go to Settings → Sync → Add a device. Enter the code "
 "it shows:"
 msgstr ""
 "Sur votre autre appareil, allez dans Paramètres → Synchronisation → Ajouter "
-"un appareil → Utiliser un code. Saisissez le code qu’il affiche :"
+"un appareil. Saisissez le code qu'il affiche :"
 
 #: ui/device-sync.slint:1433
 msgid ""
@@ -8845,20 +8813,16 @@ msgid "All mail"
 msgstr "Tous les e-mails"
 
 #: ui/dialogs/settings-dialog.slint:809
-#, fuzzy
-#| msgid "Read only"
 msgid "Headers only"
-msgstr "Lecture uniquement"
+msgstr "En-têtes uniquement"
 
 #: ui/dialogs/settings-dialog.slint:810 ui/translation.slint:420
 msgid "Messages"
 msgstr "Messages"
 
 #: ui/dialogs/settings-dialog.slint:811
-#, fuzzy
-#| msgid "Has attachments"
 msgid "Messages and attachments"
-msgstr "Avec fichiers joints"
+msgstr "Messages et pièces jointes"
 
 #: ui/dialogs/settings-dialog.slint:815
 msgid "1 minute"
@@ -10153,16 +10117,16 @@ msgid "Mail synchronization error: {}"
 msgstr "Échec de la synchronisation des messages : {}"
 
 #: ui/dialogs/settings-dialog.slint:3093
-#, fuzzy
-#| msgid "Account"
 msgid "Account name"
-msgstr "Compte d’envoi"
+msgstr "Nom du compte"
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid ""
 "Shown instead of the address in the sidebar and lists. People you email "
 "don't see it."
 msgstr ""
+"Affiché à la place de l'adresse dans la barre latérale et les listes. Les "
+"destinataires de vos e-mails ne le voient pas."
 
 #: ui/dialogs/settings-dialog.slint:3106
 msgid "Mail history"
@@ -10184,17 +10148,21 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3125
 msgid "Messages download when you open them."
-msgstr ""
+msgstr "Les messages se téléchargent à leur ouverture."
 
 #: ui/dialogs/settings-dialog.slint:3126
 msgid ""
 "Messages and their attachments up to 25 MB download ahead of time, to open "
 "them offline."
 msgstr ""
+"Les messages et leurs pièces jointes jusqu'à 25 Mo se téléchargent à "
+"l'avance, pour les ouvrir hors ligne."
 
 #: ui/dialogs/settings-dialog.slint:3127
 msgid "Messages download ahead of time, and attachments when you open them."
 msgstr ""
+"Les messages se téléchargent à l'avance, et les pièces jointes à leur "
+"ouverture."
 
 #: ui/dialogs/settings-dialog.slint:3142
 msgid "When the app starts, and when you check for new mail."
@@ -10588,10 +10556,8 @@ msgid "Edit a message as new"
 msgstr "Modifier un message comme nouveau"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Show source"
 msgid "Show a message's source"
-msgstr "Afficher le code source"
+msgstr "Afficher la source d'un message"
 
 #: ui/dialogs/settings-dialog.slint:3729
 msgid "Take back a message just sent"
@@ -11563,27 +11529,25 @@ msgid "Scheduled"
 msgstr "Programmé"
 
 #: ui/mailbox-words.slint:21
-#, fuzzy
-#| msgid "Writing"
 msgctxt "category"
 msgid "Marketing"
-msgstr "Rédaction"
+msgstr "Marketing"
 
 #: ui/mailbox-words.slint:22
 msgctxt "category"
 msgid "News"
-msgstr ""
+msgstr "Actualités"
 
 #: ui/mailbox-words.slint:23
 msgctxt "category"
 msgid "Social"
-msgstr ""
+msgstr "Réseaux sociaux"
 
 #. Partnership, sponsorship and similar offers from unknown senders.
 #: ui/mailbox-words.slint:26
 msgctxt "category"
 msgid "Pitch"
-msgstr ""
+msgstr "Pitch"
 
 #: ui/mailbox-words.slint:56
 msgid "Unified Starred"
@@ -13011,17 +12975,13 @@ msgstr "Afficher le message formaté"
 
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:381
 #: ui/views/mail-reading-pane.slint:441
-#, fuzzy
-#| msgid "Show source"
 msgid "Show HTML source"
-msgstr "Afficher le code source"
+msgstr "Afficher la source HTML"
 
 #: ui/views/mail-reading-pane.slint:364 ui/views/mail-reading-pane.slint:382
 #: ui/views/mail-reading-pane.slint:442
-#, fuzzy
-#| msgid "Show source"
 msgid "Show message source"
-msgstr "Afficher le code source"
+msgstr "Afficher la source du message"
 
 #: ui/views/mail-reading-pane.slint:365 ui/views/mail-reading-pane.slint:383
 #: ui/views/mail-reading-pane.slint:443
@@ -13205,28 +13165,20 @@ msgid "Show email"
 msgstr "Afficher le message"
 
 #: ui/views/mail-reading-pane.slint:1800
-#, fuzzy
-#| msgid "Attaching the message…"
-#| msgid_plural "Attaching {0} messages…"
 msgid "Reading the message source…"
-msgstr "Ajout du message en pièce jointe…"
+msgstr "Lecture de la source du message…"
 
 #: ui/views/mail-reading-pane.slint:1802
 msgid "Only the start. Save it to see all of it."
-msgstr ""
+msgstr "Seulement le début. Enregistrez-la pour tout voir."
 
 #: ui/views/mail-reading-pane.slint:1803
-#, fuzzy
-#| msgid "Message starred."
-#| msgid_plural "{0} messages starred."
 msgid "The message as it arrived"
-msgstr "Message marqué d’une étoile."
+msgstr "Le message tel qu'il est arrivé"
 
 #: ui/views/mail-reading-pane.slint:1823
-#, fuzzy
-#| msgid "Save"
 msgid "Save…"
-msgstr "Enregistrer les changements"
+msgstr "Enregistrer…"
 
 #: ui/views/mail-reading-pane.slint:1850
 msgid "View original plain text"

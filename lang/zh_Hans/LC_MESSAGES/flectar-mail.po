@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 15:10+0000\n"
+"PO-Revision-Date: 2026-11-23 01:31+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -1743,40 +1743,28 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "无法断开 CardDAV：{}"
 
 #: ui/app.slint:579
-#, fuzzy
-#| msgid "Updating folder settings…"
 msgid "Updating download settings…"
-msgstr "正在更新文件夹设置…"
+msgstr "正在更新下载设置…"
 
 #: ui/app.slint:580
-#, fuzzy
-#| msgid "Folder settings updated."
 msgid "Download settings updated."
-msgstr "文件夹设置已更新。"
+msgstr "下载设置已更新。"
 
 #: ui/app.slint:581
-#, fuzzy
-#| msgid "Could not update folder settings: {}"
 msgid "Could not update download settings: {}"
-msgstr "无法更新文件夹设置：{}"
+msgstr "无法更新下载设置：{}"
 
 #: ui/app.slint:583
-#, fuzzy
-#| msgid "Opened the message in your browser."
 msgid "Copied the message source"
-msgstr "已在浏览器中打开该邮件。"
+msgstr "已复制邮件源码"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not read the message source: {}"
-msgstr "无法发送邮件：{}"
+msgstr "无法读取邮件源码：{}"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not save the message: {}"
-msgstr "无法发送邮件：{}"
+msgstr "无法保存邮件：{}"
 
 #: ui/app.slint:587
 msgid "Copies saved."
@@ -2215,28 +2203,20 @@ msgid "Could not update sync settings: {}"
 msgstr "无法更新同步设置：{}"
 
 #: ui/app.slint:723
-#, fuzzy
-#| msgid "Account color changes require local mail data."
 msgid "Account names require local mail data."
-msgstr "修改账户颜色需要本地邮件数据。"
+msgstr "账户名称需要本地邮件数据。"
 
 #: ui/app.slint:724
-#, fuzzy
-#| msgid "Saving account order…"
 msgid "Saving the account name…"
-msgstr "正在保存账户顺序…"
+msgstr "正在保存账户名称…"
 
 #: ui/app.slint:725
-#, fuzzy
-#| msgid "Account order saved."
 msgid "Account name saved."
-msgstr "账户顺序已保存。"
+msgstr "账户名称已保存。"
 
 #: ui/app.slint:726
-#, fuzzy
-#| msgid "Could not save account order: {}"
 msgid "Could not save the account name: {}"
-msgstr "无法保存账户顺序：{}"
+msgstr "无法保存账户名称：{}"
 
 #: ui/app.slint:727
 msgid "Mail history requires local mail data."
@@ -6721,12 +6701,8 @@ msgid ""
 msgstr "显示二维码供手机扫描，输入其他设备显示的代码，或使用您的恢复代码。"
 
 #: ui/device-sync.slint:692
-#, fuzzy
-#| msgid ""
-#| "Scan the QR code your other device shows, enter its code, or use your "
-#| "recovery code."
 msgid "Enter the code your other device shows, or use your recovery code."
-msgstr "扫描其他设备显示的二维码，输入其代码，或使用您的恢复代码。"
+msgstr "输入其他设备显示的代码，或使用您的恢复代码。"
 
 #: ui/device-sync.slint:705 ui/device-sync.slint:710
 msgid "Enter code"
@@ -7068,16 +7044,12 @@ msgid "QR code for adding a device"
 msgstr "用于添加设备的二维码"
 
 #: ui/device-sync.slint:1297
-#, fuzzy
-#| msgid ""
-#| "On your other device, open Flectar Mail, go to Settings → Sync → Connect "
-#| "this device → Enter code, and type:"
 msgid ""
 "On your other device, open Flectar Mail and choose Enter code, on the "
 "welcome screen or in Settings → Sync → Connect this device. Then type:"
 msgstr ""
-"在您的其他设备上，打开 Flectar Mail，前往“设置”→“同步”→“连接此设备”→“输入代"
-"码”，然后输入："
+"在您的其他设备上打开 Flectar Mail，在欢迎页面或“设置”→“同步”→“连接此设备”中选"
+"择“输入代码”，然后输入："
 
 #: ui/device-sync.slint:1318
 msgid ""
@@ -7137,15 +7109,10 @@ msgstr ""
 "在您的其他设备上，前往“设置”→“同步”→“添加设备”→“使用代码”。输入其显示的代码："
 
 #: ui/device-sync.slint:1416
-#, fuzzy
-#| msgid ""
-#| "On your other device, go to Settings → Sync → Add a device → Use a code. "
-#| "Enter the code it shows:"
 msgid ""
 "On your other device, go to Settings → Sync → Add a device. Enter the code "
 "it shows:"
-msgstr ""
-"在您的其他设备上，前往“设置”→“同步”→“添加设备”→“使用代码”。输入其显示的代码："
+msgstr "在您的其他设备上，前往“设置”→“同步”→“添加设备”。输入其显示的代码："
 
 #: ui/device-sync.slint:1433
 msgid ""
@@ -8398,20 +8365,16 @@ msgid "All mail"
 msgstr "全部邮件"
 
 #: ui/dialogs/settings-dialog.slint:809
-#, fuzzy
-#| msgid "Read only"
 msgid "Headers only"
-msgstr "只读"
+msgstr "仅邮件头"
 
 #: ui/dialogs/settings-dialog.slint:810 ui/translation.slint:420
 msgid "Messages"
 msgstr "邮件"
 
 #: ui/dialogs/settings-dialog.slint:811
-#, fuzzy
-#| msgid "Has attachments"
 msgid "Messages and attachments"
-msgstr "含附件"
+msgstr "邮件和附件"
 
 #: ui/dialogs/settings-dialog.slint:815
 msgid "1 minute"
@@ -9588,16 +9551,14 @@ msgid "Mail synchronization error: {}"
 msgstr "邮件同步错误：{}"
 
 #: ui/dialogs/settings-dialog.slint:3093
-#, fuzzy
-#| msgid "Account"
 msgid "Account name"
-msgstr "账户"
+msgstr "账户名称"
 
 #: ui/dialogs/settings-dialog.slint:3094
 msgid ""
 "Shown instead of the address in the sidebar and lists. People you email "
 "don't see it."
-msgstr ""
+msgstr "在侧边栏和列表中代替地址显示。您发邮件的对象看不到它。"
 
 #: ui/dialogs/settings-dialog.slint:3106
 msgid "Mail history"
@@ -9615,17 +9576,17 @@ msgstr "下载多久以前的邮件。已存储在本设备上的邮件会保留
 
 #: ui/dialogs/settings-dialog.slint:3125
 msgid "Messages download when you open them."
-msgstr ""
+msgstr "打开邮件时下载。"
 
 #: ui/dialogs/settings-dialog.slint:3126
 msgid ""
 "Messages and their attachments up to 25 MB download ahead of time, to open "
 "them offline."
-msgstr ""
+msgstr "邮件及其不超过 25 MB 的附件会提前下载，以便离线打开。"
 
 #: ui/dialogs/settings-dialog.slint:3127
 msgid "Messages download ahead of time, and attachments when you open them."
-msgstr ""
+msgstr "邮件会提前下载，附件在打开时下载。"
 
 #: ui/dialogs/settings-dialog.slint:3142
 msgid "When the app starts, and when you check for new mail."
@@ -9979,10 +9940,8 @@ msgid "Edit a message as new"
 msgstr "将邮件作为新邮件编辑"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Show source"
 msgid "Show a message's source"
-msgstr "显示源码"
+msgstr "显示邮件源码"
 
 #: ui/dialogs/settings-dialog.slint:3729
 msgid "Take back a message just sent"
@@ -10903,27 +10862,25 @@ msgid "Scheduled"
 msgstr "定时发送"
 
 #: ui/mailbox-words.slint:21
-#, fuzzy
-#| msgid "Writing"
 msgctxt "category"
 msgid "Marketing"
-msgstr "撰写"
+msgstr "营销"
 
 #: ui/mailbox-words.slint:22
 msgctxt "category"
 msgid "News"
-msgstr ""
+msgstr "新闻"
 
 #: ui/mailbox-words.slint:23
 msgctxt "category"
 msgid "Social"
-msgstr ""
+msgstr "社交"
 
 #. Partnership, sponsorship and similar offers from unknown senders.
 #: ui/mailbox-words.slint:26
 msgctxt "category"
 msgid "Pitch"
-msgstr ""
+msgstr "推销"
 
 #: ui/mailbox-words.slint:56
 msgid "Unified Starred"
@@ -12291,17 +12248,13 @@ msgstr "显示渲染后的邮件"
 
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:381
 #: ui/views/mail-reading-pane.slint:441
-#, fuzzy
-#| msgid "Show source"
 msgid "Show HTML source"
-msgstr "显示源码"
+msgstr "显示 HTML 源码"
 
 #: ui/views/mail-reading-pane.slint:364 ui/views/mail-reading-pane.slint:382
 #: ui/views/mail-reading-pane.slint:442
-#, fuzzy
-#| msgid "Show source"
 msgid "Show message source"
-msgstr "显示源码"
+msgstr "显示邮件源码"
 
 #: ui/views/mail-reading-pane.slint:365 ui/views/mail-reading-pane.slint:383
 #: ui/views/mail-reading-pane.slint:443
@@ -12484,28 +12437,20 @@ msgid "Show email"
 msgstr "显示邮件"
 
 #: ui/views/mail-reading-pane.slint:1800
-#, fuzzy
-#| msgid "Attaching the message…"
-#| msgid_plural "Attaching {0} messages…"
 msgid "Reading the message source…"
-msgstr "正在添加 {0} 封邮件作为附件…"
+msgstr "正在读取邮件源码…"
 
 #: ui/views/mail-reading-pane.slint:1802
 msgid "Only the start. Save it to see all of it."
-msgstr ""
+msgstr "仅显示开头部分。保存后可查看全部内容。"
 
 #: ui/views/mail-reading-pane.slint:1803
-#, fuzzy
-#| msgid "Message starred."
-#| msgid_plural "{0} messages starred."
 msgid "The message as it arrived"
-msgstr "{0} 封邮件已加星标。"
+msgstr "邮件到达时的原始形态"
 
 #: ui/views/mail-reading-pane.slint:1823
-#, fuzzy
-#| msgid "Save"
 msgid "Save…"
-msgstr "保存"
+msgstr "保存…"
 
 #: ui/views/mail-reading-pane.slint:1850
 msgid "View original plain text"
