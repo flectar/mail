@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-05 09:47+0000\n"
-"Last-Translator: Paul van der Vlis <paul@vandervlis.nl>\n"
+"PO-Revision-Date: 2026-11-22 10:01+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Dutch <https://translate.flectar.com/projects/flectar-mail/"
 "mail/nl/>\n"
 "Language: nl\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"X-Generator: Weblate 2026.11.2\n"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -215,7 +215,7 @@ msgstr ""
 #: ui/ai.slint:275 ui/components/account-mail-preferences.slint:195
 #: ui/dialogs/settings-dialog.slint:77 ui/translation.slint:252
 msgid "Remove"
-msgstr ""
+msgstr "Verwijderen"
 
 #: ui/ai.slint:276 ui/translation.slint:253
 msgid "Remove {}"
@@ -454,59 +454,59 @@ msgstr ""
 
 #: ui/app.slint:210 ui/components/calendar.slint:897
 msgid "Mon"
-msgstr ""
+msgstr "ma"
 
 #: ui/app.slint:210
 msgid "Monday"
-msgstr ""
+msgstr "maandag"
 
 #: ui/app.slint:211 ui/components/calendar.slint:897
 msgid "Tue"
-msgstr ""
+msgstr "di"
 
 #: ui/app.slint:211
 msgid "Tuesday"
-msgstr ""
+msgstr "dinsdag"
 
 #: ui/app.slint:212 ui/components/calendar.slint:897
 msgid "Wed"
-msgstr ""
+msgstr "wo"
 
 #: ui/app.slint:212
 msgid "Wednesday"
-msgstr ""
+msgstr "woensdag"
 
 #: ui/app.slint:213 ui/components/calendar.slint:897
 msgid "Thu"
-msgstr ""
+msgstr "do"
 
 #: ui/app.slint:213
 msgid "Thursday"
-msgstr ""
+msgstr "donderdag"
 
 #: ui/app.slint:214 ui/components/calendar.slint:897
 msgid "Fri"
-msgstr ""
+msgstr "vr"
 
 #: ui/app.slint:214
 msgid "Friday"
-msgstr ""
+msgstr "vrijdag"
 
 #: ui/app.slint:215 ui/components/calendar.slint:897
 msgid "Sat"
-msgstr ""
+msgstr "za"
 
 #: ui/app.slint:215
 msgid "Saturday"
-msgstr ""
+msgstr "zaterdag"
 
 #: ui/app.slint:216 ui/components/calendar.slint:897
 msgid "Sun"
-msgstr ""
+msgstr "zo"
 
 #: ui/app.slint:216
 msgid "Sunday"
-msgstr ""
+msgstr "zondag"
 
 #: ui/app.slint:220
 msgctxt "time of day"
@@ -599,7 +599,7 @@ msgstr ""
 
 #: ui/app.slint:244
 msgid "All day"
-msgstr ""
+msgstr "Hele dag"
 
 #: ui/app.slint:246 ui/components/calendar.slint:603
 msgid "Accepted"
@@ -624,7 +624,7 @@ msgstr ""
 
 #: ui/app.slint:252
 msgid "(untitled event)"
-msgstr ""
+msgstr "(afspraak zonder titel)"
 
 #: ui/app.slint:254
 msgctxt "title of a collapsible section in a message"
@@ -633,20 +633,20 @@ msgstr ""
 
 #: ui/app.slint:256
 msgid "No conversation history"
-msgstr ""
+msgstr "Geen gespreksgeschiedenis"
 
 #: ui/app.slint:257
 msgid "Conversation history available"
-msgstr ""
+msgstr "Gespreksgeschiedenis beschikbaar"
 
 #: ui/app.slint:258
 msgid "New address-book entry"
-msgstr ""
+msgstr "Nieuwe adresboekinvoer"
 
 #: ui/app.slint:259 ui/app.slint:1533 ui/components/composer-fields.slint:91
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
-msgstr ""
+msgstr "Geen gekoppeld account"
 
 #: ui/app.slint:260
 msgid "No account sends mail"
@@ -655,12 +655,12 @@ msgstr ""
 #: ui/app.slint:262
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} interactie"
+msgstr[1] "{n} interacties"
 
 #: ui/app.slint:264 ui/components/composer-fields.slint:20
 msgid "New message"
-msgstr ""
+msgstr "Nieuw bericht"
 
 #: ui/app.slint:265 ui/views/mail-list-pane.slint:1173
 #: ui/views/mail-reading-pane.slint:741
@@ -712,7 +712,7 @@ msgstr ""
 #: ui/app.slint:282 ui/components/account-mail-preferences.slint:243
 #: ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:620
 msgid "Delete"
-msgstr ""
+msgstr "Verwijderen"
 
 #. notification settings list: mail that may play a sound, and the rest.
 #: ui/app.slint:285
@@ -733,23 +733,23 @@ msgstr ""
 
 #: ui/app.slint:289 ui/app.slint:683
 msgid "Loading local data…"
-msgstr ""
+msgstr "Lokale gegevens laden…"
 
 #: ui/app.slint:290 ui/app.slint:684
 msgid "Local data ready."
-msgstr ""
+msgstr "Lokale gegevens zijn gereed."
 
 #: ui/app.slint:291
 msgid "Local data is unavailable: {}"
-msgstr ""
+msgstr "Lokale gegevens zijn niet beschikbaar: {}"
 
 #: ui/app.slint:292
 msgid "Could not display local mail: {}"
-msgstr ""
+msgstr "Kon lokale e-mail niet weergeven: {}"
 
 #: ui/app.slint:323
 msgid "An unexpected interface message occurred."
-msgstr ""
+msgstr "Er is een onverwachte interfacemelding opgetreden."
 
 #: ui/app.slint:327 ui/components/profile-switcher.slint:126
 #: ui/dialogs/move-dialog.slint:53 ui/views/files-view.slint:39
@@ -840,11 +840,11 @@ msgstr ""
 
 #: ui/app.slint:347
 msgid "Notification preferences are active for this session."
-msgstr ""
+msgstr "Meldingsvoorkeuren zijn actief voor deze sessie."
 
 #: ui/app.slint:348
 msgid "Notification preferences saved."
-msgstr ""
+msgstr "Meldingsvoorkeuren opgeslagen."
 
 #: ui/app.slint:349
 msgid "Update preference saved."
@@ -1065,7 +1065,7 @@ msgstr ""
 
 #: ui/app.slint:399
 msgid "Could not save notifications: {}"
-msgstr ""
+msgstr "Kon meldingen niet opslaan: {}"
 
 #: ui/app.slint:400
 msgid "Could not save the update preference: {}"
@@ -1085,71 +1085,71 @@ msgstr ""
 
 #: ui/app.slint:404
 msgid "Sync interval is active for this session."
-msgstr ""
+msgstr "Synchronisatie-interval is actief voor deze sessie."
 
 #: ui/app.slint:405
 msgid "Sync interval set to {} minutes."
-msgstr ""
+msgstr "Synchronisatie-interval ingesteld op {} minuten."
 
 #: ui/app.slint:406
 msgid "Could not save sync interval: {}"
-msgstr ""
+msgstr "Kon synchronisatie-interval niet opslaan: {}"
 
 #: ui/app.slint:407
 msgid "Message-opening preference updated for this session."
-msgstr ""
+msgstr "Voorkeur voor het openen van berichten bijgewerkt voor deze sessie."
 
 #: ui/app.slint:408
 msgid "Message-opening preference saved."
-msgstr ""
+msgstr "Voorkeur voor het openen van berichten opgeslagen."
 
 #: ui/app.slint:409
 msgid "Could not save message-opening preference: {}"
-msgstr ""
+msgstr "Kon voorkeur voor het openen van berichten niet opslaan: {}"
 
 #: ui/app.slint:410
 msgid "Contact suggestion preferences are active for this session."
-msgstr ""
+msgstr "Contactsuggestievoorkeuren zijn actief voor deze sessie."
 
 #: ui/app.slint:411
 msgid "Contact suggestion preferences saved."
-msgstr ""
+msgstr "Contactsuggestievoorkeuren opgeslagen."
 
 #: ui/app.slint:412
 msgid "Could not save contact suggestion preferences: {}"
-msgstr ""
+msgstr "Kon contactsuggestievoorkeuren niet opslaan: {}"
 
 #: ui/app.slint:413
 msgid "Contact storage is still starting. Try again shortly."
-msgstr ""
+msgstr "Contactopslag is nog aan het opstarten. Probeer het zo nog een keer."
 
 #: ui/app.slint:414
 msgid "Cleared {} suggested people."
-msgstr ""
+msgstr "{} voorgestelde personen gewist."
 
 #: ui/app.slint:415
 msgid "Could not clear suggested people: {}"
-msgstr ""
+msgstr "Kon voorgestelde personen niet wissen: {}"
 
 #: ui/app.slint:416
 msgid "Theme updated for this session."
-msgstr ""
+msgstr "Thema bijgewerkt voor deze sessie."
 
 #: ui/app.slint:417
 msgid "Theme preference saved."
-msgstr ""
+msgstr "Thema-voorkeur opgeslagen."
 
 #: ui/app.slint:418
 msgid "Message appearance updated for this session."
-msgstr ""
+msgstr "Weergave van berichten bijgewerkt voor deze sessie."
 
 #: ui/app.slint:419
 msgid "Message appearance preference saved."
-msgstr ""
+msgstr "Voorkeur voor berichtweergave opgeslagen."
 
 #: ui/app.slint:420
 msgid "Could not save message appearance: {}"
-msgstr ""
+msgstr "Kon berichtweergave niet opslaan: {}"
 
 #: ui/app.slint:421
 msgid "Reduce motion preference saved."
@@ -1177,27 +1177,27 @@ msgstr ""
 
 #: ui/app.slint:427
 msgid "Could not save theme: {}"
-msgstr ""
+msgstr "Kon thema niet opslaan: {}"
 
 #: ui/app.slint:428
 msgid "Theme palette updated for this session."
-msgstr ""
+msgstr "Themapalet bijgewerkt voor deze sessie."
 
 #: ui/app.slint:429
 msgid "Theme palette saved."
-msgstr ""
+msgstr "Themapalet opgeslagen."
 
 #: ui/app.slint:430
 msgid "Could not save theme palette: {}"
-msgstr ""
+msgstr "Kon themapalet niet opslaan: {}"
 
 #: ui/app.slint:431
 msgid "Custom theme updated for this session."
-msgstr ""
+msgstr "Aangepast thema bijgewerkt voor deze sessie."
 
 #: ui/app.slint:432
 msgid "Custom theme saved."
-msgstr ""
+msgstr "Aangepast thema opgeslagen."
 
 #: ui/app.slint:433
 msgid "Download location saved."
@@ -1217,19 +1217,19 @@ msgstr ""
 
 #: ui/app.slint:437
 msgid "Could not save custom theme: {}"
-msgstr ""
+msgstr "Kon aangepast thema niet opslaan: {}"
 
 #: ui/app.slint:438
 msgid "Language updated for this session."
-msgstr ""
+msgstr "Taal bijgewerkt voor deze sessie."
 
 #: ui/app.slint:439
 msgid "Language preference saved."
-msgstr ""
+msgstr "Taalvoorkeur opgeslagen."
 
 #: ui/app.slint:440
 msgid "Could not save language: {}"
-msgstr ""
+msgstr "Kon taal niet opslaan: {}"
 
 #: ui/app.slint:441
 msgid "Time format updated for this session."
@@ -1245,15 +1245,15 @@ msgstr ""
 
 #: ui/app.slint:444
 msgid "Sidebar icon style updated for this session."
-msgstr ""
+msgstr "Pictogramstijl van de zijbalk bijgewerkt voor deze sessie."
 
 #: ui/app.slint:445
 msgid "Sidebar icon preference saved."
-msgstr ""
+msgstr "Pictogramvoorkeur van de zijbalk opgeslagen."
 
 #: ui/app.slint:446
 msgid "Could not save sidebar icon preference: {}"
-msgstr ""
+msgstr "Kon pictogramvoorkeur van de zijbalk niet opslaan: {}"
 
 #: ui/app.slint:447
 msgid "App icon updated for this session."
@@ -1269,27 +1269,27 @@ msgstr ""
 
 #: ui/app.slint:450
 msgid "Avatar preference updated for this session."
-msgstr ""
+msgstr "Avatarvoorkeur bijgewerkt voor deze sessie."
 
 #: ui/app.slint:451
 msgid "Avatar preference saved."
-msgstr ""
+msgstr "Avatarvoorkeur opgeslagen."
 
 #: ui/app.slint:452
 msgid "Could not save avatar preference: {}"
-msgstr ""
+msgstr "Kon avatarvoorkeur niet opslaan: {}"
 
 #: ui/app.slint:453
 msgid "Window frame updated for this session."
-msgstr ""
+msgstr "Vensterframe bijgewerkt voor deze sessie."
 
 #: ui/app.slint:454
 msgid "Window frame preference saved."
-msgstr ""
+msgstr "Vensterframevoorkeur opgeslagen."
 
 #: ui/app.slint:455
 msgid "Could not save window frame preference: {}"
-msgstr ""
+msgstr "Kon vensterframevoorkeur niet opslaan: {}"
 
 #: ui/app.slint:456
 msgid "Tabs preference updated for this session."
@@ -1310,18 +1310,20 @@ msgstr ""
 #: ui/app.slint:460
 msgid "At most {} tabs can be open. Close a tab to open another."
 msgstr ""
+"Er kunnen maximaal {} tabbladen open zijn. Sluit een tabblad om een ander te "
+"openen."
 
 #: ui/app.slint:461
 msgid "Mail grouping is active for this session."
-msgstr ""
+msgstr "E-mailgroepering is actief voor deze sessie."
 
 #: ui/app.slint:462
 msgid "Mail grouping preference saved."
-msgstr ""
+msgstr "Voorkeur voor e-mailgroepering opgeslagen."
 
 #: ui/app.slint:463
 msgid "Could not save mail grouping preference: {}"
-msgstr ""
+msgstr "Kon voorkeur voor e-mailgroepering niet opslaan: {}"
 
 #: ui/app.slint:464
 msgid "Conversation view updated for this session."
@@ -1353,43 +1355,43 @@ msgstr ""
 
 #: ui/app.slint:471
 msgid "Profile changes require local mail data."
-msgstr ""
+msgstr "Profielwijzigingen vereisen lokale e-mailgegevens."
 
 #: ui/app.slint:472
 msgid "Profile saved."
-msgstr ""
+msgstr "Profiel opgeslagen."
 
 #: ui/app.slint:473
 msgid "Could not save profile: {}"
-msgstr ""
+msgstr "Kon profiel niet opslaan: {}"
 
 #: ui/app.slint:474
 msgid "Account profile updated."
-msgstr ""
+msgstr "Accountprofiel bijgewerkt."
 
 #: ui/app.slint:475
 msgid "Account color changes require local mail data."
-msgstr ""
+msgstr "Wijzigingen in de accountkleur vereisen lokale e-mailgegevens."
 
 #: ui/app.slint:476
 msgid "Account color updated."
-msgstr ""
+msgstr "Accountkleur bijgewerkt."
 
 #: ui/app.slint:477
 msgid "Could not update account color: {}"
-msgstr ""
+msgstr "Kon accountkleur niet bijwerken: {}"
 
 #: ui/app.slint:478
 msgid "Could not update account profile: {}"
-msgstr ""
+msgstr "Kon accountprofiel niet bijwerken: {}"
 
 #: ui/app.slint:479
 msgid "Profile deleted."
-msgstr ""
+msgstr "Profiel verwijderd."
 
 #: ui/app.slint:480
 msgid "Could not delete profile: {}"
-msgstr ""
+msgstr "Kon profiel niet verwijderen: {}"
 
 #: ui/app.slint:481
 msgid "Could not switch profile: {}"
@@ -1397,39 +1399,39 @@ msgstr ""
 
 #: ui/app.slint:482
 msgid "Marker preference is active for this session."
-msgstr ""
+msgstr "Markeringsvoorkeur is actief voor deze sessie."
 
 #: ui/app.slint:483
 msgid "Mail-list marker preference saved."
-msgstr ""
+msgstr "Markeringsvoorkeur voor de e-maillijst opgeslagen."
 
 #: ui/app.slint:484
 msgid "Could not save mail-list marker preference: {}"
-msgstr ""
+msgstr "Kon markeringsvoorkeur voor de e-maillijst niet opslaan: {}"
 
 #: ui/app.slint:485
 msgid "Workspace layout updated for this session."
-msgstr ""
+msgstr "Werkruimte-indeling bijgewerkt voor deze sessie."
 
 #: ui/app.slint:486
 msgid "Workspace layout preference saved."
-msgstr ""
+msgstr "Voorkeur voor de werkruimte-indeling opgeslagen."
 
 #: ui/app.slint:487
 msgid "Could not save workspace layout: {}"
-msgstr ""
+msgstr "Kon werkruimte-indeling niet opslaan: {}"
 
 #: ui/app.slint:488
 msgid "Could not save list pane width: {}"
-msgstr ""
+msgstr "Kon de breedte van het lijstpaneel niet opslaan: {}"
 
 #: ui/app.slint:493
 msgid "Opened {}"
-msgstr ""
+msgstr "{} geopend"
 
 #: ui/app.slint:494
 msgid "Could not open link: {}"
-msgstr ""
+msgstr "Kon link niet openen: {}"
 
 #: ui/app.slint:495
 msgid "This email link is too long to open."
@@ -1451,7 +1453,7 @@ msgstr ""
 
 #: ui/app.slint:499
 msgid "Copied HTML source"
-msgstr ""
+msgstr "HTML-bron gekopieerd"
 
 #: ui/app.slint:500
 msgid "Copied HTML source. Paste it into the issue."
@@ -1467,47 +1469,48 @@ msgstr ""
 
 #: ui/app.slint:503
 msgid "Copied selected text"
-msgstr ""
+msgstr "Geselecteerde tekst gekopieerd"
 
 #: ui/app.slint:504
 msgid "Copied email text"
-msgstr ""
+msgstr "E-mailtekst gekopieerd"
 
 #: ui/app.slint:505
 msgid "Copied link"
-msgstr ""
+msgstr "Link gekopieerd"
 
 #: ui/app.slint:506
 msgid "Blitz software selection render failed: {}"
-msgstr ""
+msgstr "Blitz-softwareweergave van selectie mislukt: {}"
 
 #: ui/app.slint:507
 msgid "Blitz software tile render failed: {}"
-msgstr ""
+msgstr "Blitz-softwareweergave van tegel mislukt: {}"
 
 #: ui/app.slint:508
 msgid "Message ready."
-msgstr ""
+msgstr "Bericht gereed."
 
 #: ui/app.slint:509
 msgid "System tray behavior is unavailable in this package."
-msgstr ""
+msgstr "Gedrag van systeemvak is niet beschikbaar in dit pakket."
 
 #: ui/app.slint:510
 msgid "Close-to-tray is active for this session."
-msgstr ""
+msgstr "Sluiten naar systeemvak is actief voor deze sessie."
 
 #: ui/app.slint:511
 msgid "Saving close behavior…"
-msgstr ""
+msgstr "Sluitgedrag wordt opgeslagen…"
 
 #: ui/app.slint:512
 msgid "Closing the window will now keep Flectar Mail in the tray."
 msgstr ""
+"Bij het sluiten van het venster blijft Flectar Mail nu in het systeemvak."
 
 #: ui/app.slint:513
 msgid "Closing the window will now quit Flectar Mail."
-msgstr ""
+msgstr "Bij het sluiten van het venster wordt Flectar Mail nu afgesloten."
 
 #: ui/app.slint:514
 msgid ""
@@ -1520,7 +1523,7 @@ msgstr ""
 
 #: ui/app.slint:516
 msgid "Could not save close behavior: {}"
-msgstr ""
+msgstr "Kon sluitgedrag niet opslaan: {}"
 
 #: ui/app.slint:517
 msgid "Flectar Mail will start when you sign in."
@@ -1560,7 +1563,7 @@ msgstr ""
 
 #: ui/app.slint:530
 msgid "Database snapshot exported to {}."
-msgstr ""
+msgstr "Databasesnapshot geëxporteerd naar {}."
 
 #: ui/app.slint:531
 msgid "Choose where to export the mail"
@@ -1586,23 +1589,25 @@ msgstr ""
 
 #: ui/app.slint:536
 msgid "Could not export database snapshot: {}"
-msgstr ""
+msgstr "Kon databasesnapshot niet exporteren: {}"
 
 #: ui/app.slint:537
 msgid "Account order saved."
-msgstr ""
+msgstr "Accountvolgorde opgeslagen."
 
 #: ui/app.slint:538
 msgid "Could not save account order: {}"
-msgstr ""
+msgstr "Kon accountvolgorde niet opslaan: {}"
 
 #: ui/app.slint:539
 msgid "Mail history updated. Background sync is adjusting now."
 msgstr ""
+"E-mailgeschiedenis bijgewerkt. De achtergrondsynchronisatie wordt nu "
+"aangepast."
 
 #: ui/app.slint:540
 msgid "Account removed from this device."
-msgstr ""
+msgstr "Account verwijderd van dit apparaat."
 
 #: ui/app.slint:541
 msgid "Account removed on another device."
@@ -1614,19 +1619,20 @@ msgstr ""
 
 #: ui/app.slint:543
 msgid "Account removed. Mail refresh will retry."
-msgstr ""
+msgstr "Account verwijderd. Het vernieuwen van e-mail wordt opnieuw geprobeerd."
 
 #: ui/app.slint:544
 msgid "Account removed; local cleanup needs a retry: {}"
 msgstr ""
+"Account verwijderd; lokale opschoning moet opnieuw worden uitgevoerd: {}"
 
 #: ui/app.slint:545
 msgid "Could not remove account: {}"
-msgstr ""
+msgstr "Kon account niet verwijderen: {}"
 
 #: ui/app.slint:546
 msgid "Removing account…"
-msgstr ""
+msgstr "Account wordt verwijderd…"
 
 #: ui/app.slint:547
 msgid "Deleting mail on this device…"
@@ -1650,59 +1656,60 @@ msgstr ""
 
 #: ui/app.slint:552
 msgid "Synchronizing account…"
-msgstr ""
+msgstr "Account wordt gesynchroniseerd…"
 
 #: ui/app.slint:553
 msgid "Could not update mail history: {}"
-msgstr ""
+msgstr "Kon e-mailgeschiedenis niet bijwerken: {}"
 
 #: ui/app.slint:554
 msgid "Connected {}. Initial sync is running in the background."
 msgstr ""
+"Verbonden {}. Initiële synchronisatie wordt op de achtergrond uitgevoerd."
 
 #: ui/app.slint:555
 msgid "Account setup failed: {}"
-msgstr ""
+msgstr "Accountconfiguratie mislukt: {}"
 
 #: ui/app.slint:556
 msgid "OAuth failed: {}"
-msgstr ""
+msgstr "OAuth mislukt: {}"
 
 #: ui/app.slint:557
 msgid "Reconnected {}. Synchronization is resuming."
-msgstr ""
+msgstr "Opnieuw verbonden {}. Synchronisatie wordt hervat."
 
 #: ui/app.slint:558
 msgid "Reconnection failed: {}"
-msgstr ""
+msgstr "Opnieuw verbinden mislukt: {}"
 
 #: ui/app.slint:559
 msgid "Calendar connected and initial sync started."
-msgstr ""
+msgstr "Agenda gekoppeld en initiële synchronisatie gestart."
 
 #: ui/app.slint:560 ui/components/account-calendars.slint:282
 msgid "Could not connect calendar: {}"
-msgstr ""
+msgstr "Kon agenda niet koppelen: {}"
 
 #: ui/app.slint:561
 msgid "Calendar sync enabled."
-msgstr ""
+msgstr "Agendasynchronisatie ingeschakeld."
 
 #: ui/app.slint:562
 msgid "Calendar sync paused."
-msgstr ""
+msgstr "Agendasynchronisatie gepauzeerd."
 
 #: ui/app.slint:563
 msgid "Could not update calendar sync: {}"
-msgstr ""
+msgstr "Kon agendasynchronisatie niet bijwerken: {}"
 
 #: ui/app.slint:564
 msgid "CalDAV connected and initial sync started."
-msgstr ""
+msgstr "CalDAV gekoppeld en initiële synchronisatie gestart."
 
 #: ui/app.slint:565
 msgid "Could not connect CalDAV: {}"
-msgstr ""
+msgstr "Kon CalDAV niet koppelen: {}"
 
 #: ui/app.slint:566
 msgid "Calendar removed."
@@ -1714,31 +1721,31 @@ msgstr ""
 
 #: ui/app.slint:568
 msgid "CardDAV connected and initial sync started."
-msgstr ""
+msgstr "CardDAV gekoppeld en initiële synchronisatie gestart."
 
 #: ui/app.slint:569
 msgid "Could not connect CardDAV: {}"
-msgstr ""
+msgstr "Kon CardDAV niet koppelen: {}"
 
 #: ui/app.slint:570
 msgid "CardDAV sync enabled."
-msgstr ""
+msgstr "CardDAV-synchronisatie ingeschakeld."
 
 #: ui/app.slint:571
 msgid "CardDAV sync paused."
-msgstr ""
+msgstr "CardDAV-synchronisatie gepauzeerd."
 
 #: ui/app.slint:572
 msgid "Could not update CardDAV sync: {}"
-msgstr ""
+msgstr "Kon CardDAV-synchronisatie niet bijwerken: {}"
 
 #: ui/app.slint:573
 msgid "CardDAV disconnected."
-msgstr ""
+msgstr "CardDAV-verbinding verbroken."
 
 #: ui/app.slint:574
 msgid "Could not disconnect CardDAV: {}"
-msgstr ""
+msgstr "Kon CardDAV-verbinding niet verbreken: {}"
 
 #: ui/app.slint:576
 msgctxt "special folder"
@@ -1755,15 +1762,15 @@ msgstr ""
 
 #: ui/app.slint:583
 msgid "Connect an account before creating a backup."
-msgstr ""
+msgstr "Koppel een account voordat je een back-up maakt."
 
 #: ui/app.slint:584
 msgid "Export Flectar Mail account backup"
-msgstr ""
+msgstr "Flectar Mail-accountback-up exporteren"
 
 #: ui/app.slint:585
 msgid "Flectar Mail backup"
-msgstr ""
+msgstr "Flectar Mail-back-up"
 
 #: ui/app.slint:586 ui/dialogs/import-dialog.slint:406
 #: ui/views/onboarding-view.slint:243
@@ -1780,67 +1787,68 @@ msgstr ""
 
 #: ui/app.slint:589
 msgid "Choose where to export the database snapshot"
-msgstr ""
+msgstr "Kies waar het databasesnapshot wordt geëxporteerd"
 
 #: ui/app.slint:590
 msgid "Backup exported. Passwords and OAuth tokens were not included."
-msgstr ""
+msgstr "Back-up geëxporteerd. Wachtwoorden en OAuth-tokens zijn niet opgenomen."
 
 #: ui/app.slint:591
 msgid "Could not export backup: {}"
-msgstr ""
+msgstr "Kon back-up niet exporteren: {}"
 
 #: ui/app.slint:592
 msgid "Local data storage is unavailable. Retry startup."
 msgstr ""
+"Lokale gegevensopslag is niet beschikbaar. Probeer het opstarten opnieuw."
 
 #: ui/app.slint:593
 msgid "Creating verified database snapshot…"
-msgstr ""
+msgstr "Gecontroleerd databasesnapshot wordt gemaakt…"
 
 #: ui/app.slint:594
 msgid "All local Flectar Mail data was deleted."
-msgstr ""
+msgstr "Alle lokale Flectar Mail-gegevens zijn verwijderd."
 
 #: ui/app.slint:595
 msgid "Could not delete all local data: {}"
-msgstr ""
+msgstr "Kon alle lokale gegevens niet verwijderen: {}"
 
 #: ui/app.slint:596
 msgid "Deleting local accounts and cached data…"
-msgstr ""
+msgstr "Lokale accounts en cachegegevens worden verwijderd…"
 
 #: ui/app.slint:601
 msgid "Background mail refresh failed: {}"
-msgstr ""
+msgstr "Achtergrondvernieuwing van e-mail mislukt: {}"
 
 #: ui/app.slint:602
 msgid "No conversations in this folder"
-msgstr ""
+msgstr "Geen gesprekken in deze map"
 
 #: ui/app.slint:603
 msgid "No conversations match this search"
-msgstr ""
+msgstr "Geen gesprekken komen overeen met deze zoekopdracht"
 
 #: ui/app.slint:604
 msgid "Mail core is ready for account synchronization and message actions."
-msgstr ""
+msgstr "De e-mailkern is gereed voor accountsynchronisatie en berichtacties."
 
 #: ui/app.slint:605
 msgid "Large message rendered in compatibility mode."
-msgstr ""
+msgstr "Groot bericht weergegeven in compatibiliteitsmodus."
 
 #: ui/app.slint:606
 msgid "Software email render failed: {}"
-msgstr ""
+msgstr "Softwareweergave van e-mail mislukt: {}"
 
 #: ui/app.slint:607
 msgid "Rendered with software fallback after GPU error: {}"
-msgstr ""
+msgstr "Weergegeven met softwarefallback na GPU-fout: {}"
 
 #: ui/app.slint:608
 msgid "Blitz render failed (GPU: {}; software: {})"
-msgstr ""
+msgstr "Blitz-weergave mislukt (GPU: {}; software: {})"
 
 #: ui/app.slint:613
 msgid "Enter a name, email address, or phone number, then save."
@@ -1848,92 +1856,92 @@ msgstr ""
 
 #: ui/app.slint:614
 msgid "Could not save: contact storage is unavailable."
-msgstr ""
+msgstr "Kon niet opslaan: contactopslag is niet beschikbaar."
 
 #: ui/app.slint:615
 msgid "Could not save contact: {}"
-msgstr ""
+msgstr "Kon contact niet opslaan: {}"
 
 #: ui/app.slint:616
 msgid "Contact saved."
-msgstr ""
+msgstr "Contact opgeslagen."
 
 #: ui/app.slint:617
 msgid "Saved to contacts."
-msgstr ""
+msgstr "Opgeslagen in contacten."
 
 #: ui/app.slint:618
 msgid "Could not delete: contact storage is unavailable."
-msgstr ""
+msgstr "Kon niet verwijderen: contactopslag is niet beschikbaar."
 
 #: ui/app.slint:619
 msgid "Could not delete contact: {}"
-msgstr ""
+msgstr "Kon contact niet verwijderen: {}"
 
 #: ui/app.slint:620
 msgid "Contact deleted."
-msgstr ""
+msgstr "Contact verwijderd."
 
 #: ui/app.slint:621
 msgid "Could not load contacts: {}"
-msgstr ""
+msgstr "Kon contacten niet laden: {}"
 
 #: ui/app.slint:622
 msgid "Local contact storage is still starting…"
-msgstr ""
+msgstr "Lokale contactopslag is nog aan het opstarten…"
 
 #: ui/app.slint:623
 msgid "Loading contacts…"
-msgstr ""
+msgstr "Contacten laden…"
 
 #: ui/app.slint:628 ui/components/calendar-agenda.slint:247
 msgid "Local calendar"
-msgstr ""
+msgstr "Lokale agenda"
 
 #: ui/app.slint:629 ui/components/calendar.slint:325
 #: ui/components/calendar.slint:373 ui/components/calendar.slint:528
 msgid "Calendar"
-msgstr ""
+msgstr "Agenda"
 
 #: ui/app.slint:630
 msgid "Could not load calendar: {}"
-msgstr ""
+msgstr "Kon agenda niet laden: {}"
 
 #: ui/app.slint:631
 msgid "Calendar shown and syncing."
-msgstr ""
+msgstr "Agenda wordt weergegeven en synchroniseert."
 
 #: ui/app.slint:632
 msgid "Calendar hidden and sync paused."
-msgstr ""
+msgstr "Agenda verborgen en synchronisatie gepauzeerd."
 
 #: ui/app.slint:633
 msgid "Calendar update failed: {}"
-msgstr ""
+msgstr "Agenda-update mislukt: {}"
 
 #: ui/app.slint:634
 msgid "Only events created in Flectar Mail can be edited."
-msgstr ""
+msgstr "Alleen in Flectar Mail aangemaakte afspraken kunnen worden bewerkt."
 
 #: ui/app.slint:635
 msgid "Only events created in Flectar Mail can be deleted."
-msgstr ""
+msgstr "Alleen in Flectar Mail aangemaakte afspraken kunnen worden verwijderd."
 
 #: ui/app.slint:636
 msgid "Calendar storage is unavailable."
-msgstr ""
+msgstr "Agendaopslag is niet beschikbaar."
 
 #: ui/app.slint:637
 msgid "Could not delete event: {}"
-msgstr ""
+msgstr "Kon afspraak niet verwijderen: {}"
 
 #: ui/app.slint:638
 msgid "Event deleted, but refresh failed: {}"
-msgstr ""
+msgstr "Afspraak verwijderd, maar vernieuwen mislukt: {}"
 
 #: ui/app.slint:639
 msgid "Event deleted."
-msgstr ""
+msgstr "Afspraak verwijderd."
 
 #: ui/app.slint:640
 msgid "Removed from your calendar."
@@ -2041,65 +2049,69 @@ msgstr ""
 
 #: ui/app.slint:668
 msgid "Event duration must be a number of minutes."
-msgstr ""
+msgstr "De duur van de afspraak moet een aantal minuten zijn."
 
 #: ui/app.slint:669
 msgid "Add a title and choose a duration from 15 to 1440 minutes."
-msgstr ""
+msgstr "Voeg een titel toe en kies een duur van 15 tot 1440 minuten."
 
 #: ui/app.slint:670
 msgid "That local time does not exist in the current time zone."
-msgstr ""
+msgstr "Deze lokale tijd bestaat niet in de huidige tijdzone."
 
 #: ui/app.slint:671
 msgid "Could not save event: {}"
-msgstr ""
+msgstr "Kon afspraak niet opslaan: {}"
 
 #: ui/app.slint:672
 msgid "Event saved, but refresh failed: {}"
-msgstr ""
+msgstr "Afspraak opgeslagen, maar vernieuwen mislukt: {}"
 
 #: ui/app.slint:673
 msgid "Event saved. Provider sync will run when enabled."
 msgstr ""
+"Afspraak opgeslagen. Synchronisatie met de provider wordt uitgevoerd zodra "
+"deze is ingeschakeld."
 
 #: ui/app.slint:678
 msgid "Email resource render failed: {}"
-msgstr ""
+msgstr "Weergave van e-mailbronnen mislukt: {}"
 
 #: ui/app.slint:679
 msgid "Message refresh failed: {}"
-msgstr ""
+msgstr "Vernieuwen van bericht mislukt: {}"
 
 #: ui/app.slint:680
 msgid "Message load failed: {}"
-msgstr ""
+msgstr "Bericht laden mislukt: {}"
 
 #: ui/app.slint:681
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
 msgstr ""
+"Je lokale postbus kon niet worden geopend. Er is geen accountactie gestart. "
+"Probeer het opnieuw of kopieer de diagnostische gegevens voor ondersteuning."
 
 #: ui/app.slint:682
 msgid "Local storage startup failed."
-msgstr ""
+msgstr "Opstarten van lokale opslag mislukt."
 
 #: ui/app.slint:689
 msgid "Could not identify the dragged account."
-msgstr ""
+msgstr "Kon het gesleepte account niet identificeren."
 
 #: ui/app.slint:690
 msgid "Account ordering requires local mail data."
-msgstr ""
+msgstr "Het ordenen van accounts vereist lokale e-mailgegevens."
 
 #: ui/app.slint:691
 msgid "Could not find the account to reorder."
-msgstr ""
+msgstr "Kon het te herordenen account niet vinden."
 
 #: ui/app.slint:692
 msgid "Saving account order…"
-msgstr ""
+msgstr "Accountvolgorde wordt opgeslagen…"
 
 #: ui/app.slint:693
 msgid "Sent copy settings require local mail data."
@@ -2167,80 +2179,86 @@ msgstr ""
 
 #: ui/app.slint:709
 msgid "Mail history requires local mail data."
-msgstr ""
+msgstr "E-mailgeschiedenis vereist lokale e-mailgegevens."
 
 #: ui/app.slint:710
 msgid "Updating mail history…"
-msgstr ""
+msgstr "E-mailgeschiedenis wordt bijgewerkt…"
 
 #: ui/app.slint:711
 msgid "Remote images are unavailable in this minimal build."
-msgstr ""
+msgstr "Externe afbeeldingen zijn niet beschikbaar in deze minimale build."
 
 #: ui/app.slint:712
 msgid "Could not save remote-image setting: {}"
-msgstr ""
+msgstr "Kon instelling voor externe afbeeldingen niet opslaan: {}"
 
 #: ui/app.slint:713
 msgid "Remote sender icons unavailable: {}"
-msgstr ""
+msgstr "Externe afzenderpictogrammen niet beschikbaar: {}"
 
 #: ui/app.slint:714
 msgid "Remote images unavailable: {}"
-msgstr ""
+msgstr "Externe afbeeldingen niet beschikbaar: {}"
 
 #: ui/app.slint:715
 msgid "Remote body images and sender favicons enabled."
 msgstr ""
+"Externe afbeeldingen in de berichttekst en favicons van afzenders "
+"ingeschakeld."
 
 #: ui/app.slint:716
 msgid "Remote images blocked."
-msgstr ""
+msgstr "Externe afbeeldingen geblokkeerd."
 
 #: ui/app.slint:717
 msgid "Could not refresh message images: {}"
-msgstr ""
+msgstr "Kon berichtafbeeldingen niet vernieuwen: {}"
 
 #: ui/app.slint:718
 msgid "Remote-image loading is disabled."
-msgstr ""
+msgstr "Laden van externe afbeeldingen is uitgeschakeld."
 
 #: ui/app.slint:719
 msgid "Could not load message images: {}"
-msgstr ""
+msgstr "Kon berichtafbeeldingen niet laden: {}"
 
 #: ui/app.slint:720
 msgid "Sync finished, refresh failed: {}"
-msgstr ""
+msgstr "Synchronisatie voltooid, vernieuwen mislukt: {}"
 
 #: ui/app.slint:721
 msgid "Sync complete."
-msgstr ""
+msgstr "Synchronisatie voltooid."
 
 #: ui/app.slint:722
 msgid "Sync failed: {}"
-msgstr ""
+msgstr "Synchronisatie mislukt: {}"
 
 #: ui/app.slint:723
 msgid "Local mail data is unavailable; preview data is read-only."
 msgstr ""
+"Lokale e-mailgegevens zijn niet beschikbaar; voorbeeldgegevens zijn alleen-"
+"lezen."
 
 #: ui/app.slint:724
 msgid "Synchronizing accounts…"
-msgstr ""
+msgstr "Accounts worden gesynchroniseerd…"
 
 #: ui/app.slint:729
 msgid "Message action completed."
-msgstr ""
+msgstr "Berichtactie voltooid."
 
 #: ui/app.slint:730
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr ""
+"Definitieve verwijdering staat in de wachtrij. E-mail verdwijnt zodra de "
+"server bevestigt."
 
 #: ui/app.slint:731
 msgid "Message action failed: {}"
-msgstr ""
+msgstr "Berichtactie mislukt: {}"
 
 #: ui/app.slint:732
 msgid ""
@@ -2250,31 +2268,31 @@ msgstr ""
 
 #: ui/app.slint:733
 msgid "Message action failed: message is no longer available"
-msgstr ""
+msgstr "Berichtactie mislukt: bericht is niet langer beschikbaar"
 
 #: ui/app.slint:734
 msgid "Label added."
-msgstr ""
+msgstr "Label toegevoegd."
 
 #: ui/app.slint:735
 msgid "Label removed."
-msgstr ""
+msgstr "Label verwijderd."
 
 #: ui/app.slint:736
 msgid "Label created and added."
-msgstr ""
+msgstr "Label gemaakt en toegevoegd."
 
 #: ui/app.slint:737
 msgid "Label created."
-msgstr ""
+msgstr "Label gemaakt."
 
 #: ui/app.slint:738
 msgid "Label updated."
-msgstr ""
+msgstr "Label bijgewerkt."
 
 #: ui/app.slint:739
 msgid "Label deleted."
-msgstr ""
+msgstr "Label verwijderd."
 
 #: ui/app.slint:740
 msgid "No other folder to move this mail to."
@@ -2536,87 +2554,87 @@ msgstr[1] ""
 
 #: ui/app.slint:794
 msgid "Could not update label: {}"
-msgstr ""
+msgstr "Kon label niet bijwerken: {}"
 
 #: ui/app.slint:795
 msgid "Could not save label: {}"
-msgstr ""
+msgstr "Kon label niet opslaan: {}"
 
 #: ui/app.slint:796
 msgid "Could not delete label: {}"
-msgstr ""
+msgstr "Kon label niet verwijderen: {}"
 
 #: ui/app.slint:797
 msgid "Folder created."
-msgstr ""
+msgstr "Map gemaakt."
 
 #: ui/app.slint:798
 msgid "Folder renamed."
-msgstr ""
+msgstr "Map hernoemd."
 
 #: ui/app.slint:799
 msgid "Folder deleted."
-msgstr ""
+msgstr "Map verwijderd."
 
 #: ui/app.slint:800
 msgid "Could not create folder: {}"
-msgstr ""
+msgstr "Kon map niet maken: {}"
 
 #: ui/app.slint:801
 msgid "Could not rename folder: {}"
-msgstr ""
+msgstr "Kon map niet hernoemen: {}"
 
 #: ui/app.slint:802
 msgid "Could not delete folder: {}"
-msgstr ""
+msgstr "Kon map niet verwijderen: {}"
 
 #: ui/app.slint:803
 msgid "Could not close preview: {}"
-msgstr ""
+msgstr "Kon voorbeeld niet sluiten: {}"
 
 #: ui/app.slint:804
 msgid "Opened the system print view."
-msgstr ""
+msgstr "De afdrukweergave van het systeem is geopend."
 
 #: ui/app.slint:805
 msgid "Could not print message: {}"
-msgstr ""
+msgstr "Kon bericht niet afdrukken: {}"
 
 #: ui/app.slint:806
 msgid "Opened the message in your browser."
-msgstr ""
+msgstr "Bericht geopend in je browser."
 
 #: ui/app.slint:807
 msgid "Could not open message in browser: {}"
-msgstr ""
+msgstr "Kon bericht niet in de browser openen: {}"
 
 #: ui/app.slint:808
 msgid "Connect an account before replying or forwarding."
-msgstr ""
+msgstr "Koppel een account voordat je antwoordt of doorstuurt."
 
 #: ui/app.slint:809
 msgid "Choose a message first."
-msgstr ""
+msgstr "Kies eerst een bericht."
 
 #: ui/app.slint:810
 msgid "Only drafts can be reopened for editing."
-msgstr ""
+msgstr "Alleen concepten kunnen opnieuw worden geopend om te bewerken."
 
 #: ui/app.slint:811
 msgid "Could not open draft: {}"
-msgstr ""
+msgstr "Kon concept niet openen: {}"
 
 #: ui/app.slint:812
 msgid "Could not open draft: invalid account identifier"
-msgstr ""
+msgstr "Kon concept niet openen: ongeldige account-id"
 
 #: ui/app.slint:813
 msgid "Connected account"
-msgstr ""
+msgstr "Gekoppeld account"
 
 #: ui/app.slint:814
 msgid "Could not open composer: {}"
-msgstr ""
+msgstr "Kon opstelvenster niet openen: {}"
 
 #: ui/app.slint:815
 msgid "Add an account to send mail."
@@ -2629,7 +2647,7 @@ msgstr ""
 
 #: ui/app.slint:817
 msgid "Could not open composer: invalid account identifier"
-msgstr ""
+msgstr "Kon opstelvenster niet openen: ongeldige account-id"
 
 #. Reply and forward quotation headers, written into the draft.
 #: ui/app.slint:823
@@ -2678,7 +2696,7 @@ msgstr ""
 
 #: ui/app.slint:833
 msgid "Attach files to this email"
-msgstr ""
+msgstr "Bestanden aan deze e-mail toevoegen"
 
 #: ui/app.slint:834
 msgid "Could not add attachments: {}"
@@ -2690,21 +2708,23 @@ msgstr ""
 
 #: ui/app.slint:836
 msgid "Added 1 attachment."
-msgstr ""
+msgstr "1 bijlage toegevoegd."
 
 #: ui/app.slint:837
 msgid "Added {} attachments."
-msgstr ""
+msgstr "{} bijlagen toegevoegd."
 
 #: ui/app.slint:838
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
 msgstr ""
+"Bijlagen toegevoegd: {}. Overgeslagen: {} (dubbel, onleesbaar of boven de "
+"totale limiet van 25 MB)."
 
 #: ui/app.slint:839
 msgid "Attachment removed."
-msgstr ""
+msgstr "Bijlage verwijderd."
 
 #: ui/app.slint:840
 msgid "Insert images in this email"
@@ -2754,23 +2774,23 @@ msgstr ""
 
 #: ui/app.slint:851
 msgid "Choose the account this message should be sent from."
-msgstr ""
+msgstr "Kies het account waarmee dit bericht moet worden verzonden."
 
 #: ui/app.slint:852
 msgid "Choose a verified sender identity for this message."
-msgstr ""
+msgstr "Kies een geverifieerde afzenderidentiteit voor dit bericht."
 
 #: ui/app.slint:853
 msgid "Connect an account before saving or sending mail."
-msgstr ""
+msgstr "Koppel een account voordat je e-mail opslaat of verzendt."
 
 #: ui/app.slint:854
 msgid "Message queued for delivery (action {})."
-msgstr ""
+msgstr "Bericht in wachtrij voor verzending (actie {})."
 
 #: ui/app.slint:855
 msgid "Sending message…"
-msgstr ""
+msgstr "Bericht wordt verzonden…"
 
 #: ui/app.slint:856
 msgid "This message has already been sent."
@@ -2782,19 +2802,19 @@ msgstr ""
 
 #: ui/app.slint:858
 msgid "Message sent."
-msgstr ""
+msgstr "Bericht verzonden."
 
 #: ui/app.slint:859
 msgid "Message was not sent: {} Your draft is preserved."
-msgstr ""
+msgstr "Bericht is niet verzonden: {} Je concept is bewaard."
 
 #: ui/app.slint:860
 msgid "Draft saved locally (#{})."
-msgstr ""
+msgstr "Concept lokaal opgeslagen (#{})"
 
 #: ui/app.slint:861
 msgid "Compose failed: {}"
-msgstr ""
+msgstr "Opstellen mislukt: {}"
 
 #: ui/app.slint:862
 msgid "Could not open the message in its own window."
@@ -2807,43 +2827,43 @@ msgstr ""
 
 #: ui/app.slint:864
 msgid "Connect an account before managing email templates."
-msgstr ""
+msgstr "Koppel een account voordat je e-mailsjablonen beheert."
 
 #: ui/app.slint:865
 msgid "Could not load email templates: {}"
-msgstr ""
+msgstr "Kon e-mailsjablonen niet laden: {}"
 
 #: ui/app.slint:866
 msgid "Enter a template name."
-msgstr ""
+msgstr "Voer een sjabloonnaam in."
 
 #: ui/app.slint:867
 msgid "Add a subject or message to the template."
-msgstr ""
+msgstr "Voeg een onderwerp of bericht toe aan het sjabloon."
 
 #: ui/app.slint:868
 msgid "Email template saved."
-msgstr ""
+msgstr "E-mailsjabloon opgeslagen."
 
 #: ui/app.slint:869
 msgid "Could not save email template: {}"
-msgstr ""
+msgstr "Kon e-mailsjabloon niet opslaan: {}"
 
 #: ui/app.slint:870
 msgid "Email template deleted."
-msgstr ""
+msgstr "E-mailsjabloon verwijderd."
 
 #: ui/app.slint:871
 msgid "Could not delete email template: {}"
-msgstr ""
+msgstr "Kon e-mailsjabloon niet verwijderen: {}"
 
 #: ui/app.slint:872
 msgid "Email template is no longer available."
-msgstr ""
+msgstr "E-mailsjabloon is niet langer beschikbaar."
 
 #: ui/app.slint:873
 msgid "Email template inserted."
-msgstr ""
+msgstr "E-mailsjabloon ingevoegd."
 
 #: ui/app.slint:874 ui/components/composer-actions.slint:978
 msgid "Share files by link"
@@ -2920,6 +2940,8 @@ msgstr ""
 #: ui/app.slint:890
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr ""
+"E-mailsjabloon ingevoegd, maar het gebruik ervan kon niet worden opgeslagen: "
+"{}"
 
 #: ui/app.slint:891
 msgid "Choose a supported account type and connection security."
@@ -2927,7 +2949,7 @@ msgstr ""
 
 #: ui/app.slint:892
 msgid "IMAP port must be between 1 and 65535."
-msgstr ""
+msgstr "IMAP-poort moet tussen 1 en 65535 liggen."
 
 #: ui/app.slint:893
 msgid "POP3 port must be between 1 and 65535."
@@ -2935,37 +2957,40 @@ msgstr ""
 
 #: ui/app.slint:894
 msgid "SMTP port must be between 1 and 65535."
-msgstr ""
+msgstr "SMTP-poort moet tussen 1 en 65535 liggen."
 
 #: ui/app.slint:895
 msgid "Local mail data is unavailable. Retry startup."
 msgstr ""
+"Lokale e-mailgegevens zijn niet beschikbaar. Probeer het opstarten opnieuw."
 
 #: ui/app.slint:896
 msgid "Discovering JMAP and checking capabilities…"
-msgstr ""
+msgstr "JMAP wordt gedetecteerd en mogelijkheden worden gecontroleerd…"
 
 #: ui/app.slint:897
 msgid "Certificate imported. Connect to verify the server."
-msgstr ""
+msgstr "Certificaat geïmporteerd. Maak verbinding om de server te controleren."
 
 #: ui/app.slint:898
 msgid "Could not load account preferences: {}"
-msgstr ""
+msgstr "Kon accountvoorkeuren niet laden: {}"
 
 #: ui/app.slint:899
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
 msgstr ""
+"Je bewerkte handtekening is bewaard. Kies Geen handtekening om deze als "
+"berichttekst te behouden voordat je een andere invoegt."
 
 #: ui/app.slint:900
 msgid "Certificate import failed: {}"
-msgstr ""
+msgstr "Certificaatimport mislukt: {}"
 
 #: ui/app.slint:901
 msgid "Testing IMAP and SMTP connections…"
-msgstr ""
+msgstr "IMAP- en SMTP-verbindingen worden getest…"
 
 #: ui/app.slint:902
 msgid "Testing POP3 and SMTP connections…"
@@ -2984,6 +3009,8 @@ msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
+"Er wordt al een browserautorisatie uitgevoerd; maak deze af of kies "
+"Annuleren."
 
 #: ui/app.slint:910
 msgid "{n} account"
@@ -3087,81 +3114,83 @@ msgstr ""
 #: ui/dialogs/settings-dialog.slint:2833 ui/views/onboarding-view.slint:174
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
+"Voeg app-sleutels toe in de aanmeldinstellingen om deze provider in te "
+"schakelen."
 
 #: ui/app.slint:933
 msgid "Choose Gmail or Outlook OAuth."
-msgstr ""
+msgstr "Kies Gmail- of Outlook-OAuth."
 
 #: ui/app.slint:934
 msgid "Complete sign-in in your browser, or choose Cancel here."
-msgstr ""
+msgstr "Voltooi de aanmelding in je browser, of kies hier Annuleren."
 
 #: ui/app.slint:935
 msgid "Cancelling browser sign-in…"
-msgstr ""
+msgstr "Aanmelding in browser wordt geannuleerd…"
 
 #: ui/app.slint:936
 msgid "Finishing browser sign-in…"
-msgstr ""
+msgstr "Aanmelding in browser wordt afgerond…"
 
 #: ui/app.slint:937
 msgid "Could not use that browser address: {}"
-msgstr ""
+msgstr "Kon dat browseradres niet gebruiken: {}"
 
 #: ui/app.slint:938
 msgid "Calendar core is unavailable."
-msgstr ""
+msgstr "Agendakern is niet beschikbaar."
 
 #: ui/app.slint:939
 msgid "Account no longer exists."
-msgstr ""
+msgstr "Account bestaat niet langer."
 
 #: ui/app.slint:940
 msgid "Authorize calendar access in your browser."
-msgstr ""
+msgstr "Geef in je browser toegang tot de agenda."
 
 #: ui/app.slint:941
 msgid "OAuth app keys saved."
-msgstr ""
+msgstr "OAuth-app-sleutels opgeslagen."
 
 #: ui/app.slint:942
 msgid "{} OAuth settings saved."
-msgstr ""
+msgstr "{} OAuth-instellingen opgeslagen."
 
 #: ui/app.slint:943
 msgid "OAuth settings failed: {}"
-msgstr ""
+msgstr "OAuth-instellingen mislukt: {}"
 
 #: ui/app.slint:944
 msgid "Mail refresh failed: {}"
-msgstr ""
+msgstr "Vernieuwen van e-mail mislukt: {}"
 
 #: ui/app.slint:945
 msgid "Mail filter failed: {}"
-msgstr ""
+msgstr "E-mailfilter mislukt: {}"
 
 #: ui/app.slint:946
 msgid "Mail pagination failed: {}"
-msgstr ""
+msgstr "Paginering van e-mail mislukt: {}"
 
 #: ui/app.slint:947
 msgid "Could not mark message as read: {}"
-msgstr ""
+msgstr "Kon bericht niet als gelezen markeren: {}"
 
 #: ui/app.slint:948 ui/views/mail-reading-pane.slint:199
 #: ui/views/mail-reading-pane.slint:1462
 msgid "Loading message…"
-msgstr ""
+msgstr "Bericht wordt geladen…"
 
 #: ui/app.slint:1019 ui/components/workspace-navigation.slint:787
 #: ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26
 #: ui/views/onboarding-view.slint:140
 msgid "Flectar Mail"
-msgstr ""
+msgstr "Flectar Mail"
 
 #: ui/app.slint:1752 ui/app.slint:1765
 msgid "Global Labels (local only)"
-msgstr ""
+msgstr "Globale labels (alleen lokaal)"
 
 #: ui/app.slint:2686
 msgid "Drop to start a new message"
@@ -3173,40 +3202,42 @@ msgstr ""
 
 #: ui/app.slint:2762
 msgid "Empty Trash?"
-msgstr ""
+msgstr "Prullenbak leegmaken?"
 
 #: ui/app.slint:2762 ui/views/files-view.slint:578
 msgid "Delete permanently?"
-msgstr ""
+msgstr "Definitief verwijderen?"
 
 #: ui/app.slint:2766
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
+"Alle berichten in de Prullenbak definitief verwijderen voor alle gekoppelde "
+"accounts?"
 
 #: ui/app.slint:2767
 msgid "Permanently delete all messages in this account’s Trash?"
-msgstr ""
+msgstr "Alle berichten in de Prullenbak van dit account definitief verwijderen?"
 
 #: ui/app.slint:2769
 msgid "Permanently delete the selected conversations from Trash?"
-msgstr ""
+msgstr "De geselecteerde gesprekken definitief uit de Prullenbak verwijderen?"
 
 #: ui/app.slint:2770
 msgid "Permanently delete this conversation from Trash?"
-msgstr ""
+msgstr "Dit gesprek definitief uit de Prullenbak verwijderen?"
 
 #: ui/app.slint:2771 ui/app.slint:2797 ui/components/calendar.slint:1261
 msgid "This action cannot be undone."
-msgstr ""
+msgstr "Deze actie kan niet ongedaan worden gemaakt."
 
 #: ui/app.slint:2772 ui/dialogs/settings-dialog.slint:2592
 msgid "Empty Trash"
-msgstr ""
+msgstr "Prullenbak leegmaken"
 
 #: ui/app.slint:2772 ui/views/files-view.slint:660
 msgid "Delete permanently"
-msgstr ""
+msgstr "Definitief verwijderen"
 
 #: ui/app.slint:2794
 msgid "Mark all as read?"
@@ -3282,27 +3313,27 @@ msgstr ""
 
 #: ui/app.slint:3053
 msgid "Mailbox startup failed"
-msgstr ""
+msgstr "Opstarten van postbus mislukt"
 
 #: ui/app.slint:3059
 msgid "Flectar Mail could not open local storage"
-msgstr ""
+msgstr "Flectar Mail kon de lokale opslag niet openen"
 
 #: ui/app.slint:3072
 msgid "Diagnostic ID: {}"
-msgstr ""
+msgstr "Diagnostische id: {}"
 
 #: ui/app.slint:3075
 msgid "Diagnostic ID {}"
-msgstr ""
+msgstr "Diagnostische id {}"
 
 #: ui/app.slint:3080
 msgid "Retry"
-msgstr ""
+msgstr "Opnieuw"
 
 #: ui/app.slint:3088 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
-msgstr ""
+msgstr "Diagnostische gegevens kopiëren"
 
 #: ui/auto-replies.slint:31
 msgid "Automatic replies are on"
@@ -3345,7 +3376,7 @@ msgstr[1] ""
 
 #: ui/components/account-calendars.slint:71 ui/components/calendar.slint:539
 msgid "Paused"
-msgstr ""
+msgstr "Gepauzeerd"
 
 #: ui/components/account-calendars.slint:73
 #: ui/dialogs/settings-dialog.slint:2996
@@ -3395,51 +3426,52 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:137
 msgid "Server allows any address at this domain"
-msgstr ""
+msgstr "Server staat elk adres op dit domein toe"
 
 #: ui/components/account-mail-preferences.slint:140
 msgid "Awaiting verification by the provider; cannot be selected yet"
-msgstr ""
+msgstr "Wacht op verificatie door de provider; kan nog niet worden gekozen"
 
 #: ui/components/account-mail-preferences.slint:143
 msgid "The server refused the last message from this address: {}"
-msgstr ""
+msgstr "De server heeft het laatste bericht van dit adres geweigerd: {}"
 
 #: ui/components/account-mail-preferences.slint:143
 msgid "The server refused the last message from this address"
-msgstr ""
+msgstr "De server heeft het laatste bericht van dit adres geweigerd"
 
 #: ui/components/account-mail-preferences.slint:146
 msgid "Sign-in address · replies go to {}"
-msgstr ""
+msgstr "Aanmeldadres · antwoorden gaan naar {}"
 
 #: ui/components/account-mail-preferences.slint:146
 msgid "Sign-in address"
-msgstr ""
+msgstr "Aanmeldadres"
 
 #: ui/components/account-mail-preferences.slint:150
 msgid "Added by you · accepted by the server · replies go to {}"
 msgstr ""
+"Door jou toegevoegd · geaccepteerd door de server · antwoorden gaan naar {}"
 
 #: ui/components/account-mail-preferences.slint:150
 msgid "Added by you · accepted by the server"
-msgstr ""
+msgstr "Door jou toegevoegd · geaccepteerd door de server"
 
 #: ui/components/account-mail-preferences.slint:152
 msgid "Added by you · not used yet · replies go to {}"
-msgstr ""
+msgstr "Door jou toegevoegd · nog niet gebruikt · antwoorden gaan naar {}"
 
 #: ui/components/account-mail-preferences.slint:152
 msgid "Added by you · not used yet"
-msgstr ""
+msgstr "Door jou toegevoegd · nog niet gebruikt"
 
 #: ui/components/account-mail-preferences.slint:154
 msgid "Provided by the server · replies go to {}"
-msgstr ""
+msgstr "Geleverd door de server · antwoorden gaan naar {}"
 
 #: ui/components/account-mail-preferences.slint:154
 msgid "Provided by the server"
-msgstr ""
+msgstr "Geleverd door de server"
 
 #: ui/components/account-mail-preferences.slint:158
 msgid "Sender identities, signatures, OpenPGP & automatic replies"
@@ -3453,11 +3485,11 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:170
 msgid "Signatures"
-msgstr ""
+msgstr "Handtekeningen"
 
 #: ui/components/account-mail-preferences.slint:171
 msgid "OpenPGP"
-msgstr ""
+msgstr "OpenPGP"
 
 #: ui/components/account-mail-preferences.slint:172
 msgid "Automatic replies"
@@ -3465,44 +3497,50 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:177
 msgid "Default sender identity"
-msgstr ""
+msgstr "Standaard afzenderidentiteit"
 
 #: ui/components/account-mail-preferences.slint:177
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr ""
+"Vooraf geselecteerd voor nieuwe berichten. Je aanmeldadres is ongewijzigd."
 
 #: ui/components/account-mail-preferences.slint:183
 msgid "Save sender default"
-msgstr ""
+msgstr "Standaardafzender opslaan"
 
 #: ui/components/account-mail-preferences.slint:184
 msgid "Refresh sender identities"
-msgstr ""
+msgstr "Afzenderidentiteiten vernieuwen"
 
 #: ui/components/account-mail-preferences.slint:194
 #: ui/dialogs/settings-dialog.slint:3006
 msgid "Edit"
-msgstr ""
+msgstr "Bewerken"
 
 #: ui/components/account-mail-preferences.slint:198
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
+"Gmail bepaalt vanaf welke adressen je kunt verzenden. Voeg een adres toe in "
+"de Gmail-instellingen onder Accounts › E-mail verzenden als en vernieuw "
+"daarna de afzenderidentiteiten."
 
 #: ui/components/account-mail-preferences.slint:201
 msgid "Edit sender address"
-msgstr ""
+msgstr "Afzenderadres bewerken"
 
 #: ui/components/account-mail-preferences.slint:201
 msgid "Add a sender address"
-msgstr ""
+msgstr "Afzenderadres toevoegen"
 
 #: ui/components/account-mail-preferences.slint:205
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
 msgstr ""
+"Je server staat toe dat je vanaf elk adres op de als jokertekens weergegeven "
+"domeinen kunt verzenden. Voeg de adressen toe waaruit je wilt kiezen."
 
 #: ui/components/account-mail-preferences.slint:206
 msgid ""
@@ -3514,35 +3552,35 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:208
 #: ui/dialogs/settings-dialog.slint:4446 ui/views/onboarding-view.slint:287
 msgid "Email address"
-msgstr ""
+msgstr "E-mailadres"
 
 #: ui/components/account-mail-preferences.slint:208
 msgid "alias@example.com"
-msgstr ""
+msgstr "alias@example.com"
 
 #: ui/components/account-mail-preferences.slint:209
 msgid "Sender name"
-msgstr ""
+msgstr "Afzendernaam"
 
 #: ui/components/account-mail-preferences.slint:209
 msgid "Name shown to recipients (optional)"
-msgstr ""
+msgstr "Naam die aan ontvangers wordt getoond (optioneel)"
 
 #: ui/components/account-mail-preferences.slint:210
 msgid "Reply-to address"
-msgstr ""
+msgstr "Antwoordadres"
 
 #: ui/components/account-mail-preferences.slint:210
 msgid "Where replies should go (optional)"
-msgstr ""
+msgstr "Waar antwoorden naartoe moeten gaan (optioneel)"
 
 #: ui/components/account-mail-preferences.slint:214
 msgid "Save sender address"
-msgstr ""
+msgstr "Afzenderadres opslaan"
 
 #: ui/components/account-mail-preferences.slint:214
 msgid "Add sender address"
-msgstr ""
+msgstr "Afzenderadres toevoegen"
 
 #: ui/components/account-mail-preferences.slint:215
 #: ui/components/rule-editor.slint:516 ui/device-sync.slint:1373
@@ -3553,15 +3591,15 @@ msgstr ""
 #: ui/network.slint:421 ui/views/files-view.slint:472
 #: ui/views/mail-reading-pane.slint:2292
 msgid "Cancel"
-msgstr ""
+msgstr "Annuleren"
 
 #: ui/components/account-mail-preferences.slint:220
 msgid "Signature"
-msgstr ""
+msgstr "Handtekening"
 
 #: ui/components/account-mail-preferences.slint:220
 msgid "Saved separately for each account."
-msgstr ""
+msgstr "Wordt per account afzonderlijk opgeslagen."
 
 #: ui/components/account-mail-preferences.slint:236
 msgid "Signature preview"
@@ -3575,31 +3613,31 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:241
 msgid "Edit signature"
-msgstr ""
+msgstr "Handtekening bewerken"
 
 #: ui/components/account-mail-preferences.slint:242
 msgid "New signature"
-msgstr ""
+msgstr "Nieuwe handtekening"
 
 #: ui/components/account-mail-preferences.slint:246
 msgid "New messages"
-msgstr ""
+msgstr "Nieuwe berichten"
 
 #: ui/components/account-mail-preferences.slint:246
 msgid "Signature inserted when you start a message."
-msgstr ""
+msgstr "Handtekening wordt ingevoegd wanneer je een bericht start."
 
 #: ui/components/account-mail-preferences.slint:252
 msgid "Replies & forwards"
-msgstr ""
+msgstr "Antwoorden & doorsturen"
 
 #: ui/components/account-mail-preferences.slint:252
 msgid "Placed above the quoted message."
-msgstr ""
+msgstr "Wordt boven het geciteerde bericht geplaatst."
 
 #: ui/components/account-mail-preferences.slint:257
 msgid "Save signature defaults"
-msgstr ""
+msgstr "Handtekeningstandaarden opslaan"
 
 #: ui/components/account-mail-preferences.slint:260
 msgid "Message format"
@@ -3668,7 +3706,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:313
 msgid "Subject"
-msgstr ""
+msgstr "Onderwerp"
 
 #: ui/components/account-mail-preferences.slint:313
 msgid "Such as Out of office"
@@ -3703,56 +3741,67 @@ msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
 msgstr ""
+"OpenPGP beschermt berichtteksten en bijlagen. Met digitale handtekeningen "
+"kunnen ontvangers controleren wie een bericht heeft ondertekend."
 
 #: ui/components/account-mail-preferences.slint:354
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
 msgstr ""
+"Gebruikt de geïnstalleerde GnuPG 2.x en de beveiligde sleutelopslag ervan. "
+"Wachtzinnen worden ingevoerd in het ontgrendelingsvenster van GnuPG."
 
 #: ui/components/account-mail-preferences.slint:354
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
 msgstr ""
+"OpenPGP is niet beschikbaar in deze mobiele build. Beveiligde accounts "
+"kunnen niet verzenden zonder een ondersteunde versleutelingsengine."
 
 #: ui/components/account-mail-preferences.slint:355
 msgid "Create a new key"
-msgstr ""
+msgstr "Nieuwe sleutel maken"
 
 #: ui/components/account-mail-preferences.slint:356
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
 msgstr ""
+"Nieuwe sleutels verlopen na twee jaar. GnuPG vraagt je de persoonlijke "
+"sleutel te beveiligen met een wachtzin."
 
 #: ui/components/account-mail-preferences.slint:357
 msgid "Your full OpenPGP fingerprint"
-msgstr ""
+msgstr "Je volledige OpenPGP-vingerafdruk"
 
 #: ui/components/account-mail-preferences.slint:357
 msgid "Your full OpenPGP key fingerprint"
-msgstr ""
+msgstr "Je volledige OpenPGP-sleutelvingerafdruk"
 
 #: ui/components/account-mail-preferences.slint:359
 msgid "Digitally sign messages"
-msgstr ""
+msgstr "Berichten digitaal ondertekenen"
 
 #: ui/components/account-mail-preferences.slint:359
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr ""
+"Bewijst dat je de persoonlijke sleutel hebt; versleutelt het bericht niet."
 
 #: ui/components/account-mail-preferences.slint:364
 msgid "Require encryption"
-msgstr ""
+msgstr "Versleuteling vereisen"
 
 #: ui/components/account-mail-preferences.slint:364
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
+"Blokkeert verzending, tenzij elke ontvanger een geverifieerde, bruikbare "
+"sleutel heeft."
 
 #: ui/components/account-mail-preferences.slint:368
 msgid "Verified recipient keys"
-msgstr ""
+msgstr "Geverifieerde ontvangersleutels"
 
 #: ui/components/account-mail-preferences.slint:369
 msgid ""
@@ -3760,36 +3809,41 @@ msgid ""
 "then enter one email=fingerprint per line. Importing a key alone does not "
 "verify it."
 msgstr ""
+"Vergelijk vingerafdrukken met ontvangers via een afzonderlijk vertrouwd "
+"kanaal en voer daarna één e-mail=vingerafdruk per regel in. Een sleutel "
+"importeren verifieert die niet."
 
 #: ui/components/account-mail-preferences.slint:370
 msgid "person@example.org=FULL_FINGERPRINT"
-msgstr ""
+msgstr "person@example.org=FULL_FINGERPRINT"
 
 #: ui/components/account-mail-preferences.slint:371
 msgid "Save OpenPGP settings"
-msgstr ""
+msgstr "OpenPGP-instellingen opslaan"
 
 #: ui/components/account-mail-preferences.slint:373
 msgid "Import key"
-msgstr ""
+msgstr "Sleutel importeren"
 
 #: ui/components/account-mail-preferences.slint:374
 msgid "Export public key"
-msgstr ""
+msgstr "Openbare sleutel exporteren"
 
 #: ui/components/account-mail-preferences.slint:375
 msgid "Show keys"
-msgstr ""
+msgstr "Sleutels tonen"
 
 #: ui/components/account-mail-preferences.slint:383
 msgid "Open message file (.eml)"
-msgstr ""
+msgstr "Berichtbestand openen (.eml)"
 
 #: ui/components/account-mail-preferences.slint:385
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
 msgstr ""
+"Beheer verloop, intrekking en back-ups van persoonlijke sleutels in GnuPG. "
+"Hier worden alleen openbare sleutels geëxporteerd."
 
 #: ui/components/account-mail-preferences.slint:386
 msgid ""
@@ -3797,24 +3851,29 @@ msgid ""
 "Existing server drafts are not retroactively protected. S/MIME certificates "
 "are not supported."
 msgstr ""
+"Onderwerpen en adressen blijven zichtbaar. Beveiligde concepten blijven op "
+"dit apparaat. Bestaande serverconcepten worden niet met terugwerkende kracht "
+"beveiligd. S/MIME-certificaten worden niet ondersteund."
 
 #: ui/components/account-mail-preferences.slint:389
 msgid "Working…"
-msgstr ""
+msgstr "Bezig…"
 
 #: ui/components/account-mail-preferences.slint:401
 msgid "OpenPGP message"
-msgstr ""
+msgstr "OpenPGP-bericht"
 
 #: ui/components/account-mail-preferences.slint:404
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
 msgstr ""
+"Ontsleutelde inhoud wordt als tekst weergegeven, zonder externe inhoud. Deze "
+"wordt niet toegevoegd aan zoeken en niet opgeslagen in de e-maildatabase."
 
 #: ui/components/account-mail-preferences.slint:405
 msgid "Export decrypted message"
-msgstr ""
+msgstr "Ontsleuteld bericht exporteren"
 
 #: ui/components/account-mail-preferences.slint:406
 #: ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
@@ -3824,7 +3883,7 @@ msgstr ""
 #: ui/dialogs/when-dialog.slint:197 ui/views/files-view.slint:505
 #: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
-msgstr ""
+msgstr "Sluiten"
 
 #: ui/components/account-status.slint:10
 msgid "Couldn't check mail"
@@ -4055,77 +4114,77 @@ msgstr ""
 
 #: ui/components/calendar-agenda.slint:39
 msgid "Filter calendars · {} hidden"
-msgstr ""
+msgstr "Agenda's filteren · {} verborgen"
 
 #: ui/components/calendar-agenda.slint:39
 msgid "Filter calendars"
-msgstr ""
+msgstr "Agenda's filteren"
 
 #: ui/components/calendar-agenda.slint:67 ui/components/calendar.slint:726
 msgid "Show calendars"
-msgstr ""
+msgstr "Agenda's tonen"
 
 #: ui/components/calendar-agenda.slint:68 ui/components/theme-editor.slint:782
 #: ui/dialogs/settings-dialog.slint:2121
 msgid "Reset"
-msgstr ""
+msgstr "Herstellen"
 
 #: ui/components/calendar-agenda.slint:70
 msgid "Filters only affect this agenda."
-msgstr ""
+msgstr "Filters zijn alleen van invloed op deze agenda."
 
 #: ui/components/calendar-agenda.slint:215 ui/components/calendar.slint:746
 #: ui/views/mail-list-pane.slint:804
 msgid "Today"
-msgstr ""
+msgstr "Vandaag"
 
 #: ui/components/calendar-agenda.slint:217 ui/components/calendar.slint:760
 msgid "{n} event"
 msgid_plural "{n} events"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{n} afspraak"
+msgstr[1] "{n} afspraken"
 
 #: ui/components/calendar-agenda.slint:249 ui/components/calendar.slint:597
 msgid "Cancelled"
-msgstr ""
+msgstr "Geannuleerd"
 
 #: ui/components/calendar-agenda.slint:271 ui/components/calendar.slint:115
 #: ui/components/calendar.slint:946 ui/components/calendar.slint:1191
 msgid "View details for {}"
-msgstr ""
+msgstr "Details weergeven voor {}"
 
 #: ui/components/calendar-agenda.slint:282
 msgid "Now · {}"
-msgstr ""
+msgstr "Nu · {}"
 
 #: ui/components/calendar-agenda.slint:285
 msgid "Nothing else is scheduled this month."
-msgstr ""
+msgstr "Er staat verder niets gepland deze maand."
 
 #: ui/components/calendar-agenda.slint:299
 msgid "No events match your filters"
-msgstr ""
+msgstr "Geen afspraken komen overeen met je filters"
 
 #: ui/components/calendar-agenda.slint:299
 msgid "No events this month"
-msgstr ""
+msgstr "Geen afspraken deze maand"
 
 #: ui/components/calendar-agenda.slint:300
 msgid "Show more calendars to see their events."
-msgstr ""
+msgstr "Toon meer agenda's om hun afspraken te zien."
 
 #: ui/components/calendar-agenda.slint:300
 msgid "Create an event to start planning your month."
-msgstr ""
+msgstr "Maak een afspraak om je maand te gaan plannen."
 
 #: ui/components/calendar-agenda.slint:304 ui/views/files-view.slint:586
 msgid "Reset filters"
-msgstr ""
+msgstr "Filters herstellen"
 
 #: ui/components/calendar-agenda.slint:304 ui/components/calendar.slint:165
 #: ui/components/calendar.slint:995
 msgid "New event"
-msgstr ""
+msgstr "Nieuwe afspraak"
 
 #: ui/components/calendar.slint:31
 msgid "+{n} more"
@@ -4139,63 +4198,63 @@ msgstr ""
 
 #: ui/components/calendar.slint:195 ui/components/calendar.slint:993
 msgid "Previous month"
-msgstr ""
+msgstr "Vorige maand"
 
 #: ui/components/calendar.slint:209 ui/components/calendar.slint:994
 msgid "Next month"
-msgstr ""
+msgstr "Volgende maand"
 
 #: ui/components/calendar.slint:214 ui/components/calendar.slint:1038
 msgctxt "Monday initial"
 msgid "M"
-msgstr ""
+msgstr "M"
 
 #: ui/components/calendar.slint:215 ui/components/calendar.slint:1038
 msgctxt "Tuesday initial"
 msgid "T"
-msgstr ""
+msgstr "D"
 
 #: ui/components/calendar.slint:216 ui/components/calendar.slint:1038
 msgctxt "Wednesday initial"
 msgid "W"
-msgstr ""
+msgstr "W"
 
 #: ui/components/calendar.slint:217 ui/components/calendar.slint:1038
 msgctxt "Thursday initial"
 msgid "T"
-msgstr ""
+msgstr "D"
 
 #: ui/components/calendar.slint:218 ui/components/calendar.slint:1038
 msgctxt "Friday initial"
 msgid "F"
-msgstr ""
+msgstr "V"
 
 #: ui/components/calendar.slint:219 ui/components/calendar.slint:1038
 msgctxt "Saturday initial"
 msgid "S"
-msgstr ""
+msgstr "Z"
 
 #: ui/components/calendar.slint:220 ui/components/calendar.slint:1038
 msgctxt "Sunday initial"
 msgid "S"
-msgstr ""
+msgstr "Z"
 
 #: ui/components/calendar.slint:266 ui/components/calendar.slint:788
 #: ui/components/calendar.slint:1068
 msgid "Select {}"
-msgstr ""
+msgstr "{} selecteren"
 
 #: ui/components/calendar.slint:286
 msgid "MY CALENDARS"
-msgstr ""
+msgstr "MIJN AGENDA'S"
 
 #: ui/components/calendar.slint:373
 msgid "Hide {}"
-msgstr ""
+msgstr "{} verbergen"
 
 #: ui/components/calendar.slint:374
 msgid "Show {}"
-msgstr ""
+msgstr "{} tonen"
 
 #: ui/components/calendar.slint:405
 msgid ""
@@ -4205,35 +4264,35 @@ msgstr ""
 
 #: ui/components/calendar.slint:537
 msgid "Read only"
-msgstr ""
+msgstr "Alleen-lezen"
 
 #: ui/components/calendar.slint:537
 msgid "Read and write"
-msgstr ""
+msgstr "Lezen en schrijven"
 
 #: ui/components/calendar.slint:538
 msgid "Last synced {}"
-msgstr ""
+msgstr "Laatst gesynchroniseerd {}"
 
 #: ui/components/calendar.slint:538
 msgid "Not synced yet"
-msgstr ""
+msgstr "Nog niet gesynchroniseerd"
 
 #: ui/components/calendar.slint:539
 msgid "Enabled"
-msgstr ""
+msgstr "Ingeschakeld"
 
 #: ui/components/calendar.slint:540 ui/components/calendar.slint:563
 msgid "Default calendar"
-msgstr ""
+msgstr "Standaardagenda"
 
 #: ui/components/calendar.slint:560
 msgid "Created in Flectar Mail"
-msgstr ""
+msgstr "Gemaakt in Flectar Mail"
 
 #: ui/components/calendar.slint:560
 msgid "Synced provider event"
-msgstr ""
+msgstr "Gesynchroniseerde providerafspraak"
 
 #: ui/components/calendar.slint:610
 msgid "Confirmed"
@@ -4245,63 +4304,63 @@ msgstr ""
 
 #: ui/components/calendar.slint:642 ui/components/calendar.slint:781
 msgid "LOCAL"
-msgstr ""
+msgstr "LOKAAL"
 
 #: ui/components/calendar.slint:643 ui/components/calendar.slint:797
 msgid "ALL DAY"
-msgstr ""
+msgstr "HELE DAG"
 
 #: ui/components/calendar.slint:726
 msgid "Hide calendars"
-msgstr ""
+msgstr "Agenda's verbergen"
 
 #: ui/components/calendar.slint:741
 msgid "Previous period"
-msgstr ""
+msgstr "Vorige periode"
 
 #: ui/components/calendar.slint:742
 msgid "Next period"
-msgstr ""
+msgstr "Volgende periode"
 
 #: ui/components/calendar.slint:743
 msgid "Week"
-msgstr ""
+msgstr "Week"
 
 #: ui/components/calendar.slint:744 ui/components/calendar.slint:1007
 msgid "Month"
-msgstr ""
+msgstr "Maand"
 
 #: ui/components/calendar.slint:745 ui/components/calendar.slint:1008
 msgid "Agenda"
-msgstr ""
+msgstr "Agenda"
 
 #: ui/components/calendar.slint:759 ui/components/calendar.slint:1020
 msgid "Local time · {}"
-msgstr ""
+msgstr "Lokale tijd · {}"
 
 #: ui/components/calendar.slint:1079
 msgid "Agenda · {}"
-msgstr ""
+msgstr "Agenda · {}"
 
 #: ui/components/calendar.slint:1116
 msgid "No events for this date"
-msgstr ""
+msgstr "Geen afspraken op deze datum"
 
 #: ui/components/calendar.slint:1259
 msgid "Delete this event?"
-msgstr ""
+msgstr "Deze afspraak verwijderen?"
 
 #: ui/components/calendar.slint:1260
 msgid "This event will be removed from your calendar."
-msgstr ""
+msgstr "Deze afspraak wordt uit je agenda verwijderd."
 
 #: ui/components/calendar.slint:1262
 msgid "Delete event"
-msgstr ""
+msgstr "Afspraak verwijderen"
 
 #: ui/components/calendar.slint:1263
 msgid "Keep event"
-msgstr ""
+msgstr "Afspraak behouden"
 
 #. Color names for screen readers, also in the names of their shades.
 #: ui/components/composer-actions.slint:22
@@ -4416,19 +4475,19 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:506
 msgid "Bold · Ctrl+B"
-msgstr ""
+msgstr "Vet · Ctrl+B"
 
 #: ui/components/composer-actions.slint:507
 msgid "Italic · Ctrl+I"
-msgstr ""
+msgstr "Cursief · Ctrl+I"
 
 #: ui/components/composer-actions.slint:508
 msgid "Underline · Ctrl+U"
-msgstr ""
+msgstr "Onderstrepen · Ctrl+U"
 
 #: ui/components/composer-actions.slint:509
 msgid "Strikethrough"
-msgstr ""
+msgstr "Doorstrepen"
 
 #: ui/components/composer-actions.slint:514
 msgid "Text color"
@@ -4469,27 +4528,27 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:566
 msgid "Bulleted list"
-msgstr ""
+msgstr "Lijst met opsommingstekens"
 
 #: ui/components/composer-actions.slint:567
 msgid "Numbered list"
-msgstr ""
+msgstr "Genummerde lijst"
 
 #: ui/components/composer-actions.slint:568
 msgid "Quote"
-msgstr ""
+msgstr "Citaat"
 
 #: ui/components/composer-actions.slint:569
 msgid "Inline code"
-msgstr ""
+msgstr "Inline code"
 
 #: ui/components/composer-actions.slint:570
 msgid "Add or edit link"
-msgstr ""
+msgstr "Link toevoegen of bewerken"
 
 #: ui/components/composer-actions.slint:570
 msgid "Select text to add a link"
-msgstr ""
+msgstr "Selecteer tekst om een link toe te voegen"
 
 #: ui/components/composer-actions.slint:571
 msgid "Insert image"
@@ -4497,7 +4556,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:576
 msgid "Email templates"
-msgstr ""
+msgstr "E-mailsjablonen"
 
 #: ui/components/composer-actions.slint:586 ui/dialogs/when-dialog.slint:104
 msgid "Remind me if no reply"
@@ -4525,19 +4584,19 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:611
 msgid "Undo · Ctrl+Z"
-msgstr ""
+msgstr "Ongedaan maken · Ctrl+Z"
 
 #: ui/components/composer-actions.slint:612
 msgid "Redo · Ctrl+Shift+Z"
-msgstr ""
+msgstr "Opnieuw · Ctrl+Shift+Z"
 
 #: ui/components/composer-actions.slint:714
 msgid "Remove attachment"
-msgstr ""
+msgstr "Bijlage verwijderen"
 
 #: ui/components/composer-actions.slint:769
 msgid "Remove link"
-msgstr ""
+msgstr "Link verwijderen"
 
 #: ui/components/composer-actions.slint:832
 msgid "Shrink photos"
@@ -4561,15 +4620,15 @@ msgstr[1] ""
 
 #: ui/components/composer-actions.slint:911
 msgid "Save signature"
-msgstr ""
+msgstr "Handtekening opslaan"
 
 #: ui/components/composer-actions.slint:933
 msgid "Sending…"
-msgstr ""
+msgstr "Bezig met verzenden…"
 
 #: ui/components/composer-actions.slint:933
 msgid "Send"
-msgstr ""
+msgstr "Verzenden"
 
 #: ui/components/composer-actions.slint:952 ui/dialogs/when-dialog.slint:103
 msgid "Schedule send"
@@ -4577,11 +4636,11 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:965
 msgid "Attach files"
-msgstr ""
+msgstr "Bestanden toevoegen"
 
 #: ui/components/composer-actions.slint:1000
 msgid "Save draft"
-msgstr ""
+msgstr "Concept opslaan"
 
 #: ui/components/composer-actions.slint:1020
 msgid "More options"
@@ -4601,7 +4660,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:1049
 msgid "Discard"
-msgstr ""
+msgstr "Verwerpen"
 
 #: ui/components/composer-actions.slint:1107
 msgctxt "image"
@@ -4648,23 +4707,23 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:1354
 msgid "Apply"
-msgstr ""
+msgstr "Toepassen"
 
 #: ui/components/composer-actions.slint:1403
 msgid "Edit link"
-msgstr ""
+msgstr "Link bewerken"
 
 #: ui/components/composer-actions.slint:1403
 msgid "Add link"
-msgstr ""
+msgstr "Link toevoegen"
 
 #: ui/components/composer-actions.slint:1414
 msgid "The selected text will open this address."
-msgstr ""
+msgstr "De geselecteerde tekst opent dit adres."
 
 #: ui/components/composer-actions.slint:1435 ui/views/contacts-view.slint:803
 msgid "https://example.com"
-msgstr ""
+msgstr "https://example.com"
 
 #: ui/components/composer-actions.slint:1543
 msgid "Translate the selection"
@@ -4700,7 +4759,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:1641
 msgid "Discard this draft?"
-msgstr ""
+msgstr "Dit concept verwerpen?"
 
 #: ui/components/composer-actions.slint:1652
 msgid "What you changed since it was last saved won't be kept."
@@ -4708,30 +4767,30 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:1652
 msgid "The message and its attachments will be removed from this composer."
-msgstr ""
+msgstr "Het bericht en de bijlagen worden uit dit opstelvenster verwijderd."
 
 #: ui/components/composer-actions.slint:1663
 msgid "Keep"
-msgstr ""
+msgstr "Behouden"
 
 #: ui/components/composer-fields.slint:14 ui/views/mail-reading-pane.slint:367
 #: ui/views/mail-reading-pane.slint:425 ui/views/mail-reading-pane.slint:829
 msgid "Reply"
-msgstr ""
+msgstr "Antwoorden"
 
 #: ui/components/composer-fields.slint:15 ui/views/mail-reading-pane.slint:368
 #: ui/views/mail-reading-pane.slint:426 ui/views/mail-reading-pane.slint:838
 msgid "Reply all"
-msgstr ""
+msgstr "Allen beantwoorden"
 
 #: ui/components/composer-fields.slint:16 ui/views/mail-reading-pane.slint:369
 #: ui/views/mail-reading-pane.slint:427 ui/views/mail-reading-pane.slint:847
 msgid "Forward"
-msgstr ""
+msgstr "Doorsturen"
 
 #: ui/components/composer-fields.slint:17
 msgid "Edit draft"
-msgstr ""
+msgstr "Concept bewerken"
 
 #: ui/components/composer-fields.slint:18 ui/views/mail-reading-pane.slint:371
 #: ui/views/mail-reading-pane.slint:429
@@ -4745,31 +4804,31 @@ msgstr ""
 #: ui/components/composer-fields.slint:125 ui/components/rule-editor.slint:361
 #: ui/views/files-view.slint:701
 msgid "Account"
-msgstr ""
+msgstr "Account"
 
 #: ui/components/composer-fields.slint:365
 msgid "To"
-msgstr ""
+msgstr "Aan"
 
 #: ui/components/composer-fields.slint:366
 msgid "name@example.com · separate with commas"
-msgstr ""
+msgstr "name@example.com · gescheiden door komma's"
 
 #: ui/components/composer-fields.slint:392
 msgid "Cc"
-msgstr ""
+msgstr "Cc"
 
 #: ui/components/composer-fields.slint:393
 msgid "Carbon copy"
-msgstr ""
+msgstr "Kopie"
 
 #: ui/components/composer-fields.slint:403
 msgid "Bcc"
-msgstr ""
+msgstr "Bcc"
 
 #: ui/components/composer-fields.slint:404
 msgid "Blind carbon copy"
-msgstr ""
+msgstr "Blinde kopie"
 
 #: ui/components/composer-fields.slint:498
 msgctxt "signature"
@@ -4778,32 +4837,32 @@ msgstr ""
 
 #: ui/components/composer-fields.slint:510
 msgid "Signature name, for example Work"
-msgstr ""
+msgstr "Handtekeningnaam, bijvoorbeeld Werk"
 
 #: ui/components/composer-fields.slint:510
 msgid "What is this email about?"
-msgstr ""
+msgstr "Waar gaat deze e-mail over?"
 
 #: ui/components/confirmation-dialog.slint:14
 msgid "Confirm"
-msgstr ""
+msgstr "Bevestigen"
 
 #: ui/components/controls.slint:113 ui/dialogs/settings-dialog.slint:1512
 msgid "On"
-msgstr ""
+msgstr "Aan"
 
 #: ui/components/controls.slint:113 ui/dialogs/settings-dialog.slint:766
 #: ui/dialogs/settings-dialog.slint:1512
 msgid "Off"
-msgstr ""
+msgstr "Uit"
 
 #: ui/components/controls.slint:161 ui/views/mail-list-pane.slint:940
 msgid "Clear selection"
-msgstr ""
+msgstr "Selectie wissen"
 
 #: ui/components/controls.slint:161
 msgid "Select"
-msgstr ""
+msgstr "Selecteren"
 
 #: ui/components/controls.slint:506
 msgid "Hide password"
@@ -4815,27 +4874,27 @@ msgstr ""
 
 #: ui/components/document-preview.slint:17
 msgid "Previous page"
-msgstr ""
+msgstr "Vorige pagina"
 
 #: ui/components/document-preview.slint:18
 msgid "Page {} of {}"
-msgstr ""
+msgstr "Pagina {} van {}"
 
 #: ui/components/document-preview.slint:19
 msgid "Next page"
-msgstr ""
+msgstr "Volgende pagina"
 
 #: ui/components/email-composer.slint:480
 msgid "From"
-msgstr ""
+msgstr "Van"
 
 #: ui/components/email-composer.slint:481
 msgid "Verified sender identity"
-msgstr ""
+msgstr "Geverifieerde afzenderidentiteit"
 
 #: ui/components/email-composer.slint:617
 msgid "Write your message…"
-msgstr ""
+msgstr "Schrijf je bericht…"
 
 #: ui/components/email-composer.slint:791
 msgid "No suggestions"
@@ -4955,59 +5014,59 @@ msgstr ""
 
 #: ui/components/email-link-context-area.slint:25
 msgid "Open link"
-msgstr ""
+msgstr "Link openen"
 
 #: ui/components/email-link-context-area.slint:29
 msgid "Copy link"
-msgstr ""
+msgstr "Link kopiëren"
 
 #: ui/components/email-templates.slint:128
 msgid "New email template"
-msgstr ""
+msgstr "Nieuw e-mailsjabloon"
 
 #: ui/components/email-templates.slint:128
 msgid "Edit email template"
-msgstr ""
+msgstr "E-mailsjabloon bewerken"
 
 #: ui/components/email-templates.slint:161
 msgid "New template"
-msgstr ""
+msgstr "Nieuw sjabloon"
 
 #: ui/components/email-templates.slint:184
 msgid "No email templates yet"
-msgstr ""
+msgstr "Nog geen e-mailsjablonen"
 
 #: ui/components/email-templates.slint:224
 msgid "No subject"
-msgstr ""
+msgstr "Geen onderwerp"
 
 #: ui/components/email-templates.slint:236
 msgid "Insert template {}"
-msgstr ""
+msgstr "Sjabloon {} invoegen"
 
 #: ui/components/email-templates.slint:251
 msgid "Insert"
-msgstr ""
+msgstr "Invoegen"
 
 #: ui/components/email-templates.slint:263
 msgid "Edit template"
-msgstr ""
+msgstr "Sjabloon bewerken"
 
 #: ui/components/email-templates.slint:273
 msgid "Delete template"
-msgstr ""
+msgstr "Sjabloon verwijderen"
 
 #: ui/components/email-templates.slint:295
 msgid "Template name"
-msgstr ""
+msgstr "Sjabloonnaam"
 
 #: ui/components/email-templates.slint:301
 msgid "Shortcut (optional)"
-msgstr ""
+msgstr "Snelkoppeling (optioneel)"
 
 #: ui/components/email-templates.slint:307
 msgid "Subject (optional)"
-msgstr ""
+msgstr "Onderwerp (optioneel)"
 
 #: ui/components/email-templates.slint:332
 msgid "Insert placeholder"
@@ -5051,19 +5110,19 @@ msgstr ""
 
 #: ui/components/email-templates.slint:358
 msgid "Template message"
-msgstr ""
+msgstr "Sjabloonbericht"
 
 #: ui/components/email-templates.slint:378
 msgid "Save template"
-msgstr ""
+msgstr "Sjabloon opslaan"
 
 #: ui/components/email-templates.slint:404
 msgid "Delete email template?"
-msgstr ""
+msgstr "E-mailsjabloon verwijderen?"
 
 #: ui/components/email-templates.slint:406
 msgid "Delete this template from this device?"
-msgstr ""
+msgstr "Dit sjabloon van dit apparaat verwijderen?"
 
 #: ui/components/invitation-card.slint:59
 msgctxt "a button that opens an online meeting"
@@ -5310,7 +5369,7 @@ msgstr ""
 
 #: ui/components/mail-security-fields.slint:78
 msgid "Connection security"
-msgstr ""
+msgstr "Verbindingsbeveiliging"
 
 #: ui/components/mail-security-fields.slint:91
 msgid "POP3 encryption"
@@ -5318,7 +5377,7 @@ msgstr ""
 
 #: ui/components/mail-security-fields.slint:91
 msgid "IMAP encryption"
-msgstr ""
+msgstr "IMAP-versleuteling"
 
 #: ui/components/mail-security-fields.slint:96
 msgid "None (unencrypted)"
@@ -5326,7 +5385,7 @@ msgstr ""
 
 #: ui/components/mail-security-fields.slint:109
 msgid "SMTP encryption"
-msgstr ""
+msgstr "SMTP-versleuteling"
 
 #: ui/components/mail-security-fields.slint:121
 msgid ""
@@ -5336,11 +5395,11 @@ msgstr ""
 
 #: ui/components/mail-security-fields.slint:126
 msgid "Manage trusted certificate"
-msgstr ""
+msgstr "Vertrouwd certificaat beheren"
 
 #: ui/components/mail-security-fields.slint:126
 msgid "Custom server certificate…"
-msgstr ""
+msgstr "Aangepast servercertificaat…"
 
 #: ui/components/mail-security-fields.slint:135
 msgid ""
@@ -5348,22 +5407,25 @@ msgid ""
 "here. Only trust certificates from your server administrator. Server names "
 "and expiry dates are still checked."
 msgstr ""
+"Voor Proton Bridge exporteer je het certificaat uit de Bridge-instellingen "
+"en importeer je het hier. Vertrouw alleen certificaten van je "
+"serverbeheerder. Servernamen en verloopdata worden nog steeds gecontroleerd."
 
 #: ui/components/mail-security-fields.slint:138
 msgid "Import certificate file"
-msgstr ""
+msgstr "Certificaatbestand importeren"
 
 #: ui/components/mail-security-fields.slint:140
 msgid "PEM certificate only. Do not paste a private key."
-msgstr ""
+msgstr "Alleen PEM-certificaat. Plak geen persoonlijke sleutel."
 
 #: ui/components/mail-security-fields.slint:141
 msgid "Remove certificate"
-msgstr ""
+msgstr "Certificaat verwijderen"
 
 #: ui/components/mail-security-fields.slint:144
 msgid "Custom certificate added for this account."
-msgstr ""
+msgstr "Aangepast certificaat toegevoegd voor dit account."
 
 #: ui/components/mail-security-fields.slint:211
 msgid "Advanced settings"
@@ -5425,11 +5487,11 @@ msgstr ""
 
 #: ui/components/oauth-browser-help.slint:43
 msgid "Browser did not open — show sign-in help"
-msgstr ""
+msgstr "Browser is niet geopend — hulp bij aanmelden tonen"
 
 #: ui/components/oauth-browser-help.slint:43
 msgid "Having trouble with browser sign-in?"
-msgstr ""
+msgstr "Problemen met aanmelden in de browser?"
 
 #: ui/components/oauth-browser-help.slint:73
 msgid ""
@@ -5441,32 +5503,36 @@ msgstr ""
 msgid ""
 "Open the sign-in page again or copy its link into a browser on this device."
 msgstr ""
+"Open de aanmeldingspagina opnieuw of kopieer de link naar een browser op dit "
+"apparaat."
 
 #: ui/components/oauth-browser-help.slint:80
 msgid "Open browser"
-msgstr ""
+msgstr "Browser openen"
 
 #: ui/components/oauth-browser-help.slint:81
 msgid "Copy sign-in link"
-msgstr ""
+msgstr "Aanmeldlink kopiëren"
 
 #: ui/components/oauth-browser-help.slint:84
 msgid ""
 "If the final browser page says localhost can’t be reached, copy its full "
 "address and paste it below."
 msgstr ""
+"Als de laatste browserpagina meldt dat localhost niet bereikbaar is, kopieer "
+"dan het volledige adres en plak het hieronder."
 
 #: ui/components/oauth-browser-help.slint:89
 msgid "Final browser address"
-msgstr ""
+msgstr "Laatste browseradres"
 
 #: ui/components/oauth-browser-help.slint:90
 msgid "Final localhost address"
-msgstr ""
+msgstr "Laatste localhost-adres"
 
 #: ui/components/oauth-browser-help.slint:101
 msgid "Finish sign-in"
-msgstr ""
+msgstr "Aanmelding voltooien"
 
 #: ui/components/profile-controls.slint:24
 msgid "No accounts"
@@ -5945,39 +6011,39 @@ msgstr ""
 
 #: ui/components/sidebar-controls.slint:228
 msgid "New subfolder"
-msgstr ""
+msgstr "Nieuwe submap"
 
 #: ui/components/sidebar-controls.slint:233 ui/dialogs/folder-dialog.slint:29
 msgid "Rename folder"
-msgstr ""
+msgstr "Map hernoemen"
 
 #: ui/components/sidebar-controls.slint:238
 msgid "Delete folder"
-msgstr ""
+msgstr "Map verwijderen"
 
 #: ui/components/sidebar-controls.slint:243
 msgid "Empty Trash…"
-msgstr ""
+msgstr "Prullenbak leegmaken…"
 
 #: ui/components/sidebar-controls.slint:247
 msgid "New nested label"
-msgstr ""
+msgstr "Nieuw genest label"
 
 #: ui/components/sidebar-controls.slint:251
 msgid "Rename global label"
-msgstr ""
+msgstr "Globaal label hernoemen"
 
 #: ui/components/sidebar-controls.slint:251
 msgid "Rename label in {}"
-msgstr ""
+msgstr "Label hernoemen in {}"
 
 #: ui/components/sidebar-controls.slint:255
 msgid "Delete global label"
-msgstr ""
+msgstr "Globaal label verwijderen"
 
 #: ui/components/sidebar-controls.slint:255
 msgid "Delete label from {}"
-msgstr ""
+msgstr "Label verwijderen uit {}"
 
 #: ui/components/sidebar-controls.slint:259
 msgid "Edit saved search…"
@@ -5997,19 +6063,19 @@ msgstr ""
 
 #: ui/components/sidebar-controls.slint:297
 msgid "Collapse label"
-msgstr ""
+msgstr "Label samenvouwen"
 
 #: ui/components/sidebar-controls.slint:297
 msgid "Expand label"
-msgstr ""
+msgstr "Label uitvouwen"
 
 #: ui/components/sidebar-controls.slint:298
 msgid "Collapse folder"
-msgstr ""
+msgstr "Map samenvouwen"
 
 #: ui/components/sidebar-controls.slint:298
 msgid "Expand folder"
-msgstr ""
+msgstr "Map uitvouwen"
 
 #. The menu's first line.
 #: ui/components/sidebar-controls.slint:374
@@ -6039,7 +6105,7 @@ msgstr ""
 
 #: ui/components/sidebar.slint:192 ui/views/mail-list-pane.slint:1856
 msgid "New email"
-msgstr ""
+msgstr "Nieuwe e-mail"
 
 #: ui/components/sidebar.slint:192
 msgid "Add an account"
@@ -6048,7 +6114,7 @@ msgstr ""
 #: ui/components/sidebar.slint:246 ui/components/sidebar.slint:255
 #: ui/components/sidebar.slint:275
 msgid "Find folder or label"
-msgstr ""
+msgstr "Map of label zoeken"
 
 #: ui/components/sidebar.slint:292
 msgid "Clear folder filter"

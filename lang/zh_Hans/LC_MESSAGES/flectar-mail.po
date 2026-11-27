@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 03:03+0000\n"
+"PO-Revision-Date: 2026-11-22 10:01+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -1751,23 +1751,17 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "无法断开 CardDAV：{}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "No folders"
 msgctxt "special folder"
 msgid "No folder"
 msgstr "无文件夹"
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not create folder: {}"
 msgid "Could not read the folders: {}"
-msgstr "无法创建文件夹：{}"
+msgstr "无法读取文件夹：{}"
 
 #: ui/app.slint:578
-#, fuzzy
-#| msgid "Could not create folder: {}"
 msgid "Could not choose the folder: {}"
-msgstr "无法创建文件夹：{}"
+msgstr "无法选择文件夹：{}"
 
 #: ui/app.slint:583
 msgid "Connect an account before creating a backup."
@@ -9498,20 +9492,16 @@ msgid ""
 msgstr "仅显示和同步您在服务器上订阅的文件夹，以及收件箱和存入邮件的文件夹。"
 
 #: ui/dialogs/settings-dialog.slint:3177 ui/folder-roles.slint:132
-#, fuzzy
-#| msgid "Search folders"
 msgid "Special folders"
-msgstr "搜索文件夹"
+msgstr "特殊文件夹"
 
 #: ui/dialogs/settings-dialog.slint:3186
 msgid "Sent, Drafts, Trash, Spam and Archive"
-msgstr ""
+msgstr "已发送、草稿箱、回收站、垃圾邮件和归档"
 
 #: ui/dialogs/settings-dialog.slint:3197
-#, fuzzy
-#| msgid "Choose file…"
 msgid "Choose…"
-msgstr "选择文件…"
+msgstr "选择…"
 
 #: ui/dialogs/settings-dialog.slint:3207
 msgid "Keep mail on the server"
@@ -10242,10 +10232,8 @@ msgid "Choose a profile for {}"
 msgstr "为 {} 选择分组"
 
 #: ui/dialogs/settings-dialog.slint:4761
-#, fuzzy
-#| msgid "Search folders"
 msgid "Special folders of {}"
-msgstr "搜索文件夹"
+msgstr "{} 的特殊文件夹"
 
 #: ui/dialogs/settings-dialog.slint:4779
 msgid "Delete all local data?"
@@ -10568,12 +10556,12 @@ msgid ""
 "Flectar Mail files mail in the folders your server marks for each purpose. "
 "Choose others if those aren't right."
 msgstr ""
+"Flectar Mail 会将邮件归入服务器为各用途标记的文件夹。如果不对，可以选择其他文"
+"件夹。"
 
 #: ui/folder-roles.slint:165
-#, fuzzy
-#| msgid "Searching the server…"
 msgid "Reading the folders…"
-msgstr "正在搜索服务器…"
+msgstr "正在读取文件夹…"
 
 #: ui/link-services.slint:90
 msgid "Large files"
