@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-21 15:27+0000\n"
+"PO-Revision-Date: 2026-11-22 03:03+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -639,8 +639,6 @@ msgid "(untitled event)"
 msgstr "（无标题日程）"
 
 #: ui/app.slint:253
-#, fuzzy
-#| msgid "Details"
 msgctxt "title of a collapsible section in a message"
 msgid "Details"
 msgstr "详情"
@@ -8229,22 +8227,16 @@ msgid "All mail"
 msgstr "全部邮件"
 
 #: ui/dialogs/settings-dialog.slint:800
-#, fuzzy
-#| msgid "Every minute"
 msgid "1 minute"
-msgstr "每分钟"
+msgstr "1 分钟"
 
 #: ui/dialogs/settings-dialog.slint:801
-#, fuzzy
-#| msgid "Every 5 minutes"
 msgid "2 minutes"
-msgstr "每 5 分钟"
+msgstr "2 分钟"
 
 #: ui/dialogs/settings-dialog.slint:802
-#, fuzzy
-#| msgid "Every 5 minutes"
 msgid "5 minutes"
-msgstr "每 5 分钟"
+msgstr "5 分钟"
 
 #: ui/dialogs/settings-dialog.slint:805
 msgid "Same as all accounts"
@@ -9447,14 +9439,12 @@ msgid "The server tells Flectar Mail of new mail as soon as it arrives."
 msgstr "新邮件一到，服务器就会通知 Flectar Mail。"
 
 #: ui/dialogs/settings-dialog.slint:3110
-#, fuzzy
-#| msgid "Server storage"
 msgid "Server timeout"
-msgstr "服务器存储"
+msgstr "服务器超时"
 
 #: ui/dialogs/settings-dialog.slint:3111
 msgid "How long to wait for a slow server before giving up."
-msgstr ""
+msgstr "等待慢速服务器的最长时间，超时后放弃。"
 
 #: ui/dialogs/settings-dialog.slint:3124
 msgid "Sent copies"
