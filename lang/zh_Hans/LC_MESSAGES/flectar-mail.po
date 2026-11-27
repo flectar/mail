@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -15,105 +15,103 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "无法更新服务器邮件设置：{}"
+msgstr "正在查找 {} 的服务器设置…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
-msgstr ""
+msgstr "未找到 {} 的服务器设置。您服务商的帮助页面中有这些信息。"
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"{0} 的邮件会发往位于 {1} 的服务器，因此这是 {1} 的设置。DNS 应答可能被伪造，"
+"连接前请检查服务器名称。"
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
-msgstr ""
+msgstr "{} 的这些设置通过未加密的连接获取，途中可能已被篡改。连接前请检查服务器名称。"
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
-msgstr ""
+msgstr "{} 的服务器设置填充自公共服务商数据库。连接前请检查。"
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "服务器设置填充自 {} 自身的配置。"
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "我已检查这些服务器并信任它们"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "无法更新服务器邮件设置：{}"
+msgstr "正在查找 {} 的日历服务器…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "无法更新服务器邮件设置：{}"
+msgstr "正在查找 {} 的联系人服务器…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
-msgstr ""
+msgstr "未找到 {} 的日历服务器。您服务商的帮助页面提供了其地址。"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
-msgstr ""
+msgstr "未找到 {} 的联系人服务器。您服务商的帮助页面提供了其地址。"
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"{0} 的邮件会发往位于 {1} 的服务器，因此这是 {1} 的服务器。DNS 应答可能被伪造"
+"，连接前请检查地址。"
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
-msgstr ""
+msgstr "{0} 的 DNS 记录指向位于 {1} 的服务器。DNS 应答可能被伪造，连接前请检查地址。"
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
-msgstr ""
+msgstr "{} 的此服务器地址通过未加密的连接获取，途中可能已被篡改。连接前请检查。"
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
-msgstr ""
+msgstr "{} 的服务器地址填充自公共服务商数据库。连接前请检查。"
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "服务器地址填充自 {} 的 DNS 记录。"
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "服务器地址填充自 {} 的网站。"
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "服务器地址填充自 {} 自身的配置。"
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "我已检查此服务器并信任它"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4331,14 +4329,12 @@ msgid "Used for the app icon on your home screen."
 msgstr "用于主屏幕上的应用图标。"
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
-msgstr "离开 Flectar Mail 后新图标才会显示。某些启动器会从主屏幕移除旧图标。"
+msgstr ""
+"离开 Flectar Mail 后新图标才会显示。某些启动器需要几分钟才会显示它，还有些会"
+"从主屏幕移除旧图标。"
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -10460,10 +10456,8 @@ msgid "Stored securely in your system keyring"
 msgstr "安全保存在系统密钥环中"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "CalDAV 设置"
+msgstr "CardDAV 设置"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -12453,16 +12447,12 @@ msgid "to {}"
 msgstr "发送至 {}"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "您的电子邮件地址"
+msgstr "复制电子邮件地址"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "您的电子邮件地址"
+msgstr "复制姓名和电子邮件地址"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."

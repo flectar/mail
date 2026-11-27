@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Danish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/da/>\n"
@@ -15,105 +15,119 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "Kunne ikke opdatere servermailindstillinger: {}"
+msgstr "Slår serverindstillingerne op for {}…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
+"Der blev ikke fundet serverindstillinger for {}. Din udbyders hjælpesider "
+"viser dem."
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"{0}s e-mail går til servere på {1}, så disse er {1}s indstillinger. DNS-svar "
+"kan forfalskes, så kontroller servernavnene, før du forbinder."
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
+"Disse indstillinger for {} kom over en ukrypteret forbindelse og kan være "
+"blevet ændret undervejs. Kontroller servernavnene, før du forbinder."
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
+"Serverindstillingerne for {} er udfyldt fra den offentlige udbyderdatabase. "
+"Kontroller dem, før du forbinder."
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "Serverindstillingerne er udfyldt fra {}s egen konfiguration."
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "Jeg har kontrolleret disse servere og stoler på dem"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "Kunne ikke opdatere servermailindstillinger: {}"
+msgstr "Slår kalenderserveren op for {}…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "Kunne ikke opdatere servermailindstillinger: {}"
+msgstr "Slår kontaktsserveren op for {}…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Der blev ikke fundet en kalenderserver for {}. Din udbyders hjælpesider "
+"angiver dens adresse."
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Der blev ikke fundet en kontaktserver for {}. Din udbyders hjælpesider "
+"angiver dens adresse."
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"{0}s e-mail går til servere på {1}, så dette er {1}s server. DNS-svar kan "
+"forfalskes, så kontroller adressen, før du forbinder."
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
 msgstr ""
+"{0}s DNS-poster peger på en server på {1}. DNS-svar kan forfalskes, så "
+"kontroller adressen, før du forbinder."
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
 msgstr ""
+"Denne serveradresse for {} kom over en ukrypteret forbindelse og kan være "
+"blevet ændret undervejs. Kontroller den, før du forbinder."
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
 msgstr ""
+"Serveradressen for {} er udfyldt fra den offentlige udbyderdatabase. "
+"Kontroller den, før du forbinder."
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "Serveradressen er udfyldt fra {}s DNS-poster."
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "Serveradressen er udfyldt fra {}s websted."
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "Serveradressen er udfyldt fra {}s egen konfiguration."
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "Jeg har kontrolleret denne server og stoler på den"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4458,16 +4472,13 @@ msgid "Used for the app icon on your home screen."
 msgstr "Bruges til appikonet på din startskærm."
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
-"Det nye ikon vises, efter du har forladt Flectar Mail. Nogle appstartere "
-"fjerner det gamle ikon fra startskærmen."
+"Det nye ikon vises, efter du forlader Flectar Mail. Nogle launchere tager et "
+"par minutter om at vise det, og nogle fjerner det gamle ikon fra "
+"startskærmen."
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -10848,10 +10859,8 @@ msgid "Stored securely in your system keyring"
 msgstr "Opbevares sikkert i dit systems nøglering"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "CalDAV-indstillinger"
+msgstr "CardDAV-indstillinger"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -12909,16 +12918,12 @@ msgid "to {}"
 msgstr "til {}"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "Din e-mailadresse"
+msgstr "Kopier e-mailadresse"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "Din e-mailadresse"
+msgstr "Kopier navn og e-mailadresse"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."

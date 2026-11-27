@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Dutch <https://translate.flectar.com/projects/flectar-mail/"
 "mail/nl/>\n"
@@ -15,105 +15,122 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "Kon server-e-mailinstellingen niet bijwerken: {}"
+msgstr "Serverinstellingen voor {} opzoeken…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
+"Geen serverinstellingen gevonden voor {}. De helppagina's van je provider "
+"vermelden ze."
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"De e-mail van {0} gaat naar servers op {1}, dus dit zijn de instellingen van "
+"{1}. DNS-antwoorden kunnen worden vervalst; controleer de servernamen "
+"voordat je verbindt."
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
+"Deze instellingen voor {} kwamen binnen via een onversleutelde verbinding en "
+"kunnen onderweg zijn gewijzigd. Controleer de servernamen voordat je "
+"verbindt."
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
+"De serverinstellingen voor {} zijn ingevuld uit de openbare "
+"providerdatabase. Controleer ze voordat je verbindt."
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "De serverinstellingen zijn ingevuld uit de eigen configuratie van {}."
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "Ik heb deze servers gecontroleerd en vertrouw ze"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "Kon server-e-mailinstellingen niet bijwerken: {}"
+msgstr "Kalenderserver voor {} opzoeken…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "Kon server-e-mailinstellingen niet bijwerken: {}"
+msgstr "Contactenserver voor {} opzoeken…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Geen kalenderserver gevonden voor {}. De helppagina's van je provider geven "
+"het adres."
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Geen contactenserver gevonden voor {}. De helppagina's van je provider geven "
+"het adres."
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"De e-mail van {0} gaat naar servers op {1}, dus dit is de server van {1}. "
+"DNS-antwoorden kunnen worden vervalst; controleer het adres voordat je "
+"verbindt."
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
 msgstr ""
+"De DNS-records van {0} wijzen naar een server op {1}. DNS-antwoorden kunnen "
+"worden vervalst; controleer het adres voordat je verbindt."
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
 msgstr ""
+"Dit serveradres voor {} kwam binnen via een onversleutelde verbinding en kan "
+"onderweg zijn gewijzigd. Controleer het voordat je verbindt."
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
 msgstr ""
+"Het serveradres voor {} is ingevuld uit de openbare providerdatabase. "
+"Controleer het voordat je verbindt."
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "Het serveradres is ingevuld uit de DNS-records van {}."
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "Het serveradres is ingevuld vanaf de website van {}."
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "Het serveradres is ingevuld uit de eigen configuratie van {}."
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "Ik heb deze server gecontroleerd en vertrouw hem"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4505,16 +4522,13 @@ msgid "Used for the app icon on your home screen."
 msgstr "Wordt gebruikt voor het app-pictogram op je startscherm."
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
-"Het nieuwe pictogram verschijnt nadat je Flectar Mail verlaat. Sommige "
-"starters verwijderen het oude pictogram van het startscherm."
+"Het nieuwe pictogram verschijnt nadat je Flectar Mail hebt verlaten. Sommige "
+"launchers doen er een paar minuten over om het te tonen, en sommige "
+"verwijderen het oude pictogram van het beginscherm."
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -10968,10 +10982,8 @@ msgid "Stored securely in your system keyring"
 msgstr "Veilig opgeslagen in je systeemsleutelkluis"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "CalDAV-instellingen"
+msgstr "CardDAV-instellingen"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -13047,16 +13059,12 @@ msgid "to {}"
 msgstr "aan {}"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "Je e-mailadres"
+msgstr "E-mailadres kopiëren"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "Je e-mailadres"
+msgstr "Naam en e-mailadres kopiëren"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."

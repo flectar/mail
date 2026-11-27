@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
 "mail/de/>\n"
@@ -15,105 +15,123 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "Server-E-Mail-Einstellungen konnten nicht aktualisiert werden: {}"
+msgstr "Server-Einstellungen für {} werden gesucht…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
+"Für {} wurden keine Server-Einstellungen gefunden. Die Hilfeseiten Ihres "
+"Anbieters listen sie auf."
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"Die E-Mails von {0} gehen an Server unter {1}, daher sind dies die "
+"Einstellungen von {1}. DNS-Antworten können gefälscht werden; prüfen Sie die "
+"Servernamen, bevor Sie sich verbinden."
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
+"Diese Einstellungen für {} kamen über eine unverschlüsselte Verbindung und "
+"könnten unterwegs geändert worden sein. Prüfen Sie die Servernamen, bevor "
+"Sie sich verbinden."
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
+"Die Server-Einstellungen für {} stammen aus der öffentlichen "
+"Anbieterdatenbank. Prüfen Sie sie, bevor Sie sich verbinden."
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "Die Server-Einstellungen stammen aus der eigenen Konfiguration von {}."
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "Ich habe diese Server geprüft und vertraue ihnen"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "Server-E-Mail-Einstellungen konnten nicht aktualisiert werden: {}"
+msgstr "Kalenderserver für {} wird gesucht…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "Server-E-Mail-Einstellungen konnten nicht aktualisiert werden: {}"
+msgstr "Kontaktserver für {} wird gesucht…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Für {} wurde kein Kalenderserver gefunden. Die Hilfeseiten Ihres Anbieters "
+"nennen seine Adresse."
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Für {} wurde kein Kontaktserver gefunden. Die Hilfeseiten Ihres Anbieters "
+"nennen seine Adresse."
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"Die E-Mails von {0} gehen an Server unter {1}, daher ist dies der Server von "
+"{1}. DNS-Antworten können gefälscht werden; prüfen Sie die Adresse, bevor "
+"Sie sich verbinden."
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
 msgstr ""
+"Die DNS-Einträge von {0} verweisen auf einen Server unter {1}. DNS-Antworten "
+"können gefälscht werden; prüfen Sie die Adresse, bevor Sie sich verbinden."
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
 msgstr ""
+"Diese Serveradresse für {} kam über eine unverschlüsselte Verbindung und "
+"könnte unterwegs geändert worden sein. Prüfen Sie sie, bevor Sie sich "
+"verbinden."
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
 msgstr ""
+"Die Serveradresse für {} stammt aus der öffentlichen Anbieterdatenbank. "
+"Prüfen Sie sie, bevor Sie sich verbinden."
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "Die Serveradresse stammt aus den DNS-Einträgen von {}."
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "Die Serveradresse stammt aus der Website von {}."
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "Die Serveradresse stammt aus der eigenen Konfiguration von {}."
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "Ich habe diesen Server geprüft und vertraue ihm"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4540,16 +4558,13 @@ msgid "Used for the app icon on your home screen."
 msgstr "Wird für das App-Symbol auf Ihrem Startbildschirm verwendet."
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
 "Das neue Symbol erscheint, nachdem Sie Flectar Mail verlassen haben. Manche "
-"Starter entfernen das alte Symbol vom Startbildschirm."
+"Launcher brauchen ein paar Minuten, bis sie es anzeigen, und manche "
+"entfernen das alte Symbol vom Startbildschirm."
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -11056,10 +11071,8 @@ msgid "Stored securely in your system keyring"
 msgstr "Sicher in Ihrem System-Schlüsselbund gespeichert"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "CalDAV-Einstellungen"
+msgstr "CardDAV-Einstellungen"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -13147,16 +13160,12 @@ msgid "to {}"
 msgstr "an {}"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "Ihre E-Mail-Adresse"
+msgstr "E-Mail-Adresse kopieren"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "Ihre E-Mail-Adresse"
+msgstr "Name und E-Mail-Adresse kopieren"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."

@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -15,105 +15,119 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "サーバーのメール設定を更新できませんでした：{}"
+msgstr "{} のサーバー設定を検索しています…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
+"{} のサーバー設定が見つかりませんでした。プロバイダーのヘルプページに記載され"
+"ています。"
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"{0} のメールは {1} のサーバーに送られるため、これは {1} の設定です。DNS 応答"
+"は偽装される可能性があるため、接続する前にサーバー名を確認してください。"
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
+"{} のこの設定は暗号化されていない接続で受信されたため、途中で変更された可能性"
+"があります。接続する前にサーバー名を確認してください。"
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
+"{} のサーバー設定は公開プロバイダーデータベースから入力されています。接続する"
+"前に確認してください。"
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "サーバー設定は {} 自身の構成から入力されています。"
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "これらのサーバーを確認し、信頼します"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "サーバーのメール設定を更新できませんでした：{}"
+msgstr "{} のカレンダーサーバーを検索しています…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "サーバーのメール設定を更新できませんでした：{}"
+msgstr "{} の連絡先サーバーを検索しています…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"{} のカレンダーサーバーが見つかりませんでした。プロバイダーのヘルプページに"
+"アドレスが記載されています。"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"{} の連絡先サーバーが見つかりませんでした。プロバイダーのヘルプページに"
+"アドレスが記載されています。"
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"{0} のメールは {1} のサーバーに送られるため、これが {1} のサーバーです。DNS "
+"応答は偽装される可能性があるため、接続する前にアドレスを確認してください。"
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
 msgstr ""
+"{0} の DNS レコードは {1} のサーバーを指しています。DNS 応答は偽装される可能"
+"性があるため、接続する前にアドレスを確認してください。"
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
 msgstr ""
+"{} のこのサーバーアドレスは暗号化されていない接続で受信されたため、途中で変更"
+"された可能性があります。接続する前に確認してください。"
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
 msgstr ""
+"{} のサーバーアドレスは公開プロバイダーデータベースから入力されています。接続"
+"する前に確認してください。"
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "サーバーアドレスは {} の DNS レコードから入力されています。"
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "サーバーアドレスは {} のウェブサイトから入力されています。"
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "サーバーアドレスは {} 自身の構成から入力されています。"
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "このサーバーを確認し、信頼します"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4421,16 +4435,13 @@ msgid "Used for the app icon on your home screen."
 msgstr "ホーム画面のアプリアイコンに使用されます。"
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
-"新しいアイコンは Flectar Mail を終了すると表示されます。ランチャーによって"
-"は、古いアイコンがホーム画面から削除されることがあります。"
+"新しいアイコンは Flectar Mail を終了した後に表示されます。ランチャーによって"
+"は表示まで数分かかる場合があり、古いアイコンをホーム画面から削除するものもあ"
+"ります。"
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -10798,10 +10809,8 @@ msgid "Stored securely in your system keyring"
 msgstr "システムのキーリングに安全に保存されます"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "CalDAV 設定"
+msgstr "CardDAV 設定"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -12847,16 +12856,12 @@ msgid "to {}"
 msgstr "{} 宛"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "自分のメールアドレス"
+msgstr "メールアドレスをコピー"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "自分のメールアドレス"
+msgstr "名前とメールアドレスをコピー"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."

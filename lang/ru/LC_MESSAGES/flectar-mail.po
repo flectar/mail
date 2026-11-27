@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-23 15:22+0000\n"
+"PO-Revision-Date: 2026-11-24 15:11+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Russian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ru/>\n"
@@ -19,105 +19,119 @@ msgstr ""
 "X-Generator: Weblate 2026.11.2\n"
 
 #: ui/account-discovery.slint:35
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the server settings for {}…"
-msgstr "Не удалось обновить настройки почты на сервере: {}"
+msgstr "Поиск настроек сервера для {}…"
 
 #: ui/account-discovery.slint:36
 msgid ""
 "No server settings were found for {}. Your provider's help pages list them."
 msgstr ""
+"Настройки сервера для {} не найдены. Они перечислены на страницах помощи "
+"вашего провайдера."
 
 #: ui/account-discovery.slint:37
 msgid ""
 "{0}'s mail goes to servers at {1}, so these are {1}'s settings. DNS answers "
 "can be forged, so check the server names before connecting."
 msgstr ""
+"Почта {0} идёт на серверы по адресу {1}, поэтому это настройки {1}. Ответы "
+"DNS могут быть подделаны — проверьте имена серверов перед подключением."
 
 #: ui/account-discovery.slint:38
 msgid ""
 "These settings for {} came over an unencrypted connection and could have "
 "been changed on the way. Check the server names before connecting."
 msgstr ""
+"Эти настройки для {} получены по незашифрованному соединению и могли быть "
+"изменены по пути. Проверьте имена серверов перед подключением."
 
 #: ui/account-discovery.slint:39
 msgid ""
 "Server settings for {} are filled in from the public provider database. "
 "Check them before connecting."
 msgstr ""
+"Настройки сервера для {} заполнены из публичной базы провайдеров. Проверьте "
+"их перед подключением."
 
 #: ui/account-discovery.slint:40
 msgid "Server settings are filled in from {}'s own configuration."
-msgstr ""
+msgstr "Настройки сервера заполнены из собственной конфигурации {}."
 
 #: ui/account-discovery.slint:48
 msgid "I checked these servers and trust them"
-msgstr ""
+msgstr "Я проверил эти серверы и доверяю им"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the calendar server for {}…"
-msgstr "Не удалось обновить настройки почты на сервере: {}"
+msgstr "Поиск сервера календаря для {}…"
 
 #: ui/account-discovery.slint:104
-#, fuzzy
-#| msgid "Could not update server mail settings: {}"
 msgid "Looking up the contacts server for {}…"
-msgstr "Не удалось обновить настройки почты на сервере: {}"
+msgstr "Поиск сервера контактов для {}…"
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No calendar server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Сервер календаря для {} не найден. Адрес указан на страницах помощи вашего "
+"провайдера."
 
 #: ui/account-discovery.slint:105
 msgid ""
 "No contacts server was found for {}. Your provider's help pages give its "
 "address."
 msgstr ""
+"Сервер контактов для {} не найден. Адрес указан на страницах помощи вашего "
+"провайдера."
 
 #: ui/account-discovery.slint:106
 msgid ""
 "{0}'s mail goes to servers at {1}, so this is {1}'s server. DNS answers can "
 "be forged, so check the address before connecting."
 msgstr ""
+"Почта {0} идёт на серверы по адресу {1}, поэтому это сервер {1}. Ответы DNS "
+"могут быть подделаны — проверьте адрес перед подключением."
 
 #: ui/account-discovery.slint:107
 msgid ""
 "{0}'s DNS records point to a server at {1}. DNS answers can be forged, so "
 "check the address before connecting."
 msgstr ""
+"DNS-записи {0} указывают на сервер по адресу {1}. Ответы DNS могут быть "
+"подделаны — проверьте адрес перед подключением."
 
 #: ui/account-discovery.slint:108
 msgid ""
 "This server address for {} came over an unencrypted connection and could "
 "have been changed on the way. Check it before connecting."
 msgstr ""
+"Этот адрес сервера для {} получен по незашифрованному соединению и мог быть "
+"изменён по пути. Проверьте его перед подключением."
 
 #: ui/account-discovery.slint:109
 msgid ""
 "The server address for {} is filled in from the public provider database. "
 "Check it before connecting."
 msgstr ""
+"Адрес сервера для {} заполнен из публичной базы провайдеров. Проверьте его "
+"перед подключением."
 
 #: ui/account-discovery.slint:110
 msgid "The server address is filled in from {}'s DNS records."
-msgstr ""
+msgstr "Адрес сервера заполнен из DNS-записей {}."
 
 #: ui/account-discovery.slint:111
 msgid "The server address is filled in from {}'s website."
-msgstr ""
+msgstr "Адрес сервера заполнен с веб-сайта {}."
 
 #: ui/account-discovery.slint:112
 msgid "The server address is filled in from {}'s own configuration."
-msgstr ""
+msgstr "Адрес сервера заполнен из собственной конфигурации {}."
 
 #: ui/account-discovery.slint:120
 msgid "I checked this server and trust it"
-msgstr ""
+msgstr "Я проверил этот сервер и доверяю ему"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -4516,16 +4530,13 @@ msgid "Used for the app icon on your home screen."
 msgstr "Используется как значок приложения на главном экране."
 
 #: ui/components/app-icon-picker.slint:116
-#, fuzzy
-#| msgid ""
-#| "The new icon appears after you leave Flectar Mail. Some launchers remove "
-#| "the old icon from the home screen."
 msgid ""
 "The new icon appears after you leave Flectar Mail. Some launchers take a few "
 "minutes to show it, and some remove the old icon from the home screen."
 msgstr ""
-"Новый значок появится, когда вы выйдете из Flectar Mail. Некоторые лаунчеры "
-"убирают старый значок с главного экрана."
+"Новый значок появится после выхода из Flectar Mail. Некоторым лаунчерам "
+"нужно несколько минут, чтобы показать его, а некоторые удаляют старый значок "
+"с главного экрана."
 
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
@@ -10984,10 +10995,8 @@ msgid "Stored securely in your system keyring"
 msgstr "Надёжно хранится в системном хранилище ключей"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
-#, fuzzy
-#| msgid "CalDAV settings"
 msgid "CardDAV settings"
-msgstr "Настройки CalDAV"
+msgstr "Настройки CardDAV"
 
 #: ui/dialogs/settings-dialog.slint:4439 ui/dialogs/settings-dialog.slint:4493
 msgid "Connect CardDAV"
@@ -13048,16 +13057,12 @@ msgid "to {}"
 msgstr "кому: {}"
 
 #: ui/views/mail-reading-pane.slint:347
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy email address"
-msgstr "Ваш адрес почты"
+msgstr "Копировать адрес почты"
 
 #: ui/views/mail-reading-pane.slint:351
-#, fuzzy
-#| msgid "Your email address"
 msgid "Copy name and email address"
-msgstr "Ваш адрес почты"
+msgstr "Копировать имя и адрес почты"
 
 #: ui/views/mail-reading-pane.slint:459
 msgid "May have gone out. Check Sent first."
