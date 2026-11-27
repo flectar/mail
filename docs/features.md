@@ -482,6 +482,10 @@ inbox more room when you need it.
 
 Message appearance can follow the app theme or stay light or dark independently.
 It uses your selected color palette for HTML, plain text, and Reader mode.
+
+Plain-text mail written as format=flowed (RFC 3676) shows each paragraph as
+one, wrapping with the window rather than at the sender's line length. Mail
+downloaded before this was supported reads its text again when it's opened.
 To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.
@@ -665,6 +669,12 @@ out, its signature goes in as text, and pictures dropped on it are attached.
 in Settings → Accounts, under its sender identities and signatures, and replies
 and forwards to plain-text messages start as plain text unless that's turned
 off there. A draft opens again as it was saved.
+
+The plain text of every message, on its own or beside the formatted one, goes
+out as format=flowed (RFC 3676). Lines wrap at 72 characters, quotes are
+marked `>` once per level, and mail apps that read the format join each
+paragraph back together to fit their window. Text beyond ASCII goes as 8-bit
+text, or as base64 to a server that takes only 7-bit mail.
 
 **Forward as attachment**, in a message's **More** menu or in the **More** menu
 for messages chosen in the list, attaches them to a new message, each as it

@@ -1635,7 +1635,8 @@ impl RichComposeDocument {
     /// numbers nor spacing. Callers then load the plain text.
     pub fn load_html(&mut self, html: &str, text: &str) -> Option<ComposeSelection> {
         let (_, styles) = saved_styles(html, text, true)?;
-        Some(self.reopen(text.to_owned(), styles))
+        let (text, styles) = with_whole_quote_markers(text, styles);
+        Some(self.reopen(text, styles))
     }
 
     /// Reopens HTML that another mail app wrote, for a message edited as new, with the
@@ -1653,7 +1654,8 @@ impl RichComposeDocument {
     /// untouched, when the HTML holds other text.
     pub fn load_html_start(&mut self, html: &str, text: &str) -> Option<usize> {
         let (end, styles) = saved_styles(html, text, false)?;
-        self.reopen(text[..end].to_owned(), styles);
+        let (start, styles) = with_whole_quote_markers(&text[..end], styles);
+        self.reopen(start, styles);
         Some(end)
     }
 
@@ -3381,23 +3383,101 @@ fn typed_urls(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
 /// of it when `whole` or else a start of it that ends at a line break, and
 /// where in `text` that ends. HTML keeps a tab only as a run of spaces, a
 /// no-break space as a plain one and a CRLF line end as LF, so those
-/// differences still match; any other means the HTML belongs to other text.
+/// differences still match, as do spaces that end a line: text sent as
+/// format=flowed comes back without them (RFC 3676 section 4.2). Any other
+/// difference means the HTML belongs to other text.
 fn saved_styles(html: &str, text: &str, whole: bool) -> Option<(usize, Vec<ComposeStyleRun>)> {
     let (imported, styles) = import_body_html(html)?;
     let (expected, offsets) = text_as_html_reads_it(text);
-    let rest = expected.strip_prefix(imported.as_str())?;
+    let (imported_kept, imported_at, _) = without_line_end_spaces(&imported);
+    let (expected_kept, _, expected_from) = without_line_end_spaces(&expected);
+    let rest = expected_kept.strip_prefix(imported_kept.as_str())?;
     if !(rest.is_empty() || !whole && rest.starts_with('\n')) {
         return None;
     }
+    let in_text = |imported_offset: usize| offsets[expected_from[imported_at[imported_offset]]];
     let styles = styles
         .into_iter()
         .map(|run| ComposeStyleRun {
-            range: offsets[run.range.start]..offsets[run.range.end],
+            range: in_text(run.range.start)..in_text(run.range.end),
             style: run.style,
         })
         .filter(|run| !run.range.is_empty())
         .collect();
-    Some((offsets[imported.len()], styles))
+    Some((in_text(imported.len()), styles))
+}
+
+/// `text`, with `styles` on it, where each line that is a quote marker
+/// without its space gets the space back. That is how an empty line of a
+/// quote block comes back from text sent as format=flowed, which drops the
+/// spaces that end its lines (RFC 3676 section 4.2).
+fn with_whole_quote_markers(
+    text: &str,
+    mut styles: Vec<ComposeStyleRun>,
+) -> (String, Vec<ComposeStyleRun>) {
+    let bare = QUOTE_MARKER.trim_end();
+    let mut spaces = Vec::new();
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        if content.strip_suffix('\r').unwrap_or(content) == bare {
+            spaces.push(offset + bare.len());
+        }
+        offset += line.len();
+    }
+    if spaces.is_empty() {
+        return (text.to_owned(), styles);
+    }
+    let mut restored = String::with_capacity(text.len() + spaces.len());
+    let mut copied = 0;
+    for &space in &spaces {
+        restored.push_str(&text[copied..space]);
+        restored.push(' ');
+        copied = space;
+    }
+    restored.push_str(&text[copied..]);
+    // A run that starts where a space goes starts after it; one that ends
+    // there ends before it.
+    let moved = |offset: usize, start: bool| {
+        offset
+            + spaces
+                .iter()
+                .filter(|&&space| space < offset || start && space == offset)
+                .count()
+    };
+    for run in &mut styles {
+        run.range = moved(run.range.start, true)..moved(run.range.end, false);
+    }
+    (restored, styles)
+}
+
+/// `text` without the spaces that end its lines, with where each byte of
+/// `text` lands in it, and where each byte of it comes from in `text`, each
+/// plus one for the end. A dropped space lands where the next byte kept does.
+fn without_line_end_spaces(text: &str) -> (String, Vec<usize>, Vec<usize>) {
+    let mut kept = String::with_capacity(text.len());
+    let mut at = Vec::with_capacity(text.len() + 1);
+    let mut from = Vec::with_capacity(text.len() + 1);
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = content.trim_end_matches(' ');
+        for index in 0..trimmed.len() {
+            at.push(kept.len() + index);
+            from.push(offset + index);
+        }
+        kept.push_str(trimmed);
+        at.resize(offset + content.len(), kept.len());
+        if line.ends_with('\n') {
+            at.push(kept.len());
+            from.push(offset + content.len());
+            kept.push('\n');
+        }
+        offset += line.len();
+    }
+    at.push(kept.len());
+    from.push(text.len());
+    (kept, at, from)
 }
 
 /// `text` as its HTML imports back, with the byte offset in `text` where
@@ -4518,6 +4598,41 @@ mod tests {
         assert_eq!(reopened.body_html(), document.body_html());
         assert_style_coverage(&reopened);
         assert_eq!(reopened.history("undo"), None);
+    }
+
+    #[test]
+    fn a_draft_that_came_back_as_format_flowed_keeps_its_formatting() {
+        // Text sent as format=flowed comes back without the spaces that
+        // ended its lines, an empty quote line's included.
+        let written = "Hi team, \nBold words  \n│ quoted\n│ \n│ more\nBye";
+        let came_back = "Hi team,\nBold words\n│ quoted\n│\n│ more\nBye";
+        let reopens_as = "Hi team,\nBold words\n│ quoted\n│ \n│ more\nBye";
+        let formatted = |text: &str| {
+            let mut document = RichComposeDocument::default();
+            document.load(text, 0, 0);
+            let bold = text.find("Bold").unwrap();
+            document.format("bold", text, bold as i32, (bold + 4) as i32);
+            let more = text.find("more").unwrap();
+            document.format("italic", text, more as i32, (more + 4) as i32);
+            document
+        };
+        let html = formatted(written).body_html().unwrap();
+        let expected = formatted(reopens_as);
+
+        let mut reopened = RichComposeDocument::default();
+        reopened
+            .load_html(&html, came_back)
+            .expect("the draft's own HTML");
+        assert_eq!(reopened.text(), reopens_as);
+        assert_eq!(reopened.body_html(), expected.body_html());
+        assert_style_coverage(&reopened);
+
+        // So does the start of a saved reply, above the original it quotes.
+        let mut start = RichComposeDocument::default();
+        let saved = format!("{came_back}\n\nOn Monday, Pat wrote:\n> Hello");
+        assert_eq!(start.load_html_start(&html, &saved), Some(came_back.len()));
+        assert_eq!(start.text(), reopens_as);
+        assert_eq!(start.body_html(), expected.body_html());
     }
 
     #[test]

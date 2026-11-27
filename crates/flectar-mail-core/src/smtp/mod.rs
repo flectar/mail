@@ -683,6 +683,19 @@ async fn submit(
         }
         options.push(MailParameter::SmtpUtfEight);
     }
+    // A server that takes only 7-bit content gets the parts beyond ASCII in
+    // base64 instead, as a relay would send them on (RFC 6152).
+    let seven_bit;
+    let mut message = message;
+    if !message.is_ascii()
+        && !connection
+            .server_info()
+            .supports_feature(Extension::EightBitMime)
+        && let Some(converted) = crate::mime::seven_bit(message)
+    {
+        seven_bit = converted;
+        message = &seven_bit;
+    }
     if !message.is_ascii() {
         if !connection
             .server_info()

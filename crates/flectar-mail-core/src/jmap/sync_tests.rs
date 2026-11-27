@@ -3446,3 +3446,36 @@ async fn bodies_wait_for_an_unmetered_connection() {
     assert_eq!(stored_bodies(&ctx).await[0].1, "cached");
     mock.task.abort();
 }
+
+#[test]
+fn flowed_text_parts_read_back_into_paragraphs() {
+    let part = json!({
+        "partId": "10", "blobId": "text-blob", "size": 30, "type": "text/plain",
+        "header:Content-Type": " text/plain; charset=utf-8; format=flowed"
+    });
+    let email: Email = serde_json::from_value(json!({
+        "id": "flowed",
+        "textBody": [part],
+        "htmlBody": [part],
+        "bodyValues": {"10": {
+            "value": "A paragraph that \r\ngoes on.\r\n",
+            "isEncodingProblem": false, "isTruncated": false
+        }}
+    }))
+    .unwrap();
+    let (plain, html) = body_text(&email).unwrap();
+    assert_eq!(plain.as_deref(), Some("A paragraph that goes on.\r\n"));
+    assert!(html.is_none());
+    // A part whose Content-Type didn't come stays as it is.
+    let email: Email = serde_json::from_value(json!({
+        "id": "fixed",
+        "textBody": [{"partId": "10", "type": "text/plain"}],
+        "bodyValues": {"10": {
+            "value": "A paragraph that \r\ngoes on.\r\n",
+            "isEncodingProblem": false, "isTruncated": false
+        }}
+    }))
+    .unwrap();
+    let (plain, _) = body_text(&email).unwrap();
+    assert_eq!(plain.as_deref(), Some("A paragraph that \r\ngoes on.\r\n"));
+}

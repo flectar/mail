@@ -2760,6 +2760,8 @@ struct PartSpec {
     is_inline: bool,
     is_attachment: bool,
     charset: Option<String>,
+    /// Whether a text/plain part is format=flowed (RFC 3676).
+    format: crate::mime::flowed::Format,
     provider_attachment_id: Option<String>,
     encoded_data: Option<String>,
     size: i64,
@@ -2805,6 +2807,11 @@ fn collect_part_specs_inner(
                 .then(|| value.trim().trim_matches(['\'', '"']).to_owned())
         })
     });
+    let format = headers
+        .get("content-type")
+        .map_or(crate::mime::flowed::Format::Fixed, |value| {
+            crate::mime::flowed::Format::of_header(value)
+        });
     let content_id = headers
         .get("content-id")
         .map(|value| value.trim().trim_matches(['<', '>']).to_owned())
@@ -2827,6 +2834,7 @@ fn collect_part_specs_inner(
                 || (content_id.is_some() && !disposition.starts_with("attachment")),
             is_attachment,
             charset,
+            format,
             provider_attachment_id: body
                 .get("attachmentId")
                 .and_then(Value::as_str)
@@ -2993,7 +3001,9 @@ async fn hydrate_parts(api: &GmailApi, base: &str, resource: &Value) -> Result<H
                 decode_text_part(&bytes, spec.charset.as_deref())
             };
             match spec.mime_type.as_str() {
-                "text/plain" if hydrated.text.is_none() => hydrated.text = Some(decoded),
+                "text/plain" if hydrated.text.is_none() => {
+                    hydrated.text = Some(spec.format.read(&decoded).into_owned())
+                }
                 "text/html" if hydrated.html.is_none() => {
                     hydrated.html = Some(crate::mime::sanitize_html(&decoded))
                 }
@@ -5419,6 +5429,29 @@ mod tests {
         let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
         assert_eq!(body.text.as_deref(), Some("Atualizações"));
         assert!(body.html.unwrap().contains("Спасибо"));
+    }
+
+    #[tokio::test]
+    async fn flowed_text_reads_back_into_paragraphs() {
+        let (_dir, ctx, config) = gmail_account().await;
+        let data = |text: &str| URL_SAFE_NO_PAD.encode(text);
+        let resource = json!({
+            "id": "flowed", "threadId": "t-flowed",
+            "payload": {
+                "partId": "", "mimeType": "text/plain", "filename": "",
+                "headers": [{"name": "Content-Type",
+                             "value": "text/plain; charset=utf-8; format=flowed"}],
+                "body": {"size": 40, "data": data("A paragraph that \r\ngoes on.\r\n")},
+            },
+        });
+        let api = GmailApi::new(ctx, config).unwrap();
+        let body = hydrate_parts(&api, GMAIL_API, &resource).await.unwrap();
+        assert_eq!(body.text.as_deref(), Some("A paragraph that goes on.\r\n"));
+        // The text a message without HTML shows is the same.
+        assert_eq!(
+            body.html.as_deref(),
+            Some("<pre>A paragraph that goes on.\r\n</pre>")
+        );
     }
 
     /// A Gmail message whose file part is named `attachment_id` this time.

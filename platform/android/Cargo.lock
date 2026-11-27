@@ -2102,6 +2102,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
+ "unicode-width",
  "url",
  "webpki-roots",
  "whatlang",

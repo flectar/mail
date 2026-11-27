@@ -671,10 +671,9 @@ impl Gpg {
         let parsed = mail_parser::MessageParser::default()
             .parse(entity.as_slice())
             .ok_or_else(|| error("Decrypted MIME could not be parsed"))?;
-        let text = parsed
-            .body_text(0)
-            .map(|s| s.into_owned())
-            .unwrap_or_default();
+        // Read as other mail is, flowed paragraphs joined (RFC 3676), now
+        // that the cryptography had the text as it was sent.
+        let text = crate::mime::first_body_text(&parsed).unwrap_or_default();
         let attachment_count = parsed.attachments().count();
         let protection = if encrypted {
             "Decrypted; integrity verified."

@@ -298,3 +298,100 @@ async fn a_message_that_never_went_out_whole_notes_no_end() {
     assert_eq!(ends, [false]);
     assert!(!ran.load(Ordering::Acquire));
 }
+
+/// A server that signs anyone in, offering 8BITMIME or not, and reports the
+/// MAIL command and the data of the message it takes.
+async fn eight_bit_server(
+    offers_8bitmime: bool,
+) -> (u16, mpsc::UnboundedReceiver<(String, String)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (taken, heard) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        let mut mail = String::new();
+        loop {
+            let mut line = String::new();
+            if stream.read_line(&mut line).await.unwrap_or(0) == 0 {
+                return;
+            }
+            let verb = line.split([' ', '\r']).next().unwrap_or_default();
+            let reply: &[u8] = match verb.to_ascii_uppercase().as_str() {
+                "EHLO" if offers_8bitmime => b"250-localhost\r\n250-8BITMIME\r\n250 AUTH PLAIN\r\n",
+                "EHLO" => b"250-localhost\r\n250 AUTH PLAIN\r\n",
+                "AUTH" => b"235 Authenticated\r\n",
+                "MAIL" => {
+                    mail = line.trim_end().to_owned();
+                    b"250 OK\r\n"
+                }
+                "DATA" => {
+                    stream.write_all(b"354 Continue\r\n").await.unwrap();
+                    let mut data = String::new();
+                    loop {
+                        let mut next = String::new();
+                        if stream.read_line(&mut next).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        if next == ".\r\n" {
+                            break;
+                        }
+                        data.push_str(&next);
+                    }
+                    let _ = taken.send((mail.clone(), data));
+                    b"250 Queued\r\n"
+                }
+                "QUIT" => {
+                    let _ = stream.write_all(b"221 Goodbye\r\n").await;
+                    return;
+                }
+                _ => b"250 OK\r\n",
+            };
+            if stream.write_all(reply).await.is_err() {
+                return;
+            }
+        }
+    });
+    (port, heard)
+}
+
+async fn send_eight_bit(offers_8bitmime: bool) -> (String, String) {
+    let raw = "From: me@example.test\r\nTo: alice@example.test\r\nSubject: Hi\r\n\
+MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8; format=flowed; delsp=no\r\n\
+Content-Transfer-Encoding: 8bit\r\n\r\nGrüße aus \r\nBerlin\r\n";
+    let (port, mut heard) = eight_bit_server(offers_8bitmime).await;
+    send_raw_before(
+        &account(port),
+        &SmtpAuth::Password("secret".into()),
+        "me@example.test",
+        &["alice@example.test".into()],
+        raw.as_bytes(),
+        None,
+        Box::pin(async { Ok(()) }),
+    )
+    .await
+    .unwrap();
+    heard.recv().await.unwrap()
+}
+
+#[tokio::test]
+async fn eight_bit_content_goes_as_it_is_where_the_server_takes_it() {
+    let (mail, data) = send_eight_bit(true).await;
+    assert!(mail.ends_with("BODY=8BITMIME"), "{mail}");
+    assert!(data.contains("Content-Transfer-Encoding: 8bit\r\n\r\nGrüße aus \r\nBerlin"));
+}
+
+#[tokio::test]
+async fn eight_bit_content_goes_as_base64_where_the_server_takes_only_seven_bit() {
+    let (mail, data) = send_eight_bit(false).await;
+    assert!(!mail.contains("BODY="), "{mail}");
+    assert!(data.is_ascii(), "{data}");
+    let message = mail_parser::MessageParser::default()
+        .parse(data.as_bytes())
+        .unwrap();
+    assert_eq!(
+        message.body_text(0).as_deref(),
+        Some("Grüße aus \r\nBerlin\r\n")
+    );
+}
