@@ -25,57 +25,67 @@ export component TextEdit inherits Rectangle {
 
     min-height: 80px;
     border-radius: LayoutMetrics.corner-radius;
-    border-width: 1px;
-    border-color: editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
-    background: root.background-color;
-    drop-shadow-blur: 2px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: AppTheme.control-shadow;
-    opacity: root.enabled ? 1 : 0.5;
 
-    Text {
-        x: 12px;
-        y: 10px;
-        width: parent.width - 24px;
-        visible: root.text == "";
-        text: root.placeholder-text;
-        color: AppTheme.placeholder;
-        font-size: root.font-size;
-        wrap: word-wrap;
-        // A hint, such as person@example.org=FULL_FINGERPRINT, is cut short
-        // where a narrow phone has no room for it, as a field's hint is.
-        overflow: elide;
-    }
+    // The face draws the control and the root stays a plain box. A root with
+    // a shadow, an opacity or an animated color makes Slint copy the whole
+    // control into each of its uses, more than the release build's memory
+    // allows; this way it builds the control once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
+        background: root.background-color;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: AppTheme.control-shadow;
+        opacity: root.enabled ? 1 : 0.5;
 
-    // Longer text scrolls inside the field, and the caret stays in view.
-    editor-scroll := ScrollView {
-        x: 12px;
-        y: 10px;
-        width: parent.width - 24px;
-        height: parent.height - 20px;
-        content-width: self.visible-width;
-        content-height: editor.height;
-
-        editor := TextInput {
-            width: editor-scroll.visible-width;
-            height: max(editor-scroll.visible-height, self.preferred-height);
-            text <=> root.text;
-            color: root.text-color;
-            selection-background-color: AppTheme.accent;
-            selection-foreground-color: white;
+        Text {
+            x: 12px;
+            y: 10px;
+            width: parent.width - 24px;
+            visible: root.text == "";
+            text: root.placeholder-text;
+            color: AppTheme.placeholder;
             font-size: root.font-size;
-            single-line: false;
             wrap: word-wrap;
-            enabled: root.enabled;
-            read-only: root.read-only;
-            page-height: editor-scroll.visible-height;
-            edited => { root.edited(self.text); }
-            cursor-position-changed(cursor) => {
-                let line = self.font-metrics.ascent - self.font-metrics.descent;
-                if cursor.y + editor-scroll.content-y < 0px {
-                    editor-scroll.content-y = -cursor.y;
-                } else if cursor.y + line + editor-scroll.content-y > editor-scroll.visible-height {
-                    editor-scroll.content-y = min(0px, editor-scroll.visible-height - cursor.y - line);
+            // A hint, such as person@example.org=FULL_FINGERPRINT, is cut short
+            // where a narrow phone has no room for it, as a field's hint is.
+            overflow: elide;
+        }
+
+        // Longer text scrolls inside the field, and the caret stays in view.
+        editor-scroll := ScrollView {
+            x: 12px;
+            y: 10px;
+            width: parent.width - 24px;
+            height: parent.height - 20px;
+            content-width: self.visible-width;
+            content-height: editor.height;
+
+            editor := TextInput {
+                width: editor-scroll.visible-width;
+                height: max(editor-scroll.visible-height, self.preferred-height);
+                text <=> root.text;
+                color: root.text-color;
+                selection-background-color: AppTheme.accent;
+                selection-foreground-color: white;
+                font-size: root.font-size;
+                single-line: false;
+                wrap: word-wrap;
+                enabled: root.enabled;
+                read-only: root.read-only;
+                page-height: editor-scroll.visible-height;
+                edited => { root.edited(self.text); }
+                cursor-position-changed(cursor) => {
+                    let line = self.font-metrics.ascent - self.font-metrics.descent;
+                    if cursor.y + editor-scroll.content-y < 0px {
+                        editor-scroll.content-y = -cursor.y;
+                    } else if cursor.y + line + editor-scroll.content-y > editor-scroll.visible-height {
+                        editor-scroll.content-y = min(0px, editor-scroll.visible-height - cursor.y - line);
+                    }
                 }
             }
         }
@@ -101,19 +111,28 @@ export component Switch inherits Rectangle {
     width: 38px;
     height: 22px;
     border-radius: self.height / 2;
-    background: root.checked ? AppTheme.accent : AppTheme.control-border;
-    border-width: 0px;
-    opacity: root.enabled ? 1 : 0.45;
-    animate background { duration: 140ms; easing: ease-out; }
 
-    Rectangle {
-        x: root.checked ? parent.width - self.width - 3px : 3px;
-        y: 3px;
-        width: 16px;
-        height: 16px;
-        border-radius: self.width / 2;
-        background: white;
-        animate x { duration: 180ms; easing: spring(0.18); enabled: MotionSettings.movement; }
+    // The track draws the switch and the root stays a plain box. A root with
+    // a shadow, an opacity or an animated color makes Slint copy the whole
+    // control into each of its uses, more than the release build's memory
+    // allows; this way it builds the control once.
+    track := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.checked ? AppTheme.accent : AppTheme.control-border;
+        opacity: root.enabled ? 1 : 0.45;
+        animate background { duration: 140ms; easing: ease-out; }
+
+        Rectangle {
+            x: root.checked ? parent.width - self.width - 3px : 3px;
+            y: 3px;
+            width: 16px;
+            height: 16px;
+            border-radius: self.width / 2;
+            background: white;
+            animate x { duration: 180ms; easing: spring(0.18); enabled: MotionSettings.movement; }
+        }
     }
 
     switch-focus := FocusVisibleScope {
@@ -173,7 +192,6 @@ export component SelectionCheckBox inherits FocusVisibleScope {
 
     width: 32px;
     height: 32px;
-    opacity: root.enabled ? 1 : 0.45;
     focus-on-click: true;
     focus-on-tab-navigation: true;
     accessible-role: checkbox;
@@ -192,41 +210,49 @@ export component SelectionCheckBox inherits FocusVisibleScope {
         reject
     }
 
-    Rectangle {
-        x: (parent.width - 24px) / 2;
-        y: (parent.height - 24px) / 2;
-        width: 24px;
-        height: 24px;
-        border-radius: root.avatar-overlay ? self.width / 2 : LayoutMetrics.small-radius;
-        border-width: root.focus-visible ? 2px : 0px;
-        border-color: AppTheme.accent;
-        background: root.avatar-overlay ? AppTheme.surface.with-alpha(0.72) : transparent;
-        drop-shadow-blur: root.avatar-overlay ? 7px : 0px;
-        drop-shadow-offset-y: root.avatar-overlay ? 1px : 0px;
-        drop-shadow-color: root.avatar-overlay ? #00000038 : transparent;
+    // The checkbox dims here rather than on its root, so Slint builds it once
+    // instead of copying it into each of its uses.
+    content := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        opacity: root.enabled ? 1 : 0.45;
 
         Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: 18px;
-            height: 18px;
-            border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
-            border-width: root.checked || root.indeterminate ? 0px : 1px;
-            border-color: AppTheme.secondary;
-            background: root.checked || root.indeterminate ? AppTheme.accent : AppTheme.input-bg;
+            x: (parent.width - 24px) / 2;
+            y: (parent.height - 24px) / 2;
+            width: 24px;
+            height: 24px;
+            border-radius: root.avatar-overlay ? self.width / 2 : LayoutMetrics.small-radius;
+            border-width: root.focus-visible ? 2px : 0px;
+            border-color: AppTheme.accent;
+            background: root.avatar-overlay ? AppTheme.surface.with-alpha(0.72) : transparent;
+            drop-shadow-blur: root.avatar-overlay ? 7px : 0px;
+            drop-shadow-offset-y: root.avatar-overlay ? 1px : 0px;
+            drop-shadow-color: root.avatar-overlay ? #00000038 : transparent;
 
-            Image {
-                visible: root.checked || root.indeterminate;
+            Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                width: 12px;
-                height: 12px;
-                source: root.indeterminate
-                    ? @image-url("../icons/lucide/outline/dash.svg")
-                    : @image-url("../icons/lucide/outline/check.svg");
-                colorize: white;
-                image-fit: contain;
-                accessible-role: none;
+                width: 18px;
+                height: 18px;
+                border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
+                border-width: root.checked || root.indeterminate ? 0px : 1px;
+                border-color: AppTheme.secondary;
+                background: root.checked || root.indeterminate ? AppTheme.accent : AppTheme.input-bg;
+
+                Image {
+                    visible: root.checked || root.indeterminate;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 12px;
+                    height: 12px;
+                    source: root.indeterminate
+                        ? @image-url("../icons/lucide/outline/dash.svg")
+                        : @image-url("../icons/lucide/outline/check.svg");
+                    colorize: white;
+                    image-fit: contain;
+                    accessible-role: none;
+                }
             }
         }
     }
@@ -258,7 +284,6 @@ export component CheckBox inherits FocusVisibleScope {
 
     preferred-width: 26px + label.preferred-width;
     min-height: max(LayoutMetrics.small-control-height, label.preferred-height);
-    opacity: root.enabled ? 1 : 0.5;
     focus-on-click: true;
     focus-on-tab-navigation: true;
     accessible-role: checkbox;
@@ -274,47 +299,55 @@ export component CheckBox inherits FocusVisibleScope {
         reject
     }
 
-    box := Rectangle {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
-        width: 18px;
-        height: 18px;
-        border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
-        border-width: root.checked ? 0px : 1px;
-        border-color: root.focus-visible ? AppTheme.focus-ring : AppTheme.secondary;
-        background: root.checked ? AppTheme.accent : AppTheme.input-bg;
-        drop-shadow-blur: 2px;
-        drop-shadow-offset-y: 1px;
-        drop-shadow-color: root.checked ? transparent : AppTheme.control-shadow;
-        animate background { duration: 120ms; easing: ease-out; }
+    // The checkbox dims here rather than on its root, so Slint builds it once
+    // instead of copying it into each of its uses.
+    content := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        opacity: root.enabled ? 1 : 0.5;
 
-        Image {
-            visible: root.checked;
-            x: (parent.width - self.width) / 2;
+        box := Rectangle {
+            x: 0px;
             y: (parent.height - self.height) / 2;
-            width: 12px;
-            height: 12px;
-            source: @image-url("../icons/lucide/outline/check.svg");
-            colorize: white;
-            image-fit: contain;
+            width: 18px;
+            height: 18px;
+            border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
+            border-width: root.checked ? 0px : 1px;
+            border-color: root.focus-visible ? AppTheme.focus-ring : AppTheme.secondary;
+            background: root.checked ? AppTheme.accent : AppTheme.input-bg;
+            drop-shadow-blur: 2px;
+            drop-shadow-offset-y: 1px;
+            drop-shadow-color: root.checked ? transparent : AppTheme.control-shadow;
+            animate background { duration: 120ms; easing: ease-out; }
+
+            Image {
+                visible: root.checked;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 12px;
+                height: 12px;
+                source: @image-url("../icons/lucide/outline/check.svg");
+                colorize: white;
+                image-fit: contain;
+                accessible-role: none;
+            }
+            if root.focus-visible : FocusRing {
+                radius: box.border-radius;
+                around-width: box.width;
+                around-height: box.height;
+            }
+        }
+
+        label := Text {
+            x: 26px;
+            width: parent.width - 26px;
+            text: root.text;
+            color: AppTheme.body;
+            font-size: TypeScale.body;
+            vertical-alignment: center;
+            wrap: word-wrap;
             accessible-role: none;
         }
-        if root.focus-visible : FocusRing {
-            radius: box.border-radius;
-            around-width: box.width;
-            around-height: box.height;
-        }
-    }
-
-    label := Text {
-        x: 26px;
-        width: parent.width - 26px;
-        text: root.text;
-        color: AppTheme.body;
-        font-size: TypeScale.body;
-        vertical-alignment: center;
-        wrap: word-wrap;
-        accessible-role: none;
     }
 
     TouchArea {
@@ -410,6 +443,10 @@ export component IconButton inherits Rectangle {
     // toolbar turn this off, so the text keeps the focus and its selection. Tab still
     // reaches them.
     in property <bool> focus-on-click: true;
+    // A floating button lifts off the page with a shadow under its face.
+    in property <length> face-shadow-blur: 0px;
+    in property <length> face-shadow-offset-y: 0px;
+    in property <color> face-shadow-color: transparent;
     callback clicked;
 
     public function pointer-activated() {
@@ -428,12 +465,7 @@ export component IconButton inherits Rectangle {
         : root.ghost
             ? (hit-area.pressed || root.active ? root.active-background : hit-area.has-hover ? root.hover-background : transparent)
             : root.active ? root.active-background : hit-area.has-hover ? root.hover-background : root.idle-background;
-    background: root.fill-color;
     forward-focus: keyboard;
-    border-width: keyboard.focus-visible ? 1px : 0px;
-    border-color: AppTheme.focus-ring;
-    opacity: root.interactive ? 1 : 0.42;
-    animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.tooltip-text;
     accessible-action-default => {
@@ -442,16 +474,34 @@ export component IconButton inherits Rectangle {
         }
     }
 
-    Image {
-        x: (parent.width - root.icon-size) / 2;
-        y: (parent.height - root.icon-size) / 2 + (hit-area.pressed ? 1px : 0px);
-        width: root.icon-size;
-        height: root.icon-size;
-        source: root.icon;
-        colorize: root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color) : root.icon-color;
-        image-fit: contain;
-        accessible-role: none;
-        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
+    // The face draws the control and the root stays a plain box. A root with
+    // a shadow, an opacity or an animated color makes Slint copy the whole
+    // control into each of its uses, more than the release build's memory
+    // allows; this way it builds the control once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.fill-color;
+        border-width: keyboard.focus-visible ? 1px : 0px;
+        border-color: AppTheme.focus-ring;
+        drop-shadow-blur: root.face-shadow-blur;
+        drop-shadow-offset-y: root.face-shadow-offset-y;
+        drop-shadow-color: root.face-shadow-color;
+        opacity: root.interactive ? 1 : 0.42;
+        animate background { duration: 120ms; easing: ease-out; }
+
+        Image {
+            x: (parent.width - root.icon-size) / 2;
+            y: (parent.height - root.icon-size) / 2 + (hit-area.pressed ? 1px : 0px);
+            width: root.icon-size;
+            height: root.icon-size;
+            source: root.icon;
+            colorize: root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color) : root.icon-color;
+            image-fit: contain;
+            accessible-role: none;
+            animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
+        }
     }
 
     keyboard := FocusVisibleScope {
@@ -578,77 +628,87 @@ export component LineEdit inherits Rectangle {
     height: 36px;
     min-width: 80px;
     border-radius: LayoutMetrics.corner-radius;
-    border-width: editor.has-focus || root.outlined || root.invalid ? 1px : 0px;
-    border-color: root.invalid ? AppTheme.destructive
-        : editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
-    background: root.outlined ? AppTheme.input-bg : transparent;
-    drop-shadow-blur: 2px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: root.outlined ? AppTheme.control-shadow : transparent;
-    opacity: root.enabled ? 1 : 0.5;
 
-    Text {
-        x: root.text-inset;
-        width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
+    // The face draws the control and the root stays a plain box. A root with
+    // a shadow, an opacity or an animated color makes Slint copy the whole
+    // control into each of its uses, more than the release build's memory
+    // allows; this way it builds the control once.
+    face := Rectangle {
+        width: parent.width;
         height: parent.height;
-        visible: root.text == "";
-        text: root.placeholder-text;
-        color: AppTheme.placeholder;
-        font-size: TypeScale.body;
-        vertical-alignment: center;
-        overflow: elide;
-    }
+        border-radius: root.border-radius;
+        border-width: editor.has-focus || root.outlined || root.invalid ? 1px : 0px;
+        border-color: root.invalid ? AppTheme.destructive
+            : editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
+        background: root.outlined ? AppTheme.input-bg : transparent;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: root.outlined ? AppTheme.control-shadow : transparent;
+        opacity: root.enabled ? 1 : 0.5;
 
-    editor := TextInput {
-        x: root.text-inset;
-        width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
-        height: parent.height;
-        text <=> root.text;
-        color: AppTheme.heading;
-        selection-background-color: AppTheme.accent;
-        selection-foreground-color: white;
-        font-size: TypeScale.body;
-        single-line: true;
-        vertical-alignment: center;
-        input-type: root.revealed ? InputType.text : root.input-type;
-        accessible-label: root.input-label;
-        enabled: root.enabled;
-        read-only: root.read-only;
-        edited => {
-            root.text = self.text;
-            root.edited(self.text);
+        Text {
+            x: root.text-inset;
+            width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
+            height: parent.height;
+            visible: root.text == "";
+            text: root.placeholder-text;
+            color: AppTheme.placeholder;
+            font-size: TypeScale.body;
+            vertical-alignment: center;
+            overflow: elide;
         }
-        accepted => { root.accepted(self.text); }
-    }
 
-    if root.show-leading-icon : Image {
-        x: 20px - self.width / 2;
-        y: (parent.height - self.height) / 2;
-        width: LayoutMetrics.icon-size;
-        height: LayoutMetrics.icon-size;
-        source: root.leading-icon;
-        colorize: root.leading-icon-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
+        editor := TextInput {
+            x: root.text-inset;
+            width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
+            height: parent.height;
+            text <=> root.text;
+            color: AppTheme.heading;
+            selection-background-color: AppTheme.accent;
+            selection-foreground-color: white;
+            font-size: TypeScale.body;
+            single-line: true;
+            vertical-alignment: center;
+            input-type: root.revealed ? InputType.text : root.input-type;
+            accessible-label: root.input-label;
+            enabled: root.enabled;
+            read-only: root.read-only;
+            edited => {
+                root.text = self.text;
+                root.edited(self.text);
+            }
+            accepted => { root.accepted(self.text); }
+        }
 
-    if root.can-reveal : IconButton {
-        x: parent.width - root.trailing-content-width - self.width - 2px;
-        y: (parent.height - self.height) / 2;
-        icon: root.revealed ? @image-url("../icons/lucide/outline/eye-off.svg") : @image-url("../icons/lucide/outline/eye.svg");
-        icon-size: 16px;
-        icon-color: AppTheme.secondary;
-        ghost: true;
-        hover-background: AppTheme.muted-control-bg;
-        active-background: AppTheme.muted-control-bg;
-        interactive: root.enabled;
-        tooltip-text: root.revealed ? @tr("Hide password") : @tr("Show password");
-        clicked => {
-            root.revealed = !root.revealed;
-            // A click goes back to typing; from the keyboard, focus stays
-            // so the new state is announced.
-            if !self.focus-visible {
-                editor.focus();
+        if root.show-leading-icon : Image {
+            x: 20px - self.width / 2;
+            y: (parent.height - self.height) / 2;
+            width: LayoutMetrics.icon-size;
+            height: LayoutMetrics.icon-size;
+            source: root.leading-icon;
+            colorize: root.leading-icon-color;
+            image-fit: contain;
+            accessible-role: none;
+        }
+
+        if root.can-reveal : IconButton {
+            x: parent.width - root.trailing-content-width - self.width - 2px;
+            y: (parent.height - self.height) / 2;
+            icon: root.revealed ? @image-url("../icons/lucide/outline/eye-off.svg") : @image-url("../icons/lucide/outline/eye.svg");
+            icon-size: 16px;
+            icon-color: AppTheme.secondary;
+            ghost: true;
+            hover-background: AppTheme.muted-control-bg;
+            active-background: AppTheme.muted-control-bg;
+            interactive: root.enabled;
+            tooltip-text: root.revealed ? @tr("Hide password") : @tr("Show password");
+            clicked => {
+                root.revealed = !root.revealed;
+                // A click goes back to typing; from the keyboard, focus stays
+                // so the new state is announced.
+                if !self.focus-visible {
+                    editor.focus();
+                }
             }
         }
     }
@@ -670,9 +730,9 @@ export component FloatingActionButton inherits IconButton {
     icon-size: 22px;
     primary: true;
     tooltip-above: true;
-    drop-shadow-blur: 12px;
-    drop-shadow-offset-y: 4px;
-    drop-shadow-color: #00000040;
+    face-shadow-blur: 12px;
+    face-shadow-offset-y: 4px;
+    face-shadow-color: #00000040;
 }
 
 // A short link to a web page, such as a footer link. Links open in the

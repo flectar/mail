@@ -40,15 +40,6 @@ export component Select inherits Rectangle {
     horizontal-stretch: 1;
     vertical-stretch: 0;
     border-radius: LayoutMetrics.corner-radius;
-    border-width: 1px;
-    border-color: trigger.focus-visible ? AppTheme.focus-ring : AppTheme.input-border;
-    background: !root.enabled ? AppTheme.disabled-bg
-        : touch.has-hover || root.open ? AppTheme.control-bg : AppTheme.input-bg;
-    drop-shadow-blur: 2px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: root.enabled ? AppTheme.control-shadow : transparent;
-    opacity: root.enabled ? 1 : 0.5;
-    animate background { duration: 120ms; easing: ease-out; }
     forward-focus: trigger;
     accessible-role: combobox;
     accessible-enabled: root.enabled;
@@ -150,27 +141,45 @@ export component Select inherits Rectangle {
         around-height: root.height;
     }
 
-    HorizontalLayout {
-        padding-left: LayoutMetrics.field-padding;
-        padding-right: 10px;
-        spacing: 8px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.current-value != "" ? root.current-value : root.placeholder;
-            color: root.current-value != "" ? AppTheme.heading : AppTheme.placeholder;
-            font-size: TypeScale.body;
-            vertical-alignment: center;
-            overflow: elide;
-            accessible-role: none;
-        }
-        Image {
-            width: 16px;
-            height: 16px;
-            y: (parent.height - self.height) / 2;
-            source: @image-url("../icons/lucide/outline/chevron-down.svg");
-            colorize: AppTheme.secondary;
-            image-fit: contain;
-            accessible-role: none;
+    // The face draws the select and the root stays a plain box. A root with a
+    // shadow, an opacity or an animated color makes Slint copy the whole select,
+    // list and all, into each of its uses; this way it builds it once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: trigger.focus-visible ? AppTheme.focus-ring : AppTheme.input-border;
+        background: !root.enabled ? AppTheme.disabled-bg
+            : touch.has-hover || root.open ? AppTheme.control-bg : AppTheme.input-bg;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: root.enabled ? AppTheme.control-shadow : transparent;
+        opacity: root.enabled ? 1 : 0.5;
+        animate background { duration: 120ms; easing: ease-out; }
+
+        HorizontalLayout {
+            padding-left: LayoutMetrics.field-padding;
+            padding-right: 10px;
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.current-value != "" ? root.current-value : root.placeholder;
+                color: root.current-value != "" ? AppTheme.heading : AppTheme.placeholder;
+                font-size: TypeScale.body;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+            Image {
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("../icons/lucide/outline/chevron-down.svg");
+                colorize: AppTheme.secondary;
+                image-fit: contain;
+                accessible-role: none;
+            }
         }
     }
 

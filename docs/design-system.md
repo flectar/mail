@@ -112,3 +112,8 @@ their title's line, with a description under it.
   fine.
 - Don't give a view its own colors, corners or control heights. Add a value to
   `ui/design-system.slint` when a control needs one.
+- Don't put a shadow, an opacity, `visible` or an animated color on the root
+  of a control. Slint then copies the whole control into each place it's used,
+  which grew the generated UI by a quarter and ran the release build out of
+  memory. Draw the control on an inner face instead, as `Button`, `LineEdit` and
+  the others do, so Slint builds it once.

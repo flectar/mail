@@ -52,21 +52,6 @@ export component Button inherits Rectangle {
     private property <color> foreground: root.destructive ? white
         : root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color)
         : AppTheme.heading;
-    background: root.filled ? @linear-gradient(180deg, root.fill-color.brighter(6%) 0%, root.fill-color 100%)
-        : root.selected || button-area.pressed ? @linear-gradient(180deg, root.fill-color 0%, root.fill-color 100%)
-        : root.hovered ? @linear-gradient(180deg, AppTheme.control-hover-top 0%, AppTheme.control-hover-bottom 100%)
-        : @linear-gradient(180deg, AppTheme.control-face-top 0%, AppTheme.control-face-bottom 100%);
-    border-width: 1px;
-    border-color: keyboard.focus-visible ? AppTheme.focus-ring
-        : root.filled ? root.fill-color.darker(14%) : AppTheme.control-edge;
-    drop-shadow-blur: root.filled ? 3px : 2px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: !root.enabled || root.selected || button-area.pressed ? transparent
-        : root.primary ? AppTheme.primary-shadow
-        : root.destructive ? AppTheme.destructive-shadow : AppTheme.control-shadow;
-    opacity: root.enabled ? 1 : 0.5;
-    // Every face is a two-stop gradient, so a change fades stop by stop.
-    animate background, border-color, drop-shadow-color { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.text;
     accessible-checkable: root.checkable;
@@ -77,40 +62,65 @@ export component Button inherits Rectangle {
         }
     }
 
+    // The face draws the button and the root stays a plain box. A root with a
+    // shadow, an opacity or an animated color makes Slint copy the whole
+    // button into each of its hundreds of uses, more than the release build's
+    // memory allows; this way it builds the button once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.filled ? @linear-gradient(180deg, root.fill-color.brighter(6%) 0%, root.fill-color 100%)
+            : root.selected || button-area.pressed ? @linear-gradient(180deg, root.fill-color 0%, root.fill-color 100%)
+            : root.hovered ? @linear-gradient(180deg, AppTheme.control-hover-top 0%, AppTheme.control-hover-bottom 100%)
+            : @linear-gradient(180deg, AppTheme.control-face-top 0%, AppTheme.control-face-bottom 100%);
+        border-width: 1px;
+        border-color: keyboard.focus-visible ? AppTheme.focus-ring
+            : root.filled ? root.fill-color.darker(14%) : AppTheme.control-edge;
+        drop-shadow-blur: root.filled ? 3px : 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: !root.enabled || root.selected || button-area.pressed ? transparent
+            : root.primary ? AppTheme.primary-shadow
+            : root.destructive ? AppTheme.destructive-shadow : AppTheme.control-shadow;
+        opacity: root.enabled ? 1 : 0.5;
+        // Every face is a two-stop gradient, so a change fades stop by stop.
+        animate background, border-color, drop-shadow-color { duration: 120ms; easing: ease-out; }
+
+        label-row := HorizontalBox {
+            y: button-area.pressed ? 1px : 0px;
+            animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
+            padding-left: LayoutMetrics.button-padding;
+            padding-right: LayoutMetrics.button-padding;
+            spacing: 7px;
+            alignment: center;
+            cross-axis-alignment: center;
+
+            if root.has-icon : Image {
+                width: root.icon-size;
+                height: root.icon-size;
+                source: root.icon;
+                colorize: root.colorize-icon ? (root.primary || root.destructive ? root.foreground : AppTheme.body) : transparent;
+                image-fit: contain;
+                accessible-role: none;
+            }
+
+            Text {
+                text: root.text;
+                color: root.foreground;
+                font-size: TypeScale.body;
+                font-weight: 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: root.label-overflow;
+                wrap: root.wrap-label ? word-wrap : no-wrap;
+            }
+        }
+    }
+
     if keyboard.focus-visible : FocusRing {
         radius: root.border-radius;
         around-width: root.width;
         around-height: root.height;
-    }
-
-    label-row := HorizontalBox {
-        y: button-area.pressed ? 1px : 0px;
-        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
-        padding-left: LayoutMetrics.button-padding;
-        padding-right: LayoutMetrics.button-padding;
-        spacing: 7px;
-        alignment: center;
-        cross-axis-alignment: center;
-
-        if root.has-icon : Image {
-            width: root.icon-size;
-            height: root.icon-size;
-            source: root.icon;
-            colorize: root.colorize-icon ? (root.primary || root.destructive ? root.foreground : AppTheme.body) : transparent;
-            image-fit: contain;
-            accessible-role: none;
-        }
-
-        Text {
-            text: root.text;
-            color: root.foreground;
-            font-size: TypeScale.body;
-            font-weight: 500;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: root.label-overflow;
-            wrap: root.wrap-label ? word-wrap : no-wrap;
-        }
     }
 
     keyboard := FocusVisibleScope {

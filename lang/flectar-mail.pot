@@ -5284,28 +5284,28 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
-#: ui/components/controls.slint:126 ui/dialogs/settings-dialog.slint:1681
+#: ui/components/controls.slint:145 ui/dialogs/settings-dialog.slint:1681
 msgid "On"
 msgstr ""
 
-#: ui/components/controls.slint:126 ui/dialogs/settings-dialog.slint:881
-#: ui/components/controls.slint:126 ui/dialogs/settings-dialog.slint:881 ui/dialogs/settings-dialog.slint:1681
+#: ui/components/controls.slint:145 ui/dialogs/settings-dialog.slint:881
+#: ui/components/controls.slint:145 ui/dialogs/settings-dialog.slint:881 ui/dialogs/settings-dialog.slint:1681
 msgid "Off"
 msgstr ""
 
-#: ui/components/controls.slint:180 ui/views/mail-list-pane.slint:960
+#: ui/components/controls.slint:198 ui/views/mail-list-pane.slint:960
 msgid "Clear selection"
 msgstr ""
 
-#: ui/components/controls.slint:180
+#: ui/components/controls.slint:198
 msgid "Select"
 msgstr ""
 
-#: ui/components/controls.slint:645
+#: ui/components/controls.slint:704
 msgid "Hide password"
 msgstr ""
 
-#: ui/components/controls.slint:645
+#: ui/components/controls.slint:704
 msgid "Show password"
 msgstr ""
 
