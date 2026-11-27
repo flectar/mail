@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 14:26+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Danish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/da/>\n"
@@ -1780,13 +1780,11 @@ msgstr "Kunne ikke afbryde CardDAV: {}"
 
 #: ui/app.slint:576
 msgid "Copies saved."
-msgstr ""
+msgstr "Kopier gemt."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save notifications: {}"
 msgid "Could not save the copies: {}"
-msgstr "Kunne ikke gemme notifikationer: {}"
+msgstr "Kunne ikke gemme kopierne: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -2989,8 +2987,8 @@ msgid ""
 "letter, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
 msgstr ""
 "vedhæft, vedhæftet, vedhæfter, vedhæftet fil, vedhæftninger, vedlagt, bilag, "
-"cv, motiveret ansøgning, "
-"ansøgning, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
+"cv, motiveret ansøgning, følgebrev, .pdf, .doc, .docx, .xls, .xlsx, .ppt, "
+".pptx, .odt, .ods, .odp, .rtf, .zip"
 
 #: ui/app.slint:893
 msgid "Email template inserted, but its usage could not be saved: {}"
@@ -3500,7 +3498,7 @@ msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Adresser, der får en kopi (valgfrit)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3508,19 +3506,19 @@ msgstr "Bcc"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Adresser, der får en skjult kopi (valgfrit)"
 
 #: ui/components/account-mail-preferences.slint:290
 msgid "Cc {}"
-msgstr ""
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "Bcc {}"
-msgstr ""
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Bcc {} fra din udbyder"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3611,10 +3609,8 @@ msgid "Refresh sender identities"
 msgstr "Opdatér afsenderidentiteter"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Gem afsenderadresse"
+msgstr "Søg afsenderadresser"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3623,13 +3619,11 @@ msgstr "Redigér"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "Viser {} af {} adresser. Søg for at finde de andre."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Ingen matchende labels"
+msgstr "Ingen matchende adresser"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3642,7 +3636,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Kopier af e-mail fra {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3657,6 +3651,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Din udbyder angiver navnet og svaradressen for denne adresse. E-mails, du "
+"skriver fra den, starter også med disse kopier."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3703,7 +3699,7 @@ msgstr "Hvor svar skal sendes (valgfri)"
 
 #: ui/components/account-mail-preferences.slint:415
 msgid "Save copies"
-msgstr ""
+msgstr "Gem kopier"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3726,13 +3722,15 @@ msgstr "Annullér"
 
 #: ui/components/account-mail-preferences.slint:428
 msgid "Automatic Cc and Bcc"
-msgstr ""
+msgstr "Automatisk Cc og Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Hver besked, du skriver fra denne konto, starter med disse kopier, og viser "
+"dem, så du kan fjerne dem. Hver afsenderadresse kan tilføje sine egne."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5172,10 +5170,8 @@ msgid "Attach files…"
 msgstr "Vedhæft filer…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Send nu"
+msgstr "Send fra"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6199,14 +6195,12 @@ msgstr ""
 "denne enhed."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "Fra eller til et navn eller en adresse"
+msgstr "Søg efter navn eller adresse"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "Viser {} af {} adresser. Skriv mere for at indsnævre dem."
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -9918,7 +9912,7 @@ msgid ""
 "Show and sync only the folders you subscribed to on the server, plus Inbox "
 "and the folders mail is filed into."
 msgstr ""
-"Vis og synkronisér kun de mapper, du abonnerede på på serveren, plus "
+"Vis og synkronisér kun de mapper på serveren, du abonnerede på, samt "
 "Indbakke og de mapper, e-mail gemmes i."
 
 #: ui/dialogs/settings-dialog.slint:3178 ui/folder-roles.slint:132

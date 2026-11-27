@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 11:22+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Russian <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ru/>\n"
@@ -1798,16 +1798,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "Не удалось отключить CardDAV: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "Промпты сохранены."
+msgstr "Копии сохранены."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "Не удалось сохранить файл: {}"
+msgstr "Не удалось сохранить копии: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -3554,7 +3550,7 @@ msgstr "Копия"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Адреса, получающие копию (необязательно)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3562,23 +3558,19 @@ msgstr "Скрытая копия"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Адреса, получающие скрытую копию (необязательно)"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "Синхронизировать {}"
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "Синхронизировать {}"
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Bcc {} от вашего провайдера"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3670,10 +3662,8 @@ msgid "Refresh sender identities"
 msgstr "Обновить данные отправителей"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Сохранить адрес отправителя"
+msgstr "Поиск адресов отправителя"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3682,13 +3672,11 @@ msgstr "Изменить"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "Показано {} из {} адресов. Найдите остальные с помощью поиска."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Нет подходящих меток"
+msgstr "Нет подходящих адресов"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3701,7 +3689,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Копии писем от {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3716,6 +3704,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Ваш провайдер задаёт имя и адрес ответа для этого адреса. Письма, написанные "
+"с него, тоже начинаются с этих копий."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3761,10 +3751,8 @@ msgid "Where replies should go (optional)"
 msgstr "Куда отправлять ответы (необязательно)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "Копии отправленных писем"
+msgstr "Сохранить копии"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3786,16 +3774,17 @@ msgid "Cancel"
 msgstr "Отмена"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "Автоматически"
+msgstr "Автоматические Cc и Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Каждое письмо, написанное с этого аккаунта, начинается с этих копий, и они "
+"отображаются, чтобы вы могли их убрать. Каждый адрес отправителя может "
+"добавить свои."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5240,10 +5229,8 @@ msgid "Attach files…"
 msgstr "Прикрепить файлы…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Отправить сейчас"
+msgstr "Отправить с"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6270,14 +6257,12 @@ msgstr ""
 "на этом устройстве."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "От кого или кому имя или адрес"
+msgstr "Поиск по имени или адресу"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "Показано {} из {} адресов. Введите больше, чтобы сузить список."
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -8940,9 +8925,9 @@ msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
 msgstr ""
-"синхронизация устройства телефон компьютер сопряжение qr код код "
-"восстановления шифрование резервная копия настройка сервер подписка оплата "
-"пробный период тариф цена активация пароли данные для входа"
+"синхронизация устройства телефон компьютер сопряжение qr код восстановления "
+"шифрование резервная копия настройка сервер подписка оплата пробный период "
+"тариф цена активация пароли данные для входа"
 
 #: ui/dialogs/settings-dialog.slint:929
 msgid ""
@@ -8965,7 +8950,7 @@ msgid ""
 "translation translate languages foreign deepl libretranslate ai model ollama "
 "lm studio always never"
 msgstr ""
-"перевод перевод языки иностранный deepl libretranslate ии модель ollama lm "
+"перевод перевести языки иностранный deepl libretranslate ии модель ollama lm "
 "studio всегда никогда"
 
 #: ui/dialogs/settings-dialog.slint:935
@@ -10581,7 +10566,7 @@ msgstr "Благодарности"
 
 #: ui/dialogs/settings-dialog.slint:4036
 msgid "Built by Flectar with help from the open-source community."
-msgstr "Разработано Flectar при участии сообщества открытого ПО."
+msgstr "Разработано Flectar при участии сообщества открытого исходного кода."
 
 #: ui/dialogs/settings-dialog.slint:4045
 msgid "Flectar"
@@ -10593,7 +10578,7 @@ msgstr "Сайт компании"
 
 #: ui/dialogs/settings-dialog.slint:4056
 msgid "Open-source contributors"
-msgstr "Участники разработки открытого ПО"
+msgstr "Участники разработки открытого исходного кода"
 
 #: ui/dialogs/settings-dialog.slint:4057
 msgid "Meet the people who have contributed on GitHub"

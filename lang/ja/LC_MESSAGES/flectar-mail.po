@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 12:52+0000\n"
-"Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
 "Language: ja\n"
@@ -1786,16 +1786,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV の接続を解除できませんでした：{}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "プロンプトを保存しました。"
+msgstr "コピーを保存しました。"
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "ファイルを保存できませんでした: {}"
+msgstr "コピーを保存できませんでした: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -2809,7 +2805,7 @@ msgstr "このメールの送信元アカウントを選択してください。
 
 #: ui/app.slint:855
 msgid "Choose a verified sender identity for this message."
-msgstr "このメールの検証済み差出人 ID を選択してください。"
+msgstr "このメールの検証済み差出人を選択してください。"
 
 #: ui/app.slint:856
 msgid "Connect an account before saving or sending mail."
@@ -3468,7 +3464,7 @@ msgstr "CC"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "コピーを受信するアドレス（省略可）"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3476,23 +3472,19 @@ msgstr "BCC"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "非表示のコピーを受信するアドレス（省略可）"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "{} を同期"
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "{} を同期"
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "プロバイダーによる Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3584,10 +3576,8 @@ msgid "Refresh sender identities"
 msgstr "差出人情報のリストを更新"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "差出人情報を保存"
+msgstr "送信アドレスを検索"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3597,24 +3587,24 @@ msgstr "編集"
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
 msgstr ""
+"{} 件中 {} 件のアドレスを表示しています。検索すると他のアドレスも見つかります"
+"。"
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "一致するラベルはありません"
+msgstr "一致するアドレスはありません"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
-"送信できるアドレスは Gmail が決定します。Gmail の設定の「アカウント」›「メー"
-"ルの送信元」でアドレスを追加してから、差出人 ID を更新してください。"
+"送信できるアドレスは Gmail が決定します。Gmail の設定の「アカウント」›「"
+"メールの送信元」でアドレスを追加してから、差出人 を更新してください。"
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "{} からのメールのコピー"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3629,6 +3619,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"このアドレスの名前と返信先アドレスはプロバイダーが設定します。このアドレスか"
+"ら書くメールにもこれらのコピーが最初から付きます。"
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3674,10 +3666,8 @@ msgid "Where replies should go (optional)"
 msgstr "返信を受け取るメールアドレス（任意）"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "送信済みメールのコピー"
+msgstr "コピーを保存"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3699,16 +3689,16 @@ msgid "Cancel"
 msgstr "キャンセル"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "自動"
+msgstr "自動 Cc と Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"このアカウントから書くすべてのメッセージにはこれらのコピーが最初から付き、削"
+"除できるように表示されます。送信アドレスごとに独自のコピーを追加できます。"
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5022,7 +5012,7 @@ msgstr "差出人"
 
 #: ui/components/email-composer.slint:482
 msgid "Verified sender identity"
-msgstr "検証済みの差出人 ID"
+msgstr "検証済みの差出人"
 
 #: ui/components/email-composer.slint:631
 msgid "Write your message…"
@@ -5141,10 +5131,8 @@ msgid "Attach files…"
 msgstr "ファイルを添付…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "今すぐ送信"
+msgstr "送信元"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -5772,7 +5760,7 @@ msgstr "CC"
 #: ui/components/rule-editor.slint:17
 msgctxt "rule field"
 msgid "To or Cc"
-msgstr "宛先または CC"
+msgstr "宛先または Cc"
 
 #: ui/components/rule-editor.slint:18
 msgctxt "rule field"
@@ -6166,14 +6154,12 @@ msgstr ""
 "結果の最後の「サーバーで検索」で、このデバイスにないメールを検索します。"
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "差出人または宛先の名前やアドレス"
+msgstr "名前またはアドレスで検索"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "{} 件中 {} 件のアドレスを表示しています。入力を増やすと絞り込めます。"
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -7937,10 +7923,10 @@ msgid ""
 "a Flectar Mail backup, and mail from Thunderbird or saved mail files. "
 "Passwords are never imported: you sign in to each account afterward."
 msgstr ""
-"Thunderbird、Thunderbird for Android、K-9 Mail、または Flectar Mail のバック"
-"アップからアカウントを、Thunderbird または保存されたメールファイルからメール"
-"を取り込みます。パスワードはインポートされません。後で各アカウントにサインイ"
-"ンしてください。"
+"Thunderbird（デスクトップ版と Android 版）、K-9 Mail、または Flectar Mail の"
+"バックアップからアカウントを、Thunderbird または保存されたメールファイルから"
+"メールを取り込みます。パスワードはインポートされません。後で各アカウントに"
+"サインインしてください。"
 
 #: ui/dialogs/import-dialog.slint:497
 msgid "Thunderbird on this device"
@@ -8789,9 +8775,10 @@ msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
 msgstr ""
-"同期 デバイス スマートフォン コンピューター ペアリング QR コード リカバリー"
-"コード 暗号化 バックアップ セットアップ サーバー サブスクリプション 請求 トラ"
-"イアル プラン 価格 コード利用 パスワード サインイン"
+"同期 デバイス スマートフォン コンピューター ペアリング qr コード "
+"リカバリーコード 暗号化 バックアップ セットアップ サーバー "
+"サブスクリプション 請求 トライアル プラン 価格 コード利用 パスワード "
+"サインイン"
 
 #: ui/dialogs/settings-dialog.slint:929
 msgid ""
@@ -8814,15 +8801,14 @@ msgstr ""
 msgid ""
 "translation translate languages foreign deepl libretranslate ai model ollama "
 "lm studio always never"
-msgstr ""
-"翻訳 言語 外国語 DeepL LibreTranslate AI モデル Ollama LM Studio 常に しない"
+msgstr "翻訳 言語 外国語 DeepL LibreTranslate ai モデル Ollama lm Studio 常に しない"
 
 #: ui/dialogs/settings-dialog.slint:935
 msgid ""
 "ai artificial intelligence assistant model server ollama lm studio openai "
 "summary summarize replies writing proofread prompts"
 msgstr ""
-"AI 人工知能 アシスタント モデル サーバー Ollama LM Studio OpenAI 要約 返信 作"
+"ai 人工知能 アシスタント モデル サーバー Ollama lm Studio Openai 要約 返信 作"
 "文 校正 プロンプト"
 
 #: ui/dialogs/settings-dialog.slint:937
@@ -8859,15 +8845,15 @@ msgid ""
 "network proxy socks http connect internet connection firewall tor vpn office "
 "no proxy"
 msgstr ""
-"ネットワーク プロキシ SOCKS HTTP 接続 インターネット ファイアウォール Tor "
-"VPN オフィス プロキシなし"
+"ネットワーク プロキシ socks http 接続 インターネット ファイアウォール Tor "
+"vpn オフィス プロキシなし"
 
 #: ui/dialogs/settings-dialog.slint:945
 msgid ""
 "ai agents assistant local model llm mcp model context protocol automation "
 "connected apps access activity"
 msgstr ""
-"AI エージェント アシスタント ローカルモデル LLM MCP Model Context Protocol 自"
+"ai エージェント アシスタント ローカルモデル llm mcp Model Context Protocol 自"
 "動化 接続アプリ アクセス アクティビティ"
 
 #: ui/dialogs/settings-dialog.slint:947
@@ -10604,8 +10590,8 @@ msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
 msgstr ""
-"Proton Bridge：Bridge に表示されるローカルサーバー、ポート、パスワードを使用"
-"し、暗号化設定も Bridge に合わせてください。"
+"Proton Bridge：表示されるローカルサーバー、ポート、パスワードを使用し、暗号化"
+"設定も Bridge に合わせてください。"
 
 #: ui/dialogs/settings-dialog.slint:4541
 msgid "Save account"

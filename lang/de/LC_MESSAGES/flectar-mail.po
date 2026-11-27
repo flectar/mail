@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 11:57+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
 "mail/de/>\n"
@@ -577,7 +577,7 @@ msgstr "MMMM y"
 #: ui/app.slint:232
 msgctxt "date pattern (CLDR): first date of a range within one month"
 msgid "MMMM d"
-msgstr "d."
+msgstr "d. MMMM"
 
 #: ui/app.slint:233
 msgctxt "date pattern (CLDR): last date of a range within one month"
@@ -1816,16 +1816,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV konnte nicht getrennt werden: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "Prompts gespeichert."
+msgstr "Kopien gespeichert."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "Die Datei konnte nicht gespeichert werden: {}"
+msgstr "Kopien konnten nicht gespeichert werden: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -2728,7 +2724,7 @@ msgstr "Entwurf konnte nicht geöffnet werden: {}"
 
 #: ui/app.slint:815
 msgid "Could not open draft: invalid account identifier"
-msgstr "Entwurf konnte nicht geöffnet werden: ungültige Konto-ID"
+msgstr "Entwurf konnte nicht geöffnet werden: ungültige Konto-Kennung"
 
 #: ui/app.slint:816
 msgid "Connected account"
@@ -2749,7 +2745,7 @@ msgstr "Auf diesem Gerät"
 
 #: ui/app.slint:820
 msgid "Could not open composer: invalid account identifier"
-msgstr "Verfassen-Fenster konnte nicht geöffnet werden: ungültige Konto-ID"
+msgstr "Verfassen-Fenster konnte nicht geöffnet werden: ungültige Konto-Kennung"
 
 #. Reply and forward quotation headers, written into the draft.
 #: ui/app.slint:826
@@ -3569,7 +3565,7 @@ msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Adressen, die eine Kopie erhalten (optional)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3577,23 +3573,19 @@ msgstr "Bcc"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Adressen, die eine versteckte Kopie erhalten (optional)"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "{} synchronisieren"
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "{} synchronisieren"
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Bcc {} von Ihrem Anbieter"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3687,10 +3679,8 @@ msgid "Refresh sender identities"
 msgstr "Absenderidentitäten aktualisieren"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Absenderadresse speichern"
+msgstr "Absenderadressen durchsuchen"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3700,12 +3690,11 @@ msgstr "Bearbeiten"
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
 msgstr ""
+"Es werden {} von {} Adressen angezeigt. Suchen Sie, um die anderen zu finden."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Keine passenden Labels"
+msgstr "Keine übereinstimmenden Adressen"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3718,7 +3707,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Kopien von E-Mails von {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3733,6 +3722,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Ihr Anbieter legt den Namen und die Antwortadresse dieser Adresse fest. E-"
+"Mails, die Sie von ihr schreiben, beginnen ebenfalls mit diesen Kopien."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3779,10 +3770,8 @@ msgid "Where replies should go (optional)"
 msgstr "Wohin Antworten gehen sollen (optional)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "Gesendete Kopien"
+msgstr "Kopien speichern"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3804,16 +3793,17 @@ msgid "Cancel"
 msgstr "Abbrechen"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "Automatisch"
+msgstr "Automatisches Cc und Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Jede Nachricht, die Sie von diesem Konto schreiben, beginnt mit diesen "
+"Kopien und zeigt sie an, damit Sie sie entfernen können. Jede "
+"Absenderadresse kann eigene hinzufügen."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5265,10 +5255,8 @@ msgid "Attach files…"
 msgstr "Dateien anhängen…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Jetzt senden"
+msgstr "Senden von"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6301,14 +6289,13 @@ msgstr ""
 "diesem Gerät sind."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "Von oder an einen Namen oder eine Adresse"
+msgstr "Nach Name oder Adresse suchen"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgstr ""
+"Es werden {} von {} Adressen angezeigt. Tippen Sie mehr, um sie einzugrenzen."
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -8960,7 +8947,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:919
 msgid "sending undo send delay take back"
-msgstr "Senden Senden rückgängig machen Verzögerung zurückholen"
+msgstr "senden rückgängig machen senden verzögerung zurückholen"
 
 #: ui/dialogs/settings-dialog.slint:919
 msgid ""
@@ -8992,15 +8979,15 @@ msgid ""
 "accounts profiles personal work colors providers gmail outlook imap pop3 "
 "jmap caldav carddav mail history server oauth security signatures"
 msgstr ""
-"Konten Profile privat Arbeit Farben Anbieter Gmail Outlook IMAP POP3 JMAP "
-"CalDAV CardDAV E-Mail Verlauf Server OAuth Sicherheit Signaturen"
+"Konten Profile privat Arbeit Farben Anbieter Gmail Outlook imap pop3 jmap "
+"Caldav Carddav E-Mail Verlauf Server oauth Sicherheit Signaturen"
 
 #: ui/dialogs/settings-dialog.slint:927
 msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
 msgstr ""
-"Synchronisierung Geräte Telefon Computer Koppeln QR-Code "
+"Synchronisierung Geräte Telefon Computer Koppeln qr-Code "
 "Wiederherstellungscode verschlüsselt Sicherung Einrichtung Server Abonnement "
 "Abrechnung Testphase Tarif Preis einlösen Passwörter Anmeldungen"
 
@@ -9026,15 +9013,15 @@ msgid ""
 "translation translate languages foreign deepl libretranslate ai model ollama "
 "lm studio always never"
 msgstr ""
-"Übersetzung übersetzen Sprachen fremd DeepL LibreTranslate KI Modell Ollama "
-"LM Studio immer nie"
+"Übersetzung übersetzen Sprachen fremd DeepL LibreTranslate ki Modell Ollama "
+"lm Studio immer nie"
 
 #: ui/dialogs/settings-dialog.slint:935
 msgid ""
 "ai artificial intelligence assistant model server ollama lm studio openai "
 "summary summarize replies writing proofread prompts"
 msgstr ""
-"KI künstliche Intelligenz Assistent Modell Server Ollama LM Studio OpenAI "
+"ki künstliche Intelligenz Assistent Modell Server Ollama lm Studio Openai "
 "Zusammenfassung zusammenfassen Antworten Verfassen Korrekturlesen Prompts"
 
 #: ui/dialogs/settings-dialog.slint:937
@@ -9067,7 +9054,7 @@ msgid ""
 "network proxy socks http connect internet connection firewall tor vpn office "
 "no proxy"
 msgstr ""
-"Netzwerk Proxy SOCKS HTTP Verbindung Internet Firewall Tor VPN Büro kein "
+"Netzwerk Proxy socks http Verbindung Internet Firewall Tor vpn Büro kein "
 "Proxy"
 
 #: ui/dialogs/settings-dialog.slint:945
@@ -9075,7 +9062,7 @@ msgid ""
 "ai agents assistant local model llm mcp model context protocol automation "
 "connected apps access activity"
 msgstr ""
-"KI Agenten Assistent lokales Modell LLM MCP Model Context Protocol "
+"ki Agenten Assistent lokales Modell llm mcp Model Context Protocol "
 "Automatisierung verbundene Apps Zugriff Aktivität"
 
 #: ui/dialogs/settings-dialog.slint:947

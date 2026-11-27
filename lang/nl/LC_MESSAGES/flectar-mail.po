@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 12:52+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Dutch <https://translate.flectar.com/projects/flectar-mail/"
 "mail/nl/>\n"
@@ -1567,7 +1567,7 @@ msgstr "Kon sluitgedrag niet opslaan: {}"
 
 #: ui/app.slint:517
 msgid "Flectar Mail will start when you sign in."
-msgstr "Flectar Mail wordt gestart wanneer je je aanmeldt."
+msgstr "Flectar Mail wordt gestart wanneer je inlogt."
 
 #: ui/app.slint:518
 msgid "Flectar Mail is now your default email app."
@@ -1587,7 +1587,7 @@ msgstr "Kon de standaard e-mailapp niet wijzigen: {}"
 
 #: ui/app.slint:522
 msgid "Flectar Mail will no longer start when you sign in."
-msgstr "Flectar Mail wordt niet langer gestart wanneer je je aanmeldt."
+msgstr "Flectar Mail wordt niet langer gestart wanneer je inlogt."
 
 #: ui/app.slint:523
 msgid "Could not change startup behavior: {}"
@@ -1799,16 +1799,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "Kon CardDAV-verbinding niet verbreken: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Profile saved."
 msgid "Copies saved."
-msgstr "Profiel opgeslagen."
+msgstr "Kopieën opgeslagen."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save theme: {}"
 msgid "Could not save the copies: {}"
-msgstr "Kon thema niet opslaan: {}"
+msgstr "Kon de kopieën niet opslaan: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -2888,7 +2884,7 @@ msgstr "Bericht is niet verzonden: {} Je concept is bewaard."
 
 #: ui/app.slint:863
 msgid "Draft saved locally (#{})."
-msgstr "Concept lokaal opgeslagen (#{})"
+msgstr "Concept lokaal opgeslagen (#{})."
 
 #: ui/app.slint:864
 msgid "Compose failed: {}"
@@ -3541,7 +3537,7 @@ msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Adressen die een kopie ontvangen (optioneel)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3549,19 +3545,19 @@ msgstr "Bcc"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Adressen die een verborgen kopie ontvangen (optioneel)"
 
 #: ui/components/account-mail-preferences.slint:290
 msgid "Cc {}"
-msgstr ""
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "Bcc {}"
-msgstr ""
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Bcc {} van je provider"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3655,10 +3651,8 @@ msgid "Refresh sender identities"
 msgstr "Afzenderidentiteiten vernieuwen"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Afzenderadres opslaan"
+msgstr "Verzenderadressen zoeken"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3667,13 +3661,11 @@ msgstr "Bewerken"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "{} van {} adressen worden weergegeven. Zoek om de andere te vinden."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Geen overeenkomende labels"
+msgstr "Geen overeenkomende adressen"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3686,7 +3678,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Kopieën van e-mail van {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3701,6 +3693,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Je provider stelt de naam en het antwoordadres van dit adres in. E-mails die "
+"je vanaf dit adres schrijft, beginnen ook met deze kopieën."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3717,8 +3711,8 @@ msgid ""
 "last message."
 msgstr ""
 "Voeg een alias of een ander adres toe waarmee je mailserver laat verzenden. "
-"De server bepaalt wanneer je verzendt; Flectar Mail toont of het het laatste "
-"bericht heeft geaccepteerd."
+"De server bepaalt wanneer je verzendt; Flectar Mail toont of het laatste "
+"bericht is geaccepteerd."
 
 #: ui/components/account-mail-preferences.slint:406
 #: ui/dialogs/settings-dialog.slint:4447 ui/views/onboarding-view.slint:287
@@ -3746,10 +3740,8 @@ msgid "Where replies should go (optional)"
 msgstr "Waar antwoorden naartoe moeten gaan (optioneel)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Save profile"
 msgid "Save copies"
-msgstr "Profiel opslaan"
+msgstr "Kopieën opslaan"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3772,13 +3764,16 @@ msgstr "Annuleren"
 
 #: ui/components/account-mail-preferences.slint:428
 msgid "Automatic Cc and Bcc"
-msgstr ""
+msgstr "Automatische Cc en Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Elk bericht dat je vanaf dit account schrijft, begint met deze kopieën en "
+"toont ze, zodat je ze kunt verwijderen. Elk afzenderadres kan eigen kopieën "
+"toevoegen."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -4325,8 +4320,8 @@ msgstr ""
 #: ui/components/app-icon-picker.slint:117
 msgid "Some desktops update the launcher icon after you sign in again."
 msgstr ""
-"Sommige bureaubladen werken het starterpictogram pas bij nadat je je opnieuw "
-"hebt aangemeld."
+"Sommige bureaubladen werken het starterpictogram pas bij nadat je opnieuw "
+"inlogt."
 
 #: ui/components/calendar-agenda.slint:39
 msgid "Filter calendars · {} hidden"
@@ -5226,10 +5221,8 @@ msgid "Attach files…"
 msgstr "Bestanden toevoegen…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Nu verzenden"
+msgstr "Verzenden vanaf"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6257,14 +6250,12 @@ msgstr ""
 "apparaat staat."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "Van of aan een naam of adres"
+msgstr "Zoeken op naam of adres"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "{} van {} adressen worden weergegeven. Typ meer om ze te beperken."
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -7174,7 +7165,7 @@ msgstr "Die code is al gebruikt."
 
 #: ui/device-sync.slint:1134
 msgid "That code has expired. Ask whoever gave it to you for a new one."
-msgstr "Die code is verlopen. Vraag degene die die je gaf om een nieuwe."
+msgstr "Die code is verlopen. Vraag degene die je de code gaf om een nieuwe."
 
 #: ui/device-sync.slint:1135
 msgid "Could not redeem the code: {}"
@@ -7204,7 +7195,7 @@ msgid ""
 "you can reach, such as a password manager or a USB drive."
 msgstr ""
 "Iedereen die deze woorden heeft, kan je Flectar Mail Sync herstellen, met de "
-"accounts, wachtwoorden en aanmeldingen die die bevat. Bewaar dit bestand "
+"accounts, wachtwoorden en aanmeldingen die erin zitten. Bewaar dit bestand "
 "ergens waar alleen jij bij kan, zoals een wachtwoordbeheerder of een USB-"
 "stick."
 
@@ -7753,7 +7744,7 @@ msgid ""
 msgstr ""
 "De uitgaande server meldt zich aan als {}. Als diens wachtwoord verschilt "
 "van dat van het account, voer het in bij Geavanceerde instellingen wanneer "
-"je je aanmeldt."
+"je inlogt."
 
 #: ui/dialogs/import-dialog.slint:145
 msgid "The incoming server has no user name."
@@ -7837,11 +7828,11 @@ msgid "One other address is managed by Gmail and appears after you sign in."
 msgid_plural ""
 "{n} other addresses are managed by Gmail and appear after you sign in."
 msgstr[0] ""
-"Eén ander adres wordt beheerd door Gmail en verschijnt nadat je je hebt "
-"aangemeld."
+"Eén ander adres wordt beheerd door Gmail en verschijnt nadat je bent "
+"ingelogd."
 msgstr[1] ""
-"{n} andere adressen worden beheerd door Gmail en verschijnen nadat je je "
-"hebt aangemeld."
+"{n} andere adressen worden beheerd door Gmail en verschijnen nadat je bent "
+"ingelogd."
 
 #: ui/dialogs/import-dialog.slint:160
 msgid ""
@@ -8060,10 +8051,10 @@ msgid ""
 "a Flectar Mail backup, and mail from Thunderbird or saved mail files. "
 "Passwords are never imported: you sign in to each account afterward."
 msgstr ""
-"Haal je accounts op uit Thunderbird, Thunderbird for Android, K-9 Mail of "
-"een Flectar Mail-back-up, en e-mail uit Thunderbird of opgeslagen e-"
-"mailbestanden. Wachtwoorden worden nooit geïmporteerd: daarna meld je je bij "
-"elk account aan."
+"Haal je accounts op uit Thunderbird (desktop en Android), K-9 Mail of een "
+"Flectar Mail-back-up, en e-mail uit Thunderbird of opgeslagen e-"
+"mailbestanden. Wachtwoorden worden nooit geïmporteerd: daarna log je bij elk "
+"account in."
 
 #: ui/dialogs/import-dialog.slint:497
 msgid "Thunderbird on this device"
@@ -8448,8 +8439,7 @@ msgstr "Opgeslagen zoekopdracht verwijderen?"
 
 #: ui/dialogs/saved-search-dialog.slint:55
 msgid "“{}” leaves the sidebar. The mail it finds stays where it is."
-msgstr ""
-"„{}” verdwijnt uit de zijbalk. De e-mail die die vindt, blijft waar die is."
+msgstr "„{}” verdwijnt uit de zijbalk. De gevonden e-mail blijft waar die is."
 
 #: ui/dialogs/saved-search-dialog.slint:79
 msgid "Search for"
@@ -8880,13 +8870,13 @@ msgstr ""
 "algemeen thema weergave palet app-pictogram dock taakbalk starter taal tijd "
 "klok 12-uurs 24-uurs werkruimte-indeling venster zonder kader titelbalk "
 "renderer privacy externe afbeeldingen synchroniseren berichten groeperen "
-"datum postvak IN systeemvak achtergrond opstarten aanmelden downloadlocatie "
+"datum postvak in systeemvak achtergrond opstarten aanmelden downloadlocatie "
 "map bijlagen opslaan tabbladen gesprekken threads minder beweging animatie "
 "toegankelijkheid tekstgrootte lettertype"
 
 #: ui/dialogs/settings-dialog.slint:919
 msgid "sending undo send delay take back"
-msgstr "verzenden verzenden ongedaan maken vertraging terugnemen"
+msgstr "verzenden ongedaan maken verzendvertraging terugnemen"
 
 #: ui/dialogs/settings-dialog.slint:919
 msgid ""
@@ -9454,15 +9444,15 @@ msgstr "Automatisch starten"
 
 #: ui/dialogs/settings-dialog.slint:1876
 msgid "Opens Flectar Mail when you sign in."
-msgstr "Opent Flectar Mail wanneer je je aanmeldt."
+msgstr "Opent Flectar Mail wanneer je inlogt."
 
 #: ui/dialogs/settings-dialog.slint:1876
 msgid "Starts Flectar Mail in the system tray when you sign in."
-msgstr "Start Flectar Mail in het systeemvak wanneer je je aanmeldt."
+msgstr "Start Flectar Mail in het systeemvak wanneer je inlogt."
 
 #: ui/dialogs/settings-dialog.slint:1876
 msgid "Starts Flectar Mail in the background when you sign in."
-msgstr "Start Flectar Mail op de achtergrond wanneer je je aanmeldt."
+msgstr "Start Flectar Mail op de achtergrond wanneer je inlogt."
 
 #: ui/dialogs/settings-dialog.slint:1877
 msgid "Disabled by default; also listed in your system's startup apps."
@@ -11225,7 +11215,7 @@ msgstr "Serveradres, zoals cloud.example.com"
 
 #: ui/link-services.slint:177 ui/link-services.slint:178
 msgid "Name you sign in with"
-msgstr "Naam waarmee je je aanmeldt"
+msgstr "Naam waarmee je inlogt"
 
 #: ui/link-services.slint:195
 msgid "Sign in"
@@ -11421,7 +11411,7 @@ msgid ""
 "The proxy's answer can't be read. Check that it's the kind of proxy chosen "
 "above."
 msgstr ""
-"Het antwoord van de proxy kan niet worden gelezen. Controleer of het het "
+"Het antwoord van de proxy kan niet worden gelezen. Controleer of dit het "
 "hierboven gekozen soort proxy is."
 
 #: ui/network.slint:210

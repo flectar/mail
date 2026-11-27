@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 10:01+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -1751,16 +1751,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "无法断开 CardDAV：{}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "提示词已保存。"
+msgstr "副本已保存。"
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "无法保存文件：{}"
+msgstr "无法保存副本：{}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -3409,7 +3405,7 @@ msgstr "抄送"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "接收副本的地址（可选）"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3417,23 +3413,19 @@ msgstr "密送"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "接收密送副本的地址（可选）"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "同步 {}"
+msgstr "抄送 {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "同步 {}"
+msgstr "密送 {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "来自服务商的密送 {}"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3522,10 +3514,8 @@ msgid "Refresh sender identities"
 msgstr "刷新发件人身份"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "保存发件人地址"
+msgstr "搜索发件地址"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3534,13 +3524,11 @@ msgstr "编辑"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "正在显示 {} 个地址（共 {} 个）。搜索可找到其余地址。"
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "没有匹配的标签"
+msgstr "没有匹配的地址"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3552,7 +3540,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "来自 {} 的邮件副本"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3566,7 +3554,7 @@ msgstr "添加发件人地址"
 msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
-msgstr ""
+msgstr "该地址的名称和回复地址由您的服务商设置。用它撰写的邮件也会默认带上这些副本。"
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3610,10 +3598,8 @@ msgid "Where replies should go (optional)"
 msgstr "回复应发送至何处 (可选)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "已发送邮件副本"
+msgstr "保存副本"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3635,16 +3621,16 @@ msgid "Cancel"
 msgstr "取消"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "自动"
+msgstr "自动抄送和密送"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"此账户发出的每封邮件都会默认带上这些副本，并会显示出来供您移除。每个发件地址"
+"都可以单独添加自己的副本。"
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5045,10 +5031,8 @@ msgid "Attach files…"
 msgstr "添加附件…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "立即发送"
+msgstr "发件地址"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6045,14 +6029,12 @@ msgid ""
 msgstr "结果末尾的“在服务器上搜索”可找到不在此设备上的邮件。"
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "发件人或收件人为某名称或地址"
+msgstr "按姓名或地址搜索"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "正在显示 {} 个地址（共 {} 个）。继续输入可缩小范围。"
 
 #: ui/components/settings-components.slint:356
 msgid "or"

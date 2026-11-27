@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 11:22+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Turkish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/tr/>\n"
@@ -1786,16 +1786,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "CardDAV bağlantısı kesilemedi: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "İstemler kaydedildi."
+msgstr "Kopyalar kaydedildi."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "Dosya kaydedilemedi: {}"
+msgstr "Kopyalar kaydedilemedi: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -3496,7 +3492,7 @@ msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Kopya alan adresler (isteğe bağlı)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3504,23 +3500,19 @@ msgstr "Bcc"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Gizli kopya alan adresler (isteğe bağlı)"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "{} için eşitle"
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "{} için eşitle"
+msgstr "Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Sağlayıcının belirlediği Bcc {}"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3611,10 +3603,8 @@ msgid "Refresh sender identities"
 msgstr "Gönderen kimliklerini yenile"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Gönderen adresini kaydet"
+msgstr "Gönderen adreslerini ara"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3623,13 +3613,11 @@ msgstr "Düzenle"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "{} adresin {} tanesi gösteriliyor. Diğerlerini bulmak için arayın."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Eşleşen etiket yok"
+msgstr "Eşleşen adres yok"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3642,7 +3630,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "{} adresinden gönderilen e-postaların kopyaları"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3657,6 +3645,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Sağlayıcınız bu adresin adını ve yanıt adresini belirler. Bu adresten "
+"yazdığın e-postalar da bu kopyalarla başlar."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3702,10 +3692,8 @@ msgid "Where replies should go (optional)"
 msgstr "Yanıtların gönderileceği adres (isteğe bağlı)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "Gönderilen kopyalar"
+msgstr "Kopyaları kaydet"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3727,16 +3715,16 @@ msgid "Cancel"
 msgstr "İptal"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "Otomatik"
+msgstr "Otomatik Cc ve Bcc"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Bu hesaptan yazdığın her ileti bu kopyalarla başlar ve çıkarabilmen için "
+"gösterilir. Her gönderen adres kendi kopyalarını ekleyebilir."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5178,10 +5166,8 @@ msgid "Attach files…"
 msgstr "Dosya ekle…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Şimdi gönder"
+msgstr "Gönderen"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -6201,14 +6187,12 @@ msgid ""
 msgstr "Sonuçların sonundaki Sunucuda ara, bu cihazda olmayan e-postayı bulur."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "Bir ad ya da adresten veya ona"
+msgstr "Ada veya adrese göre ara"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "{} adresin {} tanesi gösteriliyor. Daraltmak için daha fazla yazın."
 
 #: ui/components/settings-components.slint:356
 msgid "or"

@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 11:22+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
@@ -1805,16 +1805,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "No se pudo desconectar CardDAV: {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Prompts saved."
 msgid "Copies saved."
-msgstr "Prompts guardados."
+msgstr "Copias guardadas."
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the file: {}"
 msgid "Could not save the copies: {}"
-msgstr "No se pudo guardar el archivo: {}"
+msgstr "No se pudieron guardar las copias: {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -3552,7 +3548,7 @@ msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Direcciones que reciben una copia (opcional)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
@@ -3560,23 +3556,19 @@ msgstr "Cco"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Direcciones que reciben una copia oculta (opcional)"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Cc {}"
-msgstr "Sincronizar {}"
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
-#, fuzzy
-#| msgid "Sync {}"
 msgid "Bcc {}"
-msgstr "Sincronizar {}"
+msgstr "Cco {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Cco {} de tu proveedor"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3671,10 +3663,8 @@ msgid "Refresh sender identities"
 msgstr "Actualizar identidades de remitente"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Guardar dirección de remitente"
+msgstr "Buscar direcciones del remitente"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3683,13 +3673,11 @@ msgstr "Editar"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "Se muestran {} de {} direcciones. Busca para encontrar las demás."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "No hay etiquetas que coincidan"
+msgstr "No hay direcciones coincidentes"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3702,7 +3690,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Copias del correo de {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3717,6 +3705,8 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Tu proveedor define el nombre y la dirección de respuesta de esta dirección. "
+"El correo que escribas desde ella también empieza con estas copias."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3762,10 +3752,8 @@ msgid "Where replies should go (optional)"
 msgstr "Dónde recibir las respuestas (opcional)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "Copias enviadas"
+msgstr "Guardar copias"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3787,16 +3775,17 @@ msgid "Cancel"
 msgstr "Cancelar"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "Automático"
+msgstr "Cc y Cco automáticos"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Cada mensaje que escribas desde esta cuenta empieza con estas copias y las "
+"muestra para que puedas quitarlas. Cada dirección del remitente puede añadir "
+"las suyas."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5242,10 +5231,8 @@ msgid "Attach files…"
 msgstr "Adjuntar archivos…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Enviar ahora"
+msgstr "Enviar desde"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -5874,12 +5861,12 @@ msgstr "Destinatario"
 #: ui/components/rule-editor.slint:16
 msgctxt "rule field"
 msgid "Cc"
-msgstr "CC"
+msgstr "Cc"
 
 #: ui/components/rule-editor.slint:17
 msgctxt "rule field"
 msgid "To or Cc"
-msgstr "Destinatario o CC"
+msgstr "Destinatario o Cc"
 
 #: ui/components/rule-editor.slint:18
 msgctxt "rule field"
@@ -6273,14 +6260,12 @@ msgstr ""
 "está en este dispositivo."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "De o para un nombre o una dirección"
+msgstr "Buscar por nombre o dirección"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "Se muestran {} de {} direcciones. Escribe más para reducirlas."
 
 #: ui/components/settings-components.slint:356
 msgid "or"

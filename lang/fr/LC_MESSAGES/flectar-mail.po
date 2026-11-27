@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-22 14:26+0000\n"
+"PO-Revision-Date: 2026-11-22 15:10+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
@@ -287,12 +287,12 @@ msgstr "bleu"
 #: ui/app-icon.slint:23 ui/components/composer-actions.slint:25
 #: ui/components/theme-editor.slint:639
 msgid "Green"
-msgstr "VERT"
+msgstr "Vert"
 
 #: ui/app-icon.slint:24 ui/components/composer-actions.slint:28
 #: ui/components/theme-editor.slint:640
 msgid "Purple"
-msgstr "VIOLET"
+msgstr "Violet"
 
 #: ui/app.slint:167
 msgctxt "abbreviated month in a date"
@@ -1509,7 +1509,7 @@ msgstr ""
 
 #: ui/app.slint:499
 msgid "Copied HTML source"
-msgstr "La source HTML a été copiée."
+msgstr "La source HTML a été copié"
 
 #: ui/app.slint:500
 msgid "Copied HTML source. Paste it into the issue."
@@ -1525,15 +1525,15 @@ msgstr "Impossible d’enregistrer la source HTML : {}"
 
 #: ui/app.slint:503
 msgid "Copied selected text"
-msgstr "Le texte sélectionné a été copié."
+msgstr "Le texte sélectionné a été copié"
 
 #: ui/app.slint:504
 msgid "Copied email text"
-msgstr "Le texte du message a été copié."
+msgstr "Le texte du message a été copié"
 
 #: ui/app.slint:505
 msgid "Copied link"
-msgstr "Le lien a été copié."
+msgstr "Le lien a été copié"
 
 #: ui/app.slint:506
 msgid "Blitz software selection render failed: {}"
@@ -1821,15 +1821,12 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr "La déconnexion de CardDAV a échoué : {}"
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "Profile saved."
 msgid "Copies saved."
-msgstr "Profil enregistré."
+msgstr "Copies enregistrées."
 
 #: ui/app.slint:577
-#, fuzzy
 msgid "Could not save the copies: {}"
-msgstr "Impossible d’enregistrer le thème : {}"
+msgstr "Impossible d'enregistrer les copies : {}"
 
 #: ui/app.slint:579
 msgctxt "special folder"
@@ -3578,31 +3575,31 @@ msgstr "Ajouter un agenda CalDAV"
 
 #: ui/components/account-mail-preferences.slint:269
 msgid "Cc"
-msgstr "CC"
+msgstr "Cc"
 
 #: ui/components/account-mail-preferences.slint:270
 msgid "Addresses that get a copy (optional)"
-msgstr ""
+msgstr "Adresses recevant une copie (facultatif)"
 
 #: ui/components/account-mail-preferences.slint:273
 msgid "Bcc"
-msgstr "CCI"
+msgstr "Cci"
 
 #: ui/components/account-mail-preferences.slint:274
 msgid "Addresses that get a hidden copy (optional)"
-msgstr ""
+msgstr "Adresses recevant une copie cachée (facultatif)"
 
 #: ui/components/account-mail-preferences.slint:290
 msgid "Cc {}"
-msgstr ""
+msgstr "Cc {}"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "Bcc {}"
-msgstr ""
+msgstr "Cci {}"
 
 #: ui/components/account-mail-preferences.slint:292
 msgid "Bcc {} from your provider"
-msgstr ""
+msgstr "Cci {} de votre fournisseur"
 
 #: ui/components/account-mail-preferences.slint:298
 msgid "Server allows any address at this domain"
@@ -3698,10 +3695,8 @@ msgid "Refresh sender identities"
 msgstr "Rafraîchir les identités d’expéditeur"
 
 #: ui/components/account-mail-preferences.slint:363
-#, fuzzy
-#| msgid "Save sender address"
 msgid "Search sender addresses"
-msgstr "Enregistrer l’adresse d’envoi"
+msgstr "Rechercher des adresses d'expédition"
 
 #: ui/components/account-mail-preferences.slint:378
 #: ui/dialogs/settings-dialog.slint:3007
@@ -3710,13 +3705,11 @@ msgstr "Éditer"
 
 #: ui/components/account-mail-preferences.slint:384
 msgid "Showing {} of {} addresses. Search to find the others."
-msgstr ""
+msgstr "Affichage de {} adresses sur {}. Recherchez pour trouver les autres."
 
 #: ui/components/account-mail-preferences.slint:388
-#, fuzzy
-#| msgid "No matching labels"
 msgid "No matching addresses"
-msgstr "Aucun libellé correspondant"
+msgstr "Aucune adresse correspondante"
 
 #: ui/components/account-mail-preferences.slint:390
 msgid ""
@@ -3729,7 +3722,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:395
 msgid "Copies of mail from {}"
-msgstr ""
+msgstr "Copies des e-mails de {}"
 
 #: ui/components/account-mail-preferences.slint:396
 msgid "Edit sender address"
@@ -3744,6 +3737,9 @@ msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
 msgstr ""
+"Votre fournisseur définit le nom et l'adresse de réponse de cette adresse. "
+"Les e-mails que vous écrivez depuis celle-ci commencent également par ces "
+"copies."
 
 #: ui/components/account-mail-preferences.slint:403
 msgid ""
@@ -3790,10 +3786,8 @@ msgid "Where replies should go (optional)"
 msgstr "Adresse où diriger les réponses (facultatif)"
 
 #: ui/components/account-mail-preferences.slint:415
-#, fuzzy
-#| msgid "Sent copies"
 msgid "Save copies"
-msgstr "Copies envoyées"
+msgstr "Enregistrer les copies"
 
 #: ui/components/account-mail-preferences.slint:416
 msgid "Save sender address"
@@ -3815,16 +3809,17 @@ msgid "Cancel"
 msgstr "Annuler"
 
 #: ui/components/account-mail-preferences.slint:428
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic Cc and Bcc"
-msgstr "Automatique"
+msgstr "Cc et Cci automatiques"
 
 #: ui/components/account-mail-preferences.slint:429
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
 msgstr ""
+"Chaque message que vous écrivez depuis ce compte commence par ces copies et "
+"les affiche pour que vous puissiez les retirer. Chaque adresse d'expédition "
+"peut ajouter les siennes."
 
 #: ui/components/account-mail-preferences.slint:439
 msgid "Signature"
@@ -5092,11 +5087,11 @@ msgstr "nom@example.com · séparez par des virgules"
 
 #: ui/components/composer-fields.slint:393
 msgid "Carbon copy"
-msgstr "Copie carbone (CC)"
+msgstr "Copie carbone (Cc)"
 
 #: ui/components/composer-fields.slint:404
 msgid "Blind carbon copy"
-msgstr "Copie carbone invisible (CCI)"
+msgstr "Copie carbone invisible (Cci)"
 
 #: ui/components/composer-fields.slint:498
 msgctxt "signature"
@@ -5277,10 +5272,8 @@ msgid "Attach files…"
 msgstr "Joindre des fichiers…"
 
 #: ui/components/email-composer.slint:1233
-#, fuzzy
-#| msgid "Send now"
 msgid "Send from"
-msgstr "Envoyer maintenant"
+msgstr "Envoyer depuis"
 
 #: ui/components/email-composer.slint:1272
 msgid "Drop to add to your message"
@@ -5910,12 +5903,12 @@ msgstr "Destinataire"
 #: ui/components/rule-editor.slint:16
 msgctxt "rule field"
 msgid "Cc"
-msgstr "CC"
+msgstr "Cc"
 
 #: ui/components/rule-editor.slint:17
 msgctxt "rule field"
 msgid "To or Cc"
-msgstr "Destinataire ou CC"
+msgstr "Destinataire ou Cc"
 
 #: ui/components/rule-editor.slint:18
 msgctxt "rule field"
@@ -6312,14 +6305,12 @@ msgstr ""
 "sont pas sur cet appareil."
 
 #: ui/components/sender-picker.slint:154 ui/components/sender-picker.slint:155
-#, fuzzy
-#| msgid "From or to a name or address"
 msgid "Search by name or address"
-msgstr "De ou à un nom ou une adresse"
+msgstr "Rechercher par nom ou adresse"
 
 #: ui/components/sender-picker.slint:220
 msgid "Showing {} of {} addresses. Type more to narrow them down."
-msgstr ""
+msgstr "Affichage de {} adresses sur {}. Saisissez davantage pour les filtrer."
 
 #: ui/components/settings-components.slint:356
 msgid "or"
@@ -6627,15 +6618,15 @@ msgstr "Palette"
 #: ui/components/theme-editor.slint:621 ui/components/theme-editor.slint:633
 #: ui/dialogs/settings-dialog.slint:1546
 msgid "Default"
-msgstr "PAR DÉFAUT"
+msgstr "Par défaut"
 
 #: ui/components/theme-editor.slint:622 ui/components/theme-editor.slint:634
 msgid "Teal"
-msgstr "TURQUOISE"
+msgstr "Turquoise"
 
 #: ui/components/theme-editor.slint:625 ui/components/theme-editor.slint:646
 msgid "Custom"
-msgstr "PERSONNALISÉE"
+msgstr "Personnalisée"
 
 #: ui/components/theme-editor.slint:655 ui/components/theme-editor.slint:668
 msgid "Custom palette"
@@ -9962,7 +9953,7 @@ msgstr "Créer un profil"
 
 #: ui/dialogs/settings-dialog.slint:2687 ui/dialogs/settings-dialog.slint:2695
 msgid "Show account color at the left edge of each message"
-msgstr "Affiche la couleur du compte sur le bord gauche de chaque message."
+msgstr "Affiche la couleur du compte sur le bord gauche de chaque message"
 
 #: ui/dialogs/settings-dialog.slint:2717
 msgid ""
