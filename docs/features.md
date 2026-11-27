@@ -259,7 +259,11 @@ meanwhile wait too and go to the server once it's ready. When an IMAP server
 turns down a connection for having too many open, Flectar Mail opens one fewer
 for downloading in the background from then on. When many accounts start
 together, they take turns connecting, and a few at a time download their older
-mail.
+mail. When a server refuses an account's sign-in, as after its password
+changed somewhere else, downloading in the background tries again only after 5
+minutes, then twice as long each time up to 5 hours, and one connection at a
+time, since servers lock accounts or block addresses that keep failing to sign
+in. Signing in again, or opening a message, tries at once.
 
 ## Server settings for new accounts
 

@@ -6,7 +6,7 @@
 
 use crate::Core;
 use crate::db::repo;
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::events::CoreEvent;
 use crate::models::{AccountConfig, DownloadPolicy, MailProtocol, now_ms};
 use crate::sync::gmail::cost;
@@ -40,10 +40,19 @@ impl Core {
             let now = now_ms();
             failed.retain(|_, until| *until > now);
             match self.next_prefetch(&failed).await {
-                Ok(Some(attachment_id)) => {
+                Ok(Some((attachment_id, account_id))) => {
                     if let Err(error) = self.get_attachment(attachment_id).await {
                         tracing::debug!(attachment_id, %error, "an attachment didn't download ahead of time");
                         failed.insert(attachment_id, now + RETRY_AFTER_MS);
+                        // The server refused the account's sign-in: its other
+                        // attachments wait too, rather than each fail in turn.
+                        // An IMAP sign-in noted that itself.
+                        let pace = self.pace.account(account_id);
+                        if matches!(error, CoreError::NeedsReauth | CoreError::Auth(_))
+                            && !pace.waits_to_sign_in()
+                        {
+                            pace.sign_in_refused();
+                        }
                     }
                     continue;
                 }
@@ -85,15 +94,16 @@ impl Core {
         }
     }
 
-    /// The attachment to download next: of the accounts set to download
-    /// everything and whose servers don't ask to wait, the one of the newest
-    /// mail inside its account's mail history, but those in `failed`.
-    async fn next_prefetch(&self, failed: &HashMap<i64, i64>) -> Result<Option<i64>> {
+    /// The attachment to download next, and its account: of the accounts set
+    /// to download everything, whose servers don't ask to wait and didn't
+    /// refuse their sign-in lately, the one of the newest mail inside its
+    /// account's mail history, but those in `failed`.
+    async fn next_prefetch(&self, failed: &HashMap<i64, i64>) -> Result<Option<(i64, i64)>> {
         // On a metered connection, when the device chose so, they wait.
         if self.metered.downloads_wait() {
             return Ok(None);
         }
-        let mut next = None::<(i64, i64)>;
+        let mut next = None::<(i64, i64, i64)>;
         for config in self.list_account_configs().await? {
             let everything = config.settings.download == DownloadPolicy::Everything
                 && matches!(
@@ -101,7 +111,11 @@ impl Core {
                     MailProtocol::Imap | MailProtocol::Jmap | MailProtocol::Gmail
                 );
             let pace = self.pace.account(config.id);
-            if !everything || pace.paused().is_some() || gmail_room(&config, &pace).is_some() {
+            if !everything
+                || pace.paused().is_some()
+                || pace.waits_to_sign_in()
+                || gmail_room(&config, &pace).is_some()
+            {
                 continue;
             }
             let account_id = config.id;
@@ -128,12 +142,12 @@ impl Core {
                 })
                 .await?;
             if let Some((attachment_id, date)) = candidate
-                && next.is_none_or(|(_, newest)| date > newest)
+                && next.is_none_or(|(_, _, newest)| date > newest)
             {
-                next = Some((attachment_id, date));
+                next = Some((attachment_id, account_id, date));
             }
         }
-        Ok(next.map(|(attachment_id, _)| attachment_id))
+        Ok(next.map(|(attachment_id, account_id, _)| (attachment_id, account_id)))
     }
 
     /// The soonest a Gmail account set to download everything has room in
@@ -216,7 +230,7 @@ mod tests {
         assert_eq!(download_of(&core, 1).await, DownloadPolicy::Everything);
         assert_eq!(
             core.next_prefetch(&HashMap::new()).await.unwrap(),
-            Some(attachment)
+            Some((attachment, 1))
         );
         // One that failed waits.
         assert_eq!(
@@ -244,7 +258,16 @@ mod tests {
         metered.store(false, std::sync::atomic::Ordering::SeqCst);
         assert_eq!(
             core.next_prefetch(&HashMap::new()).await.unwrap(),
-            Some(attachment)
+            Some((attachment, 1))
+        );
+        // So do an account's after its server refused its sign-in, until one
+        // works again or it gets new credentials.
+        core.pace.account(1).sign_in_refused();
+        assert_eq!(core.next_prefetch(&HashMap::new()).await.unwrap(), None);
+        core.pace.account(1).signed_in();
+        assert_eq!(
+            core.next_prefetch(&HashMap::new()).await.unwrap(),
+            Some((attachment, 1))
         );
 
         // A JMAP server sends each attachment as its blob.
@@ -269,7 +292,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             core.next_prefetch(&HashMap::new()).await.unwrap(),
-            Some(blob)
+            Some((blob, 1))
         );
 
         core.db
@@ -328,7 +351,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             core.next_prefetch(&HashMap::new()).await.unwrap(),
-            Some(attachment)
+            Some((attachment, 1))
         );
         assert_eq!(core.gmail_room_again().await, None);
         // Work in the background spent the account's share of this minute.
