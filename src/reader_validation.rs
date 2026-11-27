@@ -659,6 +659,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert_eq!(renderer_settings.get_active(), "cpu");
     assert!(renderer_settings.get_restart_required());
     app.set_theme_mode("light".into());
+    let view_before_settings = app.get_active_view();
     app.set_settings_tab("General".into());
     app.invoke_open_settings();
     draw("renderer-settings-desktop", 1280, 900);
@@ -693,6 +694,14 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(renderer_settings.get_gpu_failed());
     assert_eq!(renderer_settings.get_preferred(), "gpu");
     assert_eq!(renderer_settings.get_active(), "cpu");
+    // Escape leaves Settings for the screen it was opened from.
+    key(slint::platform::Key::Escape.into(), true);
+    key(slint::platform::Key::Escape.into(), false);
+    assert_eq!(
+        app.get_active_view(),
+        view_before_settings,
+        "Escape must close Settings"
+    );
     app.invoke_close_settings();
     app.set_active_view("contacts".into());
     app.set_contacts(ModelRc::default());
