@@ -179,9 +179,9 @@ async fn actor(
                 _ => {}
             }
         }
-        if settings.has_changed().unwrap_or(false) {
-            config.settings = settings.borrow_and_update().clone();
-        }
+        // The account's settings as they are now. A change that woke the
+        // worker is marked seen already, so `has_changed` can't tell of it.
+        config.settings = settings.borrow_and_update().clone();
         let reused = session.take();
         let outcome = async {
             let connected = match reused {
