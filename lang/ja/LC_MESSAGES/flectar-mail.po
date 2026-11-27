@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-06 17:13+0000\n"
+"PO-Revision-Date: 2026-11-08 15:58+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -319,32 +319,32 @@ msgstr "M月d日 EEEE"
 #: ui/app.slint:164
 msgctxt "date pattern (CLDR): month heading, LLLL is the month name on its own"
 msgid "LLLL y"
-msgstr ""
+msgstr "y年M月"
 
 #: ui/app.slint:165
 msgctxt "date pattern (CLDR): first date of a range within one month"
 msgid "MMMM d"
-msgstr ""
+msgstr "y年M月d日"
 
 #: ui/app.slint:166
 msgctxt "date pattern (CLDR): last date of a range within one month"
 msgid "d, y"
-msgstr ""
+msgstr "d日"
 
 #: ui/app.slint:167
 msgctxt "date pattern (CLDR): first date of a range within one year"
 msgid "MMM d"
-msgstr ""
+msgstr "y年M月d日"
 
 #: ui/app.slint:168
 msgctxt "date pattern (CLDR): last date of a range within one year"
 msgid "MMM d, y"
-msgstr ""
+msgstr "M月d日"
 
 #: ui/app.slint:169
 msgctxt "time pattern (CLDR): 24-hour clock"
 msgid "HH:mm"
-msgstr ""
+msgstr "HH:mm"
 
 #: ui/app.slint:170
 msgctxt "time pattern (CLDR): 12-hour clock, a is AM or PM"
@@ -359,16 +359,16 @@ msgstr "a h"
 #: ui/app.slint:174
 msgctxt "date range"
 msgid "{0} – {1}"
-msgstr ""
+msgstr "{0}～{1}"
 
 #: ui/app.slint:175
 msgctxt "date and time"
 msgid "{0} at {1}"
-msgstr ""
+msgstr "{0} {1}"
 
 #: ui/app.slint:177
 msgid "All day"
-msgstr ""
+msgstr "終日"
 
 #: ui/app.slint:178
 msgid "(untitled event)"
@@ -1839,7 +1839,7 @@ msgstr ""
 #: ui/app.slint:624 ui/components/workspace-navigation.slint:787
 #: ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
-msgstr ""
+msgstr "Flectar Mail"
 
 #: ui/app.slint:1305 ui/app.slint:1318
 msgid "Global Labels (local only)"
@@ -1847,7 +1847,7 @@ msgstr ""
 
 #: ui/app.slint:2261
 msgid "Empty Trash?"
-msgstr ""
+msgstr "ゴミ箱を空にしますか？"
 
 #: ui/app.slint:2261 ui/views/files-view.slint:578
 msgid "Delete permanently?"
@@ -1900,7 +1900,7 @@ msgstr ""
 
 #: ui/app.slint:2483
 msgid "Retry"
-msgstr ""
+msgstr "再試行"
 
 #: ui/app.slint:2491 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
@@ -2030,37 +2030,39 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:122
 msgid "Sender identities, signatures & OpenPGP"
-msgstr ""
+msgstr "差出人情報・署名・OpenPGP"
 
 #: ui/components/account-mail-preferences.slint:123
 msgid ""
 "Choose an account to manage its sender identity, signature, and message "
 "protection."
-msgstr ""
+msgstr "差出人情報・署名・OpenPGPを設定するアカウントを選択します。"
 
 #: ui/components/account-mail-preferences.slint:134
 msgid "Signatures"
-msgstr ""
+msgstr "署名"
 
 #: ui/components/account-mail-preferences.slint:135
 msgid "OpenPGP"
-msgstr ""
+msgstr "OpenPGP"
 
 #: ui/components/account-mail-preferences.slint:140
 msgid "Default sender identity"
-msgstr ""
+msgstr "デフォルトの差出人情報"
 
 #: ui/components/account-mail-preferences.slint:140
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr ""
+"新しいメールを作成するときに自動的に選択されます。サインイン用の"
+"メールアドレスは変わりません。"
 
 #: ui/components/account-mail-preferences.slint:146
 msgid "Save sender default"
-msgstr ""
+msgstr "デフォルトを保存"
 
 #: ui/components/account-mail-preferences.slint:147
 msgid "Refresh sender identities"
-msgstr ""
+msgstr "差出人情報のリストを更新"
 
 #: ui/components/account-mail-preferences.slint:157
 msgid "Edit"
@@ -2069,7 +2071,7 @@ msgstr "編集"
 #: ui/components/account-mail-preferences.slint:158
 #: ui/views/contacts-view.slint:608
 msgid "Remove"
-msgstr ""
+msgstr "削除"
 
 #: ui/components/account-mail-preferences.slint:161
 msgid ""
@@ -2079,17 +2081,19 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:164
 msgid "Edit sender address"
-msgstr ""
+msgstr "差出人情報を編集"
 
 #: ui/components/account-mail-preferences.slint:164
 msgid "Add a sender address"
-msgstr ""
+msgstr "差出人情報を追加"
 
 #: ui/components/account-mail-preferences.slint:168
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
 msgstr ""
+"サーバーでは、ワイルドカードで示されたドメインの任意のアドレスから送信できま"
+"す。差出人として選択したいアドレスを追加してください。"
 
 #: ui/components/account-mail-preferences.slint:169
 msgid ""
@@ -2097,6 +2101,9 @@ msgid ""
 "server decides when you send; Flectar shows whether it accepted the last "
 "message."
 msgstr ""
+"メールサーバーで使用できるエイリアスや別の差出人アドレスを追加してください。"
+"そのアドレスから送信できるかどうかは、送信時にサーバーが判断します。Flectarに"
+"は、直前に送信したメールをサーバーが受け付けたかどうかが表示されます。"
 
 #: ui/components/account-mail-preferences.slint:171
 #: ui/dialogs/settings-dialog.slint:3046 ui/views/onboarding-view.slint:269
@@ -2105,31 +2112,31 @@ msgstr "メールアドレス"
 
 #: ui/components/account-mail-preferences.slint:171
 msgid "alias@example.com"
-msgstr ""
+msgstr "alias@example.com"
 
 #: ui/components/account-mail-preferences.slint:172
 msgid "Sender name"
-msgstr ""
+msgstr "差出人の表示名"
 
 #: ui/components/account-mail-preferences.slint:172
 msgid "Name shown to recipients (optional)"
-msgstr ""
+msgstr "受信者に表示される名前（任意）"
 
 #: ui/components/account-mail-preferences.slint:173
 msgid "Reply-to address"
-msgstr ""
+msgstr "返信先メールアドレス"
 
 #: ui/components/account-mail-preferences.slint:173
 msgid "Where replies should go (optional)"
-msgstr ""
+msgstr "返信を受け取るメールアドレス（任意）"
 
 #: ui/components/account-mail-preferences.slint:177
 msgid "Save sender address"
-msgstr ""
+msgstr "差出人情報を保存"
 
 #: ui/components/account-mail-preferences.slint:177
 msgid "Add sender address"
-msgstr ""
+msgstr "送信者情報を追加"
 
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
@@ -2140,23 +2147,23 @@ msgstr "キャンセル"
 
 #: ui/components/account-mail-preferences.slint:183
 msgid "Edit signature"
-msgstr ""
+msgstr "署名を編集"
 
 #: ui/components/account-mail-preferences.slint:183
 msgid "Saved separately for each account."
-msgstr ""
+msgstr "アカウントごとに保存されます。"
 
 #: ui/components/account-mail-preferences.slint:188
 msgid "New signature"
-msgstr ""
+msgstr "新しい署名"
 
 #: ui/components/account-mail-preferences.slint:189
 msgid "Signature name"
-msgstr ""
+msgstr "署名の名前"
 
 #: ui/components/account-mail-preferences.slint:189
 msgid "Signature name, for example Work"
-msgstr ""
+msgstr "署名の名前（例：仕事用）"
 
 #: ui/components/account-mail-preferences.slint:190
 msgid ""
@@ -2164,6 +2171,9 @@ msgid ""
 "Role · Company\n"
 "Phone · Website"
 msgstr ""
+"あなたの名前\n"
+"役職・会社名\n"
+"電話番号・Webサイト"
 
 #: ui/components/account-mail-preferences.slint:191
 msgid ""
@@ -2173,16 +2183,16 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:193
 msgid "Save signature"
-msgstr ""
+msgstr "署名を保存"
 
 #: ui/components/account-mail-preferences.slint:194
 #: ui/views/contacts-view.slint:608
 msgid "Delete"
-msgstr ""
+msgstr "削除"
 
 #: ui/components/account-mail-preferences.slint:197
 msgid "New messages"
-msgstr ""
+msgstr "新しいメール"
 
 #: ui/components/account-mail-preferences.slint:197
 msgid "Signature inserted when you start a message."
@@ -2265,7 +2275,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:229
 msgid "person@example.org=FULL_FINGERPRINT"
-msgstr ""
+msgstr "person@example.org=フィンガープリント全体"
 
 #: ui/components/account-mail-preferences.slint:230
 msgid "Save OpenPGP settings"
@@ -2379,12 +2389,12 @@ msgstr ""
 #: ui/components/calendar-agenda.slint:212 ui/components/calendar.slint:582
 #: ui/views/mail-list-pane.slint:678
 msgid "Today"
-msgstr ""
+msgstr "今日"
 
 #: ui/components/calendar-agenda.slint:214 ui/components/calendar.slint:596
 msgid "{n} event"
 msgid_plural "{n} events"
-msgstr[0] ""
+msgstr[0] "{n}個の予定"
 
 #: ui/components/calendar-agenda.slint:237
 msgid "Cancelled"
@@ -2397,7 +2407,7 @@ msgstr ""
 
 #: ui/components/calendar-agenda.slint:268
 msgid "Now · {}"
-msgstr ""
+msgstr "現在・{}"
 
 #: ui/components/calendar-agenda.slint:271
 msgid "Nothing else is scheduled this month."
@@ -2426,7 +2436,7 @@ msgstr ""
 #: ui/components/calendar-agenda.slint:290 ui/components/calendar.slint:114
 #: ui/components/calendar.slint:757
 msgid "New event"
-msgstr ""
+msgstr "新しい予定"
 
 #: ui/components/calendar.slint:143 ui/components/calendar.slint:755
 msgid "Previous month"
@@ -2439,42 +2449,42 @@ msgstr ""
 #: ui/components/calendar.slint:162 ui/components/calendar.slint:800
 msgctxt "Monday initial"
 msgid "M"
-msgstr ""
+msgstr "月"
 
 #: ui/components/calendar.slint:163 ui/components/calendar.slint:800
 msgctxt "Tuesday initial"
 msgid "T"
-msgstr ""
+msgstr "火"
 
 #: ui/components/calendar.slint:164 ui/components/calendar.slint:800
 msgctxt "Wednesday initial"
 msgid "W"
-msgstr ""
+msgstr "水"
 
 #: ui/components/calendar.slint:165 ui/components/calendar.slint:800
 msgctxt "Thursday initial"
 msgid "T"
-msgstr ""
+msgstr "木"
 
 #: ui/components/calendar.slint:166 ui/components/calendar.slint:800
 msgctxt "Friday initial"
 msgid "F"
-msgstr ""
+msgstr "金"
 
 #: ui/components/calendar.slint:167 ui/components/calendar.slint:800
 msgctxt "Saturday initial"
 msgid "S"
-msgstr ""
+msgstr "土"
 
 #: ui/components/calendar.slint:168 ui/components/calendar.slint:800
 msgctxt "Sunday initial"
 msgid "S"
-msgstr ""
+msgstr "日"
 
 #: ui/components/calendar.slint:214 ui/components/calendar.slint:624
 #: ui/components/calendar.slint:830
 msgid "Select {}"
-msgstr ""
+msgstr "{}を選択"
 
 #: ui/components/calendar.slint:234
 msgid "MY CALENDARS"
@@ -2548,11 +2558,11 @@ msgstr ""
 
 #: ui/components/calendar.slint:579
 msgid "Week"
-msgstr ""
+msgstr "週"
 
 #: ui/components/calendar.slint:580 ui/components/calendar.slint:769
 msgid "Month"
-msgstr ""
+msgstr "月"
 
 #: ui/components/calendar.slint:581 ui/components/calendar.slint:770
 msgid "Agenda"
@@ -3185,10 +3195,8 @@ msgid "Check for new mail"
 msgstr ""
 
 #: ui/components/sidebar-controls.slint:415
-#, fuzzy
-#| msgid "Account status: {}"
 msgid "Account settings"
-msgstr "アカウントの状態：{}"
+msgstr "アカウント設定"
 
 #: ui/components/sidebar.slint:119 ui/views/mail-list-pane.slint:1542
 msgid "New email"
@@ -3201,7 +3209,7 @@ msgstr "アカウントを追加"
 #: ui/components/sidebar.slint:173 ui/components/sidebar.slint:182
 #: ui/components/sidebar.slint:202
 msgid "Find folder or label"
-msgstr ""
+msgstr "フォルダーやラベルを検索"
 
 #: ui/components/sidebar.slint:219
 msgid "Clear folder filter"
@@ -4068,6 +4076,10 @@ msgid ""
 "(.json), and mail saved as .mbox or .eml files, in maildir folders, or in "
 "ZIP archives of them."
 msgstr ""
+"Thunderbird for AndroidとK-9 Mailの設定（.k9s）、Thunderbirdのプロファイルの"
+"エクスポートファイル（.zip）、プロファイルフォルダー、prefs.js、Flectar Mail"
+"のバックアップ（.json）に対応しています。メールは.mbox、.eml、maildir"
+"フォルダー、およびそれらをまとめたZIPアーカイブに対応しています。"
 
 #: ui/dialogs/import-dialog.slint:576
 msgid ""
@@ -4235,10 +4247,8 @@ msgid "Recent"
 msgstr ""
 
 #: ui/dialogs/move-dialog.slint:49
-#, fuzzy
-#| msgid "Collapse folder"
 msgid "All folders"
-msgstr "フォルダーを折りたたむ"
+msgstr "すべてのフォルダー"
 
 #: ui/dialogs/move-dialog.slint:74 ui/dialogs/move-dialog.slint:198
 msgid "Copy to"
@@ -4249,10 +4259,8 @@ msgid "Move to"
 msgstr ""
 
 #: ui/dialogs/move-dialog.slint:219 ui/dialogs/move-dialog.slint:220
-#, fuzzy
-#| msgid "Rename folder"
 msgid "Search folders"
-msgstr "フォルダー名を変更"
+msgstr "フォルダーを検索"
 
 #: ui/dialogs/move-dialog.slint:232 ui/views/files-view.slint:581
 msgid "Folders"
@@ -4526,51 +4534,51 @@ msgstr "すべてのメール"
 
 #: ui/dialogs/settings-dialog.slint:669
 msgid "Always"
-msgstr ""
+msgstr "常に残す"
 
 #: ui/dialogs/settings-dialog.slint:670
 msgid "Until deleted here"
-msgstr ""
+msgstr "Flectar Mail で削除するまで"
 
 #: ui/dialogs/settings-dialog.slint:671
 msgid "7 days"
-msgstr ""
+msgstr "7日間"
 
 #: ui/dialogs/settings-dialog.slint:672
 msgid "14 days"
-msgstr ""
+msgstr "14日間"
 
 #: ui/dialogs/settings-dialog.slint:673
 msgid "30 days"
-msgstr ""
+msgstr "30日間"
 
 #: ui/dialogs/settings-dialog.slint:674
 msgid "Until downloaded"
-msgstr ""
+msgstr "ダウンロードするまで"
 
 #: ui/dialogs/settings-dialog.slint:677
 msgid "System language"
-msgstr ""
+msgstr "システムの言語"
 
 #: ui/dialogs/settings-dialog.slint:678
 msgid "English"
-msgstr ""
+msgstr "英語"
 
 #: ui/dialogs/settings-dialog.slint:679
 msgid "Spanish"
-msgstr ""
+msgstr "スペイン語"
 
 #: ui/dialogs/settings-dialog.slint:680
 msgid "Turkish"
-msgstr ""
+msgstr "トルコ語"
 
 #: ui/dialogs/settings-dialog.slint:681
 msgid "Simplified Chinese"
-msgstr ""
+msgstr "中国語（簡体字）"
 
 #: ui/dialogs/settings-dialog.slint:682
 msgid "Russian"
-msgstr ""
+msgstr "ロシア語"
 
 #: ui/dialogs/settings-dialog.slint:685
 msgid "Automatic"
@@ -4578,11 +4586,11 @@ msgstr "自動"
 
 #: ui/dialogs/settings-dialog.slint:686
 msgid "12-hour"
-msgstr ""
+msgstr "12時間表示"
 
 #: ui/dialogs/settings-dialog.slint:687
 msgid "24-hour"
-msgstr ""
+msgstr "24時間表示"
 
 #: ui/dialogs/settings-dialog.slint:718
 msgid ""
@@ -4633,15 +4641,15 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:731 ui/dialogs/settings-dialog.slint:2698
 msgid "Privacy policy"
-msgstr ""
+msgstr "プライバシーポリシー"
 
 #: ui/dialogs/settings-dialog.slint:1023 ui/dialogs/settings-dialog.slint:2804
 msgid "SETTINGS"
-msgstr ""
+msgstr "設定"
 
 #: ui/dialogs/settings-dialog.slint:1026 ui/dialogs/settings-dialog.slint:2806
 msgid "No settings found"
-msgstr ""
+msgstr "該当する設定が見つかりません"
 
 #: ui/dialogs/settings-dialog.slint:1027 ui/dialogs/settings-dialog.slint:1057
 #: ui/dialogs/settings-dialog.slint:2807
@@ -4670,12 +4678,12 @@ msgstr "ストレージ"
 #: ui/dialogs/settings-dialog.slint:1033 ui/dialogs/settings-dialog.slint:2507
 #: ui/dialogs/settings-dialog.slint:2813
 msgid "Services"
-msgstr ""
+msgstr "サービス"
 
 #: ui/dialogs/settings-dialog.slint:1034 ui/dialogs/settings-dialog.slint:2594
 #: ui/dialogs/settings-dialog.slint:2814
 msgid "About"
-msgstr ""
+msgstr "Flectar Mailについて"
 
 #: ui/dialogs/settings-dialog.slint:1058
 msgid "Manage appearance, privacy, and synchronization."
@@ -4683,15 +4691,15 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1070
 msgid "Message appearance"
-msgstr ""
+msgstr "メールの表示"
 
 #: ui/dialogs/settings-dialog.slint:1071
 msgid "Choose the background and text colors used to read messages."
-msgstr ""
+msgstr "メールを読むときの背景色と文字色を選びます。"
 
 #: ui/dialogs/settings-dialog.slint:1072
 msgid "Follow app theme"
-msgstr ""
+msgstr "アプリのテーマに合わせる"
 
 #: ui/dialogs/settings-dialog.slint:1131
 msgid "Interface"
@@ -4735,7 +4743,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1213
 msgid "Language and time"
-msgstr ""
+msgstr "言語と時刻"
 
 #: ui/dialogs/settings-dialog.slint:1216
 msgid "Display language"
@@ -4743,23 +4751,23 @@ msgstr "表示言語"
 
 #: ui/dialogs/settings-dialog.slint:1217
 msgid "Follow your device language when a translation is available."
-msgstr ""
+msgstr "翻訳が利用可能な場合は、お使いのデバイスの言語設定に従います。"
 
 #: ui/dialogs/settings-dialog.slint:1217
 msgid "Choose the language used throughout Flectar Mail."
-msgstr ""
+msgstr "Flectar Mail で使用する言語を選択してください。"
 
 #: ui/dialogs/settings-dialog.slint:1227
 msgid "Time format"
-msgstr ""
+msgstr "時刻の形式"
 
 #: ui/dialogs/settings-dialog.slint:1228
 msgid "Follow your region, for example {}."
-msgstr ""
+msgstr "地域の設定に従います（例：{}）。"
 
 #: ui/dialogs/settings-dialog.slint:1228
 msgid "Times appear as {}."
-msgstr ""
+msgstr "時刻は{}のように表示されます。"
 
 #: ui/dialogs/settings-dialog.slint:1250
 msgid "Inbox behavior"
@@ -4849,7 +4857,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1403
 msgid "Default email app"
-msgstr ""
+msgstr "既定のメールアプリ"
 
 #: ui/dialogs/settings-dialog.slint:1406
 msgid "Email links in browsers and other apps open in Flectar Mail."
@@ -4869,11 +4877,13 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1409
 msgid "Open email links from browsers and other apps in Flectar Mail."
-msgstr ""
+msgstr "ブラウザーやほかのアプリのメールリンクをFlectar Mailで開きます。"
 
 #: ui/dialogs/settings-dialog.slint:1416
 msgid "Opens Default apps in Windows Settings, where you choose Flectar Mail."
 msgstr ""
+"Windowsの設定で「既定のアプリ」が開きます。そこでFlectar Mailを選択してくださ"
+"い。"
 
 #: ui/dialogs/settings-dialog.slint:1417
 msgid "macOS asks you to confirm the change."
@@ -4891,30 +4901,28 @@ msgid ""
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1434
-#, fuzzy
-#| msgid "Provider default"
 msgid "Make default"
-msgstr "プロバイダーの既定値"
+msgstr "既定にする"
 
 #: ui/dialogs/settings-dialog.slint:1442
 msgid "Remove from Windows"
-msgstr ""
+msgstr "Windowsへの登録を解除"
 
 #: ui/dialogs/settings-dialog.slint:1463
 msgid "Sync and notifications"
-msgstr ""
+msgstr "同期と通知"
 
 #: ui/dialogs/settings-dialog.slint:1467
 msgid "How often to refresh when an instant provider update is unavailable."
-msgstr ""
+msgstr "メールサービスから更新情報をすぐに受け取れない場合の同期間隔を設定します。"
 
 #: ui/dialogs/settings-dialog.slint:1477 ui/dialogs/settings-dialog.slint:2422
 msgid "Desktop notifications"
-msgstr ""
+msgstr "デスクトップ通知"
 
 #: ui/dialogs/settings-dialog.slint:1478 ui/dialogs/settings-dialog.slint:2423
 msgid "Choose which incoming messages can alert you."
-msgstr ""
+msgstr "どの新着メールを通知の対象にするかを選びます。"
 
 #: ui/dialogs/settings-dialog.slint:1491
 msgid "Provider synchronization is ready."
@@ -5283,7 +5291,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2292
 msgid "https://contacts.example.com/"
-msgstr ""
+msgstr "https://contacts.example.com/"
 
 #: ui/dialogs/settings-dialog.slint:2293 ui/dialogs/settings-dialog.slint:2917
 #: ui/dialogs/settings-dialog.slint:3047
@@ -5363,6 +5371,9 @@ msgid_plural ""
 "Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a "
 "backup, or export {n} connected accounts and your preferences."
 msgstr[0] ""
+"Thunderbird、K-9 Mail、メールファイル、バックアップからアカウントやメールを"
+"インポートできます。また、接続済みアカウント{n}件と設定をエクスポートすること"
+"もできます。"
 
 #: ui/dialogs/settings-dialog.slint:2373
 msgid ""
@@ -5372,7 +5383,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2382
 msgid "Export"
-msgstr ""
+msgstr "エクスポート"
 
 #: ui/dialogs/settings-dialog.slint:2389
 msgid "Delete all local data"
@@ -5402,11 +5413,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2392 ui/dialogs/settings-dialog.slint:3337
 msgid "Delete everything"
-msgstr ""
+msgstr "すべてを削除"
 
 #: ui/dialogs/settings-dialog.slint:2406
 msgid "Choose how Flectar Mail gets your attention."
-msgstr ""
+msgstr "Flectar Mailから通知を受け取る方法を選んでください。"
 
 #: ui/dialogs/settings-dialog.slint:2433
 msgid "Notification sounds"
@@ -5418,7 +5429,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2454
 msgid "Keyboard shortcuts"
-msgstr ""
+msgstr "キーボードショートカット"
 
 #: ui/dialogs/settings-dialog.slint:2455
 msgid "Move through mail without leaving the keyboard."
@@ -5441,79 +5452,75 @@ msgid "Search mail"
 msgstr "メールを検索"
 
 #: ui/dialogs/settings-dialog.slint:2463
-#, fuzzy
-#| msgid "Rename folder"
 msgid "Move to a folder"
-msgstr "フォルダー名を変更"
+msgstr "フォルダーに移動"
 
 #: ui/dialogs/settings-dialog.slint:2464
-#, fuzzy
-#| msgid "Rename folder"
 msgid "Copy to a folder"
-msgstr "フォルダー名を変更"
+msgstr "フォルダーにコピー"
 
 #: ui/dialogs/settings-dialog.slint:2465 ui/views/mail-list-pane.slint:801
 #: ui/views/mail-reading-pane.slint:355 ui/views/mail-reading-pane.slint:834
 msgid "Move to spam"
-msgstr ""
+msgstr "迷惑メールフォルダーに移動"
 
 #: ui/dialogs/settings-dialog.slint:2466 ui/views/mail-list-pane.slint:810
 #: ui/views/mail-reading-pane.slint:335 ui/views/mail-reading-pane.slint:376
 #: ui/views/mail-reading-pane.slint:414
 msgid "Move to trash"
-msgstr ""
+msgstr "ゴミ箱に移動"
 
 #: ui/dialogs/settings-dialog.slint:2468
 msgid "Navigation"
-msgstr ""
+msgstr "ナビゲーション"
 
 #: ui/dialogs/settings-dialog.slint:2469
 msgid "Move between messages"
-msgstr ""
+msgstr "前後のメールに移動"
 
 #: ui/dialogs/settings-dialog.slint:2470
 msgid "Open message"
-msgstr ""
+msgstr "メールを開く"
 
 #: ui/dialogs/settings-dialog.slint:2471
 msgid "Select message"
-msgstr ""
+msgstr "メールを選択"
 
 #: ui/dialogs/settings-dialog.slint:2472
 msgid "Switch between list and message"
-msgstr ""
+msgstr "メール一覧と本文の操作先を切り替え"
 
 #: ui/dialogs/settings-dialog.slint:2474
 msgid "Reading"
-msgstr ""
+msgstr "メールの閲覧"
 
 #: ui/dialogs/settings-dialog.slint:2475 ui/views/mail-reading-pane.slint:1301
 msgid "Find in message"
-msgstr ""
+msgstr "メール内を検索"
 
 #: ui/dialogs/settings-dialog.slint:2478
 msgid "Reset zoom"
-msgstr ""
+msgstr "拡大率をリセット"
 
 #: ui/dialogs/settings-dialog.slint:2479 ui/views/mail-reading-pane.slint:1630
 msgid "Caret browsing"
-msgstr ""
+msgstr "カーソルを使って本文を操作"
 
 #: ui/dialogs/settings-dialog.slint:2485
 msgid "Next tab"
-msgstr ""
+msgstr "次のタブ"
 
 #: ui/dialogs/settings-dialog.slint:2486
 msgid "Previous tab"
-msgstr ""
+msgstr "前のタブ"
 
 #: ui/dialogs/settings-dialog.slint:2487
 msgid "Go to tab 1–8"
-msgstr ""
+msgstr "タブ1～8に移動"
 
 #: ui/dialogs/settings-dialog.slint:2488
 msgid "Go to last tab"
-msgstr ""
+msgstr "最後のタブに移動"
 
 #: ui/dialogs/settings-dialog.slint:2508
 msgid ""
@@ -6704,19 +6711,19 @@ msgstr "メール履歴"
 
 #: ui/views/mail-list-pane.slint:680
 msgid "This week"
-msgstr ""
+msgstr "今週"
 
 #: ui/views/mail-list-pane.slint:681
 msgid "Last week"
-msgstr ""
+msgstr "先週"
 
 #: ui/views/mail-list-pane.slint:682
 msgid "This month"
-msgstr ""
+msgstr "今月"
 
 #: ui/views/mail-list-pane.slint:683
 msgid "Last month"
-msgstr ""
+msgstr "先月"
 
 #: ui/views/mail-list-pane.slint:684
 msgid "Earlier"
@@ -6756,11 +6763,11 @@ msgstr ""
 
 #: ui/views/mail-list-pane.slint:792
 msgid "Archive selected message"
-msgstr ""
+msgstr "選択したメールをアーカイブ"
 
 #: ui/views/mail-list-pane.slint:810
 msgid "Delete selected permanently"
-msgstr ""
+msgstr "選択したメールを完全に削除"
 
 #: ui/views/mail-list-pane.slint:823 ui/views/mail-reading-pane.slint:1055
 msgid "More message actions"
@@ -6768,11 +6775,11 @@ msgstr ""
 
 #: ui/views/mail-list-pane.slint:830
 msgid "Open in new tabs"
-msgstr ""
+msgstr "新しいタブで開く"
 
 #: ui/views/mail-list-pane.slint:830 ui/views/mail-list-pane.slint:1433
 msgid "Open in new tab"
-msgstr ""
+msgstr "新しいタブで開く"
 
 #: ui/views/mail-list-pane.slint:835 ui/views/mail-list-pane.slint:1440
 #: ui/views/mail-reading-pane.slint:373 ui/views/mail-reading-pane.slint:412
@@ -6787,26 +6794,26 @@ msgstr ""
 #: ui/views/mail-list-pane.slint:848 ui/views/mail-list-pane.slint:1436
 #: ui/views/mail-reading-pane.slint:371 ui/views/mail-reading-pane.slint:411
 msgid "Mark as read"
-msgstr ""
+msgstr "既読にする"
 
 #: ui/views/mail-list-pane.slint:849 ui/views/mail-list-pane.slint:1436
 #: ui/views/mail-reading-pane.slint:371 ui/views/mail-reading-pane.slint:411
 msgid "Mark as unread"
-msgstr ""
+msgstr "未読にする"
 
 #: ui/views/mail-list-pane.slint:850 ui/views/mail-list-pane.slint:1435
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:403
 msgid "Star message"
-msgstr ""
+msgstr "スターを付ける"
 
 #: ui/views/mail-list-pane.slint:851 ui/views/mail-list-pane.slint:1435
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:403
 msgid "Remove star"
-msgstr ""
+msgstr "スターを外す"
 
 #: ui/views/mail-list-pane.slint:978 ui/views/mail-list-pane.slint:1237
 msgid "(No subject)"
-msgstr ""
+msgstr "（件名なし）"
 
 #: ui/views/mail-list-pane.slint:980
 msgid "Profile: {}"
@@ -6847,11 +6854,11 @@ msgstr ""
 
 #: ui/views/mail-list-pane.slint:1519
 msgid "Nothing here"
-msgstr ""
+msgstr "表示するメールがありません"
 
 #: ui/views/mail-list-pane.slint:1520
 msgid "Try another folder or search term."
-msgstr ""
+msgstr "別のフォルダーを選ぶか、検索キーワードを変えてみてください。"
 
 #: ui/views/mail-reading-pane.slint:148
 msgid "Rendering message…"
@@ -6859,11 +6866,11 @@ msgstr ""
 
 #: ui/views/mail-reading-pane.slint:196
 msgid "Message from {}"
-msgstr ""
+msgstr "{}からのメール"
 
 #: ui/views/mail-reading-pane.slint:196 ui/views/mail-reading-pane.slint:221
 msgid "You"
-msgstr ""
+msgstr "自分"
 
 #: ui/views/mail-reading-pane.slint:237
 msgid "Verified brand with BIMI authority evidence"
@@ -6932,7 +6939,7 @@ msgstr ""
 #: ui/views/mail-reading-pane.slint:346 ui/views/mail-reading-pane.slint:366
 #: ui/views/mail-reading-pane.slint:406
 msgid "Open in browser"
-msgstr ""
+msgstr "ブラウザで開く"
 
 #: ui/views/mail-reading-pane.slint:743
 msgid "Close conversation"
@@ -6964,7 +6971,7 @@ msgstr ""
 
 #: ui/views/mail-reading-pane.slint:1004 ui/views/mail-reading-pane.slint:2018
 msgid "Edit label"
-msgstr ""
+msgstr "ラベルを編集"
 
 #: ui/views/mail-reading-pane.slint:1021
 msgid "No matching labels"
