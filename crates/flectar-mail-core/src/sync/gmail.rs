@@ -115,6 +115,8 @@ pub(crate) mod cost {
     pub(super) const LABELS_GET: u32 = 1;
     pub(super) const LABELS_CREATE: u32 = 5;
     pub(super) const LABELS_UPDATE: u32 = 5;
+    /// Google lists no cost for labels.patch, so it counts as labels.update.
+    pub(super) const LABELS_PATCH: u32 = LABELS_UPDATE;
     pub(super) const LABELS_DELETE: u32 = 5;
     pub(super) const MESSAGES_LIST: u32 = 5;
     /// messages.get with the `metadata` or `minimal` format.
@@ -289,6 +291,28 @@ impl GmailApi {
             let response = self
                 .http
                 .put(url)
+                .bearer_auth(token)
+                .json(body)
+                .send()
+                .await
+                .map_err(network_error)?;
+            let result = google_json(response).await;
+            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
+                self.ctx.tokens.invalidate(self.account.id).await;
+                continue;
+            }
+            return result;
+        }
+        Err(CoreError::NeedsReauth)
+    }
+
+    async fn patch_json(&self, url: &str, body: &Value, units: u32) -> Result<Value> {
+        for attempt in 0..2 {
+            let token = self.token().await?;
+            self.spend(units);
+            let response = self
+                .http
+                .patch(url)
                 .bearer_auth(token)
                 .json(body)
                 .send()
@@ -866,6 +890,20 @@ impl GmailApi {
     }
 
     async fn update_label(&self, provider_id: &str, name: &str, color: Option<&str>) -> Result<()> {
+        self.update_label_at(GMAIL_API, provider_id, name, color)
+            .await
+    }
+
+    /// Renames and recolors a label with labels.patch, which changes only
+    /// what it's given: labels.update replaces the whole label, and Gmail
+    /// requires its list visibilities too.
+    async fn update_label_at(
+        &self,
+        base: &str,
+        provider_id: &str,
+        name: &str,
+        color: Option<&str>,
+    ) -> Result<()> {
         let mut body = json!({ "name": name });
         if let Some(background) = color.and_then(gmail_palette_color) {
             body["color"] = json!({
@@ -873,10 +911,10 @@ impl GmailApi {
                 "textColor": contrasting_text(background),
             });
         }
-        self.put_json(
-            &format!("{GMAIL_API}/labels/{}", urlencode(provider_id)),
+        self.patch_json(
+            &format!("{base}/labels/{}", urlencode(provider_id)),
             &body,
-            cost::LABELS_UPDATE,
+            cost::LABELS_PATCH,
         )
         .await?;
         Ok(())
