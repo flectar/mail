@@ -3275,6 +3275,8 @@ impl Core {
         self.db
             .write(move |conn| repo::accounts::set_sync_state(conn, account_id, "idle"))
             .await?;
+        // New credentials: work in the background may sign in at once.
+        self.pace.account(account_id).signed_in();
         let has_handle = self.handles.read().await.contains_key(&account_id);
         if has_handle {
             if let Some(handle) = self.handles.read().await.get(&account_id) {

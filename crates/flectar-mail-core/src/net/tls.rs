@@ -251,9 +251,17 @@ pub(crate) fn http_config() -> rustls::ClientConfig {
 /// The start of every HTTP client of the app: reqwest's builder with these
 /// certificate checks (`http_config`). On Android only these checks work,
 /// so clippy.toml rejects reqwest's own constructors everywhere else.
+///
+/// Responses come as servers send them. Only a client that asks for gzip,
+/// such as the Gmail API's, gets compressed ones, because reqwest asks for
+/// gzip on byte-range requests too and then can't decode the part it gets.
+/// It also unpacks a .gz file that a server labels as compressed in transit,
+/// and a decoded response loses its Content-Length.
 #[allow(clippy::disallowed_methods)]
 pub fn client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().tls_backend_preconfigured(http_config())
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(http_config())
+        .no_gzip()
 }
 
 fn system_connector() -> TlsConnector {
