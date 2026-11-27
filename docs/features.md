@@ -678,9 +678,16 @@ and writes each link's address after its text, and Undo brings them back. A
 plain-text message shows the original it answers as the quoted text that goes
 out, its signature goes in as text, and pictures dropped on it are attached.
 **Formatted text** switches back. Each account chooses how its messages start
-in Settings → Accounts, under its sender identities and signatures, and replies
-and forwards to plain-text messages start as plain text unless that's turned
-off there. A draft opens again as it was saved.
+in the **Composing** tab of Settings → Accounts, beside its sender identities
+and signatures, and replies and forwards to plain-text messages start as plain
+text unless that's turned off there. In plain text, quotes are written with
+`>` as they go out, and with **Plain text in a fixed-width font** the message
+is written in the font it's read in. A draft opens again as it was saved.
+
+A reply quotes the original without its signature, the lines after `-- `, and
+each quote level takes one more `>`. **Start replies below the quote**, in the
+same tab, puts the original into the reply as text to answer between its
+lines, with the reply written below it and the signature after that.
 
 The plain text of every message, on its own or beside the formatted one, goes
 out as format=flowed (RFC 3676). Lines wrap at 72 characters, quotes are

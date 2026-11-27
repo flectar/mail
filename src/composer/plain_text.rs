@@ -124,10 +124,16 @@ impl ComposeSession {
     }
 }
 
-/// An original's plain text, below a message being written, as HTML the quote renderer shows.
+/// An original's plain text, below a message being written, as HTML the quote renderer shows,
+/// in the fixed-width font when plain text shows in it (#544).
 pub(super) fn plain_quote_html(plain: &str) -> String {
+    let font = if crate::plain_text_view::look().fixed_width {
+        "font-family:monospace,monospace;"
+    } else {
+        ""
+    };
     let mut html = format!(
-        "<body style=\"margin:8px 0;font-size:{}px\"><div style=\"white-space:pre-wrap\">",
+        "<body style=\"margin:8px 0;{font}font-size:{}px\"><div style=\"white-space:pre-wrap\">",
         crate::compose_editor::FONT_SIZE_LOGICAL
     );
     crate::email_document::append_escaped(&mut html, plain);

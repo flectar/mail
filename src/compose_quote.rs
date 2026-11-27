@@ -26,14 +26,21 @@ pub(crate) struct ComposeQuote {
 
 impl ComposeQuote {
     /// A reply quoting `text`, or `html` when the original has an HTML part.
-    /// `attribution` is the "On …, X wrote:" line.
+    /// `attribution` is the "On …, X wrote:" line. Each line takes one more
+    /// `>`, with no space between the marks, as format=flowed reads quote
+    /// levels (RFC 3676 section 4.5).
     pub(crate) fn reply(attribution: &str, text: &str, html: Option<&str>) -> Self {
         let text = text.trim_end();
         let mut plain = String::with_capacity(attribution.len() + text.len() + 64);
         plain.push_str(attribution);
         for line in text.lines() {
-            plain.push_str("\n> ");
-            plain.push_str(line);
+            let (depth, content) = flectar_mail_core::mime::flowed::quote_marks(line);
+            plain.push('\n');
+            plain.extend(std::iter::repeat_n('>', depth + 1));
+            if !content.is_empty() {
+                plain.push(' ');
+                plain.push_str(content);
+            }
         }
         let mut block = format!("<div class=\"{QUOTE_CLASS}\"><div>");
         append_escaped(&mut block, attribution);
@@ -132,6 +139,21 @@ impl ComposeQuote {
             html: block.to_owned(),
         })
     }
+}
+
+/// `text` without its signature: the Usenet separator line "-- " and all
+/// that follows, which a reply leaves out of what it quotes. A quoted
+/// separator belongs to an earlier message and stays.
+pub(crate) fn without_signature(text: &str) -> &str {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        if content.strip_suffix('\r').unwrap_or(content) == "-- " {
+            return text[..offset].trim_end();
+        }
+        offset += line.len();
+    }
+    text
 }
 
 /// Where the quote block starts, if the HTML ends with one.
@@ -278,6 +300,33 @@ mod tests {
             "<div class=\"flectar-quote\"><div>On Mon, Maya &lt;maya@example.com&gt; wrote:<br></div>\
              <blockquote type=\"cite\" style=\"margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex\">\
              <p>First <b>line</b></p></blockquote></div>"
+        );
+    }
+
+    #[test]
+    fn nested_quotes_take_one_more_mark_without_spaces() {
+        let quote = ComposeQuote::reply(
+            "Maya wrote:",
+            "Sure\n\n> Earlier\n> > Older, spaced\n>> Older\n  indented",
+            None,
+        );
+        assert_eq!(
+            quote.plain,
+            "Maya wrote:\n> Sure\n>\n>> Earlier\n>>> Older, spaced\n>>> Older\n>   indented"
+        );
+    }
+
+    #[test]
+    fn a_reply_leaves_the_signature_out() {
+        assert_eq!(
+            without_signature("Thanks\n\n-- \nMaya\nBuild team\n"),
+            "Thanks"
+        );
+        assert_eq!(without_signature("Thanks\r\n-- \r\nMaya"), "Thanks");
+        // A quoted signature, and dashes that aren't the separator, stay.
+        assert_eq!(
+            without_signature("Hi\n> -- \n> Pat\n--\nbye"),
+            "Hi\n> -- \n> Pat\n--\nbye"
         );
     }
 

@@ -75,6 +75,9 @@ export global AccountMailPreferences {
     // New messages ask for a read receipt, which each message can change.
     in-out property <bool> request-read-receipts: false;
     callback save-read-receipt-requests;
+    // Replies start below the original they quote, which goes into the message as text.
+    in-out property <bool> reply-below-quote: false;
+    callback save-reply-below-quote;
     callback load(int);
     callback edit-signature(int);
     // Opens the chosen signature, or a new one, in the composer to write.
@@ -318,8 +321,8 @@ export component AccountMailPreferencesPanel inherits Rectangle {
     }
     content := VerticalBox {
         padding: 20px; spacing: 12px; alignment: start;
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Sender identities, signatures, OpenPGP & automatic replies"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage its sender identity, signature, message protection and automatic replies."); color: AppTheme.secondary; wrap: word-wrap; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Sender identities, signatures, composing, OpenPGP & automatic replies"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage its sender identity, signature, how its messages are written, message protection and automatic replies."); color: AppTheme.secondary; wrap: word-wrap; }
         for account in root.accounts : Button {
             text: account.email;
             primary: AccountMailPreferences.account-id == account.id;
@@ -331,6 +334,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
             Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.account-label; color: AppTheme.heading; font-weight: 600; overflow: elide; }
             HorizontalBox {
                 Button { text: @tr("Signatures"); primary: root.tab == "signatures"; clicked => { root.tab = "signatures"; } }
+                Button { text: @tr("Composing"); primary: root.tab == "composing"; clicked => { root.tab = "composing"; } }
                 Button { text: @tr("OpenPGP"); primary: root.tab == "openpgp"; clicked => { root.tab = "openpgp"; } }
                 Button { text: @tr("Automatic replies"); primary: root.tab == "replies"; clicked => { root.tab = "replies"; } }
             }
@@ -476,7 +480,9 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     selected(index, value) => { AccountMailPreferences.reply-index = index; }
                 }
                 Button { text: @tr("Save signature defaults"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-defaults(); } }
-                Rectangle { height: 1px; background: AppTheme.input-border; }
+            }
+            if root.tab == "composing" : VerticalBox {
+                spacing: 10px;
                 SettingsSelectRow {
                     compact: root.compact; title: @tr("Message format"); description: @tr("How new messages start. Each message can change it.");
                     choices: [@tr("message format" => "Formatted text"), @tr("message format" => "Plain text")];
@@ -493,6 +499,13 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     enabled: !AccountMailPreferences.busy;
                     title-color: AppTheme.heading; description-color: AppTheme.secondary;
                     toggled(on) => { AccountMailPreferences.save-message-format(); }
+                }
+                SettingsSwitchRow {
+                    compact: root.compact; title: @tr("Start replies below the quote"); description: @tr("The message you answer goes into your reply as text, to answer between its lines, and you write below it.");
+                    checked <=> AccountMailPreferences.reply-below-quote;
+                    enabled: !AccountMailPreferences.busy;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    toggled(on) => { AccountMailPreferences.save-reply-below-quote(); }
                 }
                 SettingsSwitchRow {
                     compact: root.compact; title: @tr("Request read receipts"); description: @tr("New messages ask to be told when they're read. Each message can change it under More options.");

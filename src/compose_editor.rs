@@ -48,6 +48,9 @@ pub struct ComposeEditorStyle {
     pub selected_text: Color,
     /// The wavy line under misspelled words.
     pub misspelling: Color,
+    /// All text in the fixed-width font, as plain text shows when that's
+    /// chosen in Settings (#544), whatever font its formatting names.
+    pub fixed_width: bool,
 }
 
 #[derive(Clone)]
@@ -77,6 +80,7 @@ struct LayoutKey {
     link_color: u32,
     /// How an empty last line lines up, which follows the caret.
     last_line_align: Alignment,
+    fixed_width: bool,
 }
 
 /// Retained cosmic-text layout and raster cache for the composer body.
@@ -661,6 +665,7 @@ impl CosmicComposeEditor {
             text_color: style.text.as_argb_encoded(),
             link_color: style.link.as_argb_encoded(),
             last_line_align,
+            fixed_width: style.fixed_width,
         };
         let preedit_offset = valid_offset(text, selection.end);
         if self.layout_key == Some(key)
@@ -674,14 +679,18 @@ impl CosmicComposeEditor {
             FONT_SIZE_LOGICAL * scale_factor,
             LINE_HEIGHT_LOGICAL * scale_factor,
         );
-        let default_attrs = Attrs::new()
-            .family(Family::Name(UI_FONT_FAMILY))
-            .color(cosmic_color(style.text));
+        let family = if style.fixed_width {
+            Family::Monospace
+        } else {
+            Family::Name(UI_FONT_FAMILY)
+        };
+        let default_attrs = Attrs::new().family(family).color(cosmic_color(style.text));
         let look = TextLook {
             dark: luminance(style.text) > 0.5,
             metrics,
             link: cosmic_color(style.link),
             width: physical_width as f32,
+            fixed_width: style.fixed_width,
         };
         let mut images = Vec::new();
         let mut spans = rich_spans(
@@ -1383,6 +1392,8 @@ struct TextLook {
     link: CosmicColor,
     /// The width text lays out in, which images shrink to fit.
     width: f32,
+    /// Every font is the fixed-width one.
+    fixed_width: bool,
 }
 
 /// Marks a glyph's metadata as highlighted, with the highlight's color in its low bits.
@@ -1445,7 +1456,7 @@ fn character_attrs(
         FontFamily::Serif => attrs = attrs.family(Family::Serif),
         FontFamily::Monospace => attrs = attrs.family(Family::Monospace),
     }
-    if style.marks & CODE != 0 {
+    if style.marks & CODE != 0 || look.fixed_width {
         attrs = attrs.family(Family::Monospace);
     }
     if style.size != TextSize::Normal {
@@ -1981,6 +1992,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut surface = CosmicComposeEditor::default();
@@ -2072,6 +2084,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(255, 0, 0),
+            fixed_width: false,
         };
         for scale in [1.0, 2.0] {
             let render = |surface: &mut CosmicComposeEditor| {
@@ -2140,6 +2153,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         let mut document = RichComposeDocument::default();
         document.synchronize("abc def\nsecond line", 0, 0);
@@ -2188,6 +2202,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2324,6 +2339,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2392,6 +2408,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2443,6 +2460,7 @@ mod tests {
             metrics: Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
             link: CosmicColor::rgb(0, 90, 180),
             width: 600.0,
+            fixed_width: false,
         }
     }
 
@@ -2487,6 +2505,7 @@ mod tests {
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
+                fixed_width: false,
             },
             "",
         );
@@ -2529,6 +2548,7 @@ mod tests {
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
+                fixed_width: false,
             },
             "世界",
         );
@@ -2550,6 +2570,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
 
         for text in ["\n", "first\n", "\nsecond", "first\nsecond"] {
@@ -2609,6 +2630,7 @@ mod tests {
                 selection: Color::from_argb_u8(140, 60, 120, 220),
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
+                fixed_width: false,
             },
             "",
         );
@@ -2711,6 +2733,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
+            fixed_width: false,
         };
         let quote = (0..40)
             .map(|line| format!("> Row {line}: café العربية 👩‍💻 quoted text that wraps\n"))
@@ -2784,6 +2807,7 @@ mod tests {
             selection: Color::from_argb_u8(140, 60, 120, 220),
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(255, 0, 0),
+            fixed_width: false,
         }
     }
 
