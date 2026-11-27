@@ -1159,6 +1159,7 @@ fn long_quoted_conversations_paint_with_the_software_renderer() {
             MailMessage {
                 id: 100 + index,
                 html: Some(quoted.clone()),
+                html_part: true,
                 ..thread.clone()
             }
         })

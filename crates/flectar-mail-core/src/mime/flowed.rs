@@ -204,7 +204,7 @@ pub fn encode(text: &str) -> String {
 /// The quote depth of a line of text that isn't flowed, and what follows its
 /// quote marks. Marks may have a space between them, as some mail apps write
 /// them, and one space after them is part of the marks.
-fn quote_marks(line: &str) -> (usize, &str) {
+pub fn quote_marks(line: &str) -> (usize, &str) {
     let mut depth = 0;
     let mut rest = line;
     loop {

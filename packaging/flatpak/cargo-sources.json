@@ -5262,6 +5262,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/linkify/linkify-0.12.0.crate",
+        "sha256": "19ddb16a872aaef460efdefe77da5f20e12226d220580952710c4a9d60e1aa7c",
+        "dest": "cargo/vendor/linkify-0.12.0"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"19ddb16a872aaef460efdefe77da5f20e12226d220580952710c4a9d60e1aa7c\", \"files\": {}}",
+        "dest": "cargo/vendor/linkify-0.12.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/linktime-proc-macro/linktime-proc-macro-0.2.3.crate",
         "sha256": "7e57c38c1e860fd37c604281cdfb1dd2216977fd76a50f85ba2f388ef3219616",
         "dest": "cargo/vendor/linktime-proc-macro-0.2.3"

@@ -789,6 +789,7 @@ pub(super) fn restore_account_backup(
     app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
     state.borrow_mut().mark_read = settings.mark_read;
+    crate::startup::apply_reading(app, &settings);
     app.set_remote_images_enabled(settings.load_remote_images && cfg!(feature = "remote-content"));
     app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     Ok(restore)

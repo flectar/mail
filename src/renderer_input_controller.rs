@@ -301,6 +301,7 @@ pub(super) fn register_renderer_input_callbacks(
         };
         match command {
             "viewport" => repaint_reader(&host, &r, gpu),
+            "plain-text" => crate::plain_text_view::switch_shown(&host),
             "zoom-set" | "zoom-in" | "zoom-out" | "zoom-reset" | "fit" => {
                 let old = r.borrow().zoom;
                 let zoom = match command {

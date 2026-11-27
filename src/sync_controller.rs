@@ -1225,6 +1225,7 @@ fn show_preferences(
     }
     app.set_mark_read(settings.mark_read.as_str().into());
     state.borrow_mut().mark_read = settings.mark_read;
+    startup::apply_reading(app, settings);
     app.global::<crate::ReadReceipts>()
         .set_policy(settings.read_receipts.as_str().into());
     crate::apply_list_rows(app, settings);

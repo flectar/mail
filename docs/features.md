@@ -486,6 +486,18 @@ It uses your selected color palette for HTML, plain text, and Reader mode.
 Plain-text mail written as format=flowed (RFC 3676) shows each paragraph as
 one, wrapping with the window rather than at the sender's line length. Mail
 downloaded before this was supported reads its text again when it's opened.
+Plain-text mail shows each quote level as a colored bar beside the quoted
+text, links web and email addresses, and sets the signature apart. **Plain
+text in a fixed-width font** in Settings → General keeps the columns senders
+lined up. It's on by default on the desktop and off on phones, and each device
+keeps its own choice.
+
+**Show messages as** in Settings → General chooses how messages open, as their
+senders formatted them, in Reader mode, or as plain text. Plain text shows the
+text a sender wrote beside the HTML, or else the HTML's text. **View plain
+text** in a message's menu switches one message, and **Show formatted
+message** switches it back. A reply to a message shown as plain text quotes
+its text as it was written, quote marks included.
 To temporarily show the sender's original colors, use the contrast icon between
 Find and Reader mode in the desktop message toolbar, or choose **Show original
 colors** from the message's three-dot menu on any screen size.

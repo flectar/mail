@@ -112,6 +112,9 @@ pub struct MailMessage {
     pub labels: Vec<i64>,
     pub html: Option<String>,
     pub text: Option<String>,
+    /// The message has HTML of its own, beside or instead of its text. Mail
+    /// with only text always shows as plain text (#544).
+    pub html_part: bool,
     /// The row is showing its snippet while the core fetches the real MIME
     /// body. The shell uses this to retry a missed/late MailUpdated event.
     pub body_pending: bool,
@@ -181,6 +184,7 @@ impl MailMessage {
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
             text: None,
+            html_part: true,
             body_pending: false,
             sender_verification: String::new(),
             can_unsubscribe: false,
@@ -2130,6 +2134,27 @@ impl CoreMailSource {
     ) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.mark_read = choice;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_message_view(
+        &self,
+        view: flectar_mail_core::models::MessageView,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.message_view = view;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_plain_text_fixed_width(&self, fixed_width: bool) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.plain_text_fixed_width = fixed_width;
         self.core
             .set_settings(settings)
             .await
@@ -4437,6 +4462,7 @@ fn summary_to_message(
         is_outgoing: false,
         labels: thread.labels,
         html: None,
+        html_part: false,
         text: None,
         body_pending: true,
         sender_verification: String::new(),
@@ -4566,6 +4592,7 @@ fn message_summary_to_message(
         is_outgoing: message.is_outgoing,
         labels: message.labels,
         html: None,
+        html_part: false,
         text: None,
         body_pending: true,
         sender_verification: String::new(),
@@ -4635,6 +4662,8 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
             &message.snippet,
         )
     });
+    let html_part = body_loaded
+        && own_html(message.html_body.as_deref(), message.text_body.as_deref()).is_some();
 
     let initials = initials(&sender);
     // The scheduled draft keeps when it goes out, or why it did not, which
@@ -4686,6 +4715,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         is_outgoing: message.is_outgoing,
         labels: row.labels.clone(),
         html,
+        html_part,
         text: if body_loaded {
             message.text_body.clone()
         } else {
@@ -4733,11 +4763,16 @@ fn detail_to_conversation_message(
     Some(projected)
 }
 
-fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) -> String {
+/// The HTML a message has of its own: not empty, and not its text in a `<pre>`,
+/// which is how the Gmail sync stores a message that has only text, so that it
+/// shows as plain-text mail from other accounts does.
+fn own_html<'a>(html: Option<&'a str>, text: Option<&str>) -> Option<&'a str> {
     html.filter(|value| !value.trim().is_empty())
-        // The Gmail sync stores a message that has only text as that text in
-        // a `<pre>`. Show it as plain-text mail from other accounts is shown.
         .filter(|value| !text.is_some_and(|text| is_text_in_pre(value, text)))
+}
+
+fn readable_message_html(html: Option<&str>, text: Option<&str>, snippet: &str) -> String {
+    own_html(html, text)
         .map(str::to_owned)
         .or_else(|| {
             text.filter(|value| !value.trim().is_empty())
@@ -4830,22 +4865,16 @@ fn text_to_html(text: &str) -> String {
     text_to_html_in(text, false)
 }
 
-/// A text body as the reader shows it, written right to left when its
+/// A text body as the reader shows it (#544), written right to left when its
 /// language is, as a translation into Arabic or Hebrew is (#240).
 pub(crate) fn text_to_html_in(text: &str, right_to_left: bool) -> String {
-    const PREFIX: &str = "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"";
-    const PRE: &str =
-        "><pre style=\"margin:0;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere\">";
-    const SUFFIX: &str = "</pre></body></html>";
-    let mut html = String::with_capacity(PREFIX.len() + PRE.len() + text.len() + SUFFIX.len() + 10);
-    html.push_str(PREFIX);
-    if right_to_left {
-        html.push_str(" dir=\"rtl\"");
-    }
-    html.push_str(PRE);
-    crate::email_document::append_escaped(&mut html, text);
-    html.push_str(SUFFIX);
-    html
+    crate::plain_text_view::document(
+        text,
+        crate::plain_text_view::Look {
+            right_to_left,
+            ..crate::plain_text_view::look()
+        },
+    )
 }
 
 fn markdown_options() -> Options {
@@ -5276,13 +5305,23 @@ mod tests {
 
     #[test]
     fn plain_text_body_preserves_reply_lines_and_quote_depth() {
+        // Each quote level shows as a bar instead of its marks (#544). A
+        // reply quotes the text as it was written, marks and all.
         let text = "Hi Tomas,\n\n> Earlier reply\n>> Older reply";
         let html = readable_message_html(None, Some(text), "preview");
         let prepared = crate::renderer::prepare_email_html(&html).unwrap();
 
         assert!(html.contains("white-space:pre-wrap"));
-        assert!(html.contains("&gt; Earlier reply\n&gt;&gt; Older reply"));
-        assert_eq!(prepared.plain_text, text);
+        assert!(html.contains(
+            "<div>Hi Tomas,</div><div><br></div><blockquote><div>Earlier reply</div>\
+             <blockquote><div>Older reply</div></blockquote></blockquote>"
+        ));
+        let lines: Vec<&str> = prepared
+            .plain_text
+            .lines()
+            .filter(|line| !line.is_empty())
+            .collect();
+        assert_eq!(lines, ["Hi Tomas,", "Earlier reply", "Older reply"]);
     }
 
     fn message_summary(from: &str, to: &[&str], outgoing: bool) -> MessageSummary {

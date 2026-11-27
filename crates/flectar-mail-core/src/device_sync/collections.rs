@@ -79,6 +79,7 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "undoSendSeconds",
     "loadRemoteImages",
     "markRead",
+    "messageView",
     "readReceipts",
     "listDensity",
     "previewLines",
