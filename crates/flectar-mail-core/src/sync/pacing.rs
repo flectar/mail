@@ -2,6 +2,9 @@
 //! asked to wait, between checks for new mail, and when many accounts start
 //! at once. Also how many connections an IMAP account opens for work in the
 //! background, and how much of its server's quota an account spent lately.
+//! And when work in the background signs in again after a server refused an
+//! account's sign-in: a refused password or token doesn't start working by
+//! itself, and servers lock accounts or ban addresses that keep failing.
 //!
 //! A failure such as a dropped connection is tried again soon, sooner than
 //! most clients do, since it is usually the network. A server that asked to
@@ -44,6 +47,14 @@ static HISTORY_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 /// How long a server counts what a request cost against the account's
 /// quota: Gmail limits the units a user spends in a minute.
 const QUOTA_WINDOW: Duration = Duration::from_secs(60);
+
+/// After a server refused an account's sign-in, work in the background signs
+/// in again this much later, then twice as late each time it's refused, up
+/// to [`REFUSED_MOST`]. The same sign-in won't work if tried again unchanged
+/// (RFC 9051 7.1), and fail2ban bans an address after 5 failures in 10
+/// minutes by default.
+const REFUSED_FIRST: Duration = Duration::from_secs(5 * 60);
+const REFUSED_MOST: Duration = Duration::from_secs(5 * 60 * 60);
 
 /// Accounts that start together connect at once up to this many; the rest
 /// take turns.
@@ -286,6 +297,10 @@ struct PaceState {
     /// What the account's requests cost in the last [`QUOTA_WINDOW`] and
     /// when each went out, oldest first.
     spent: VecDeque<(Instant, u32)>,
+    /// Sign-ins the server refused since the last that worked, and when work
+    /// in the background may sign in again.
+    refusals: u32,
+    sign_in_again: Option<Instant>,
 }
 
 impl AccountPace {
@@ -298,6 +313,8 @@ impl AccountPace {
                 bulk_owed: 0,
                 start: None,
                 spent: VecDeque::new(),
+                refusals: 0,
+                sign_in_again: None,
             }),
             bulk: Arc::new(Semaphore::new(BULK_CONNECTIONS)),
         }
@@ -407,6 +424,53 @@ impl AccountPace {
         }
         // More than the ceiling on its own: once nothing else counts.
         state.spent.back().map_or(now, |(at, _)| *at + QUOTA_WINDOW)
+    }
+
+    /// The server refused the account's sign-in, as with a password changed
+    /// elsewhere or access taken back: work in the background waits before it
+    /// signs in again, longer each time.
+    pub(crate) fn sign_in_refused(&self) {
+        let mut state = lock(&self.state);
+        let wait = doubled(REFUSED_FIRST, REFUSED_MOST, state.refusals);
+        state.refusals = state.refusals.saturating_add(1);
+        state.sign_in_again = Some(Instant::now() + wait);
+    }
+
+    /// The account signed in, or got new credentials: work in the background
+    /// may sign in whenever it needs.
+    pub(crate) fn signed_in(&self) {
+        let mut state = lock(&self.state);
+        state.refusals = 0;
+        state.sign_in_again = None;
+    }
+
+    /// Whether work in the background waits before it signs in again, after
+    /// the server refused the account's sign-in.
+    pub(crate) fn waits_to_sign_in(&self) -> bool {
+        lock(&self.state)
+            .sign_in_again
+            .is_some_and(|again| again > Instant::now())
+    }
+
+    /// Whether work in the background may sign in now. After a refusal only
+    /// one may try once the wait is over: it takes the turn, and the rest wait
+    /// for how that goes, so the account's connections don't all fail at once.
+    pub(crate) fn may_sign_in(&self) -> bool {
+        let mut state = lock(&self.state);
+        match state.sign_in_again {
+            None => true,
+            Some(again) if again > Instant::now() => false,
+            Some(_) => {
+                // Until this try says how it went.
+                let wait = doubled(
+                    REFUSED_FIRST,
+                    REFUSED_MOST,
+                    state.refusals.saturating_sub(1),
+                );
+                state.sign_in_again = Some(Instant::now() + wait);
+                true
+            }
+        }
     }
 
     fn fewer_connections(&self, state: &mut PaceState) {
@@ -805,5 +869,35 @@ mod tests {
         account.spend(20);
         let last = Instant::now();
         assert_eq!(account.room_at(3_000, 2_000), last + QUOTA_WINDOW);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_sign_in_is_tried_again_ever_later_and_once_at_a_time() {
+        let account = Pace::default().account(1);
+        assert!(account.may_sign_in() && !account.waits_to_sign_in());
+        account.sign_in_refused();
+        assert!(account.waits_to_sign_in());
+        assert!(!account.may_sign_in());
+        tokio::time::advance(REFUSED_FIRST).await;
+        // One connection takes the turn; the rest wait for how it goes.
+        assert!(account.may_sign_in());
+        assert!(!account.may_sign_in());
+        // Refused again: twice as long.
+        account.sign_in_refused();
+        tokio::time::advance(REFUSED_FIRST).await;
+        assert!(account.waits_to_sign_in());
+        tokio::time::advance(REFUSED_FIRST).await;
+        assert!(account.may_sign_in());
+        // A sign-in that works, or new credentials, end the wait.
+        account.sign_in_refused();
+        account.signed_in();
+        assert!(account.may_sign_in() && account.may_sign_in());
+        assert!(!account.waits_to_sign_in());
+        // Five hours at most.
+        for _ in 0..20 {
+            account.sign_in_refused();
+        }
+        tokio::time::advance(REFUSED_MOST).await;
+        assert!(account.may_sign_in());
     }
 }

@@ -2803,6 +2803,40 @@ async fn check_now(tx: &mpsc::Sender<SyncCmd>) -> std::result::Result<(), String
         .unwrap()
 }
 
+/// After the server refused the account's sign-in, work in the background
+/// doesn't sign in again until the wait is over or the account gets new
+/// credentials: servers lock accounts, and fail2ban bans addresses, that
+/// keep failing.
+#[tokio::test]
+async fn a_refused_sign_in_holds_work_in_the_background_back() {
+    let (port, sign_ins) =
+        refusing_server("NO [AUTHENTICATIONFAILED] Authentication failed.").await;
+    let (_dir, ctx, config, _) = deleted_mail_context(port).await;
+    let pace = ctx.pace.account(config.id);
+    let tries = || sign_ins.load(std::sync::atomic::Ordering::SeqCst);
+
+    let refused = connect(&ctx, &config).await.map(|_| ()).unwrap_err();
+    assert!(matches!(refused, CoreError::Auth(_)), "{refused}");
+    assert_eq!(tries(), 1);
+    assert!(pace.waits_to_sign_in());
+
+    // Work in the background doesn't ask the server in the meantime.
+    for _ in 0..3 {
+        let waiting = connect_in_background(&ctx, &config)
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert!(matches!(waiting, CoreError::NeedsReauth), "{waiting}");
+    }
+    assert_eq!(tries(), 1);
+
+    // New credentials let it sign in again at once.
+    pace.signed_in();
+    let _ = connect_in_background(&ctx, &config).await;
+    assert_eq!(tries(), 2);
+    assert!(pace.waits_to_sign_in());
+}
+
 #[tokio::test]
 async fn an_account_with_too_many_connections_waits_and_opens_fewer() {
     // Gmail's words when an account has too many connections open.

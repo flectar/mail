@@ -1898,6 +1898,28 @@ pub(super) async fn emit_sync_status(ctx: &SyncCtx, account_id: i64) {
 }
 
 pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
+    let session = sign_in(ctx, config).await;
+    // How signing in went decides when work in the background signs in again.
+    let pace = ctx.pace.account(config.id);
+    match &session {
+        Ok(_) => pace.signed_in(),
+        Err(CoreError::NeedsReauth | CoreError::Auth(_)) => pace.sign_in_refused(),
+        Err(_) => {}
+    }
+    session
+}
+
+/// [`connect`] for work in the background. After the server refused the
+/// account's sign-in, only one connection signs in again, once the wait is
+/// over; the rest give up for now as if refused too.
+async fn connect_in_background(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
+    if !ctx.pace.account(config.id).may_sign_in() {
+        return Err(CoreError::NeedsReauth);
+    }
+    connect(ctx, config).await
+}
+
+async fn sign_in(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
     crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
     let creds = imap_credentials(ctx, config).await?;
     crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
@@ -2818,9 +2840,10 @@ async fn run_history_backfill(
             }
         }
 
-        // While the server asks to wait, older mail waits too.
+        // While the server asks to wait, or refused the account's sign-in,
+        // older mail waits too.
         let pace = ctx.pace.account(account_id);
-        if pace.paused().is_some() {
+        if pace.paused().is_some() || pace.waits_to_sign_in() {
             continue;
         }
         // Accounts take turns downloading older mail, on one of the
@@ -2884,7 +2907,7 @@ async fn run_history_backfill(
                     continue;
                 }
                 if session.is_none() {
-                    match connect(&ctx, &config).await {
+                    match connect_in_background(&ctx, &config).await {
                         Ok(s) => session = Some(s),
                         Err(e) => {
                             tracing::warn!(account_id, error = %e, "history backfill: connect failed");
@@ -3053,7 +3076,7 @@ async fn relink_waiting_mail(
     since: chrono::NaiveDate,
 ) -> Result<()> {
     if session.is_none() {
-        *session = Some(connect(ctx, config).await?);
+        *session = Some(connect_in_background(ctx, config).await?);
     }
     let Some(s) = session.as_mut() else {
         return Ok(());
@@ -3126,7 +3149,7 @@ async fn retry_one_header_failure(
         return Ok(true);
     }
     if session.is_none() {
-        *session = Some(connect(ctx, config).await?);
+        *session = Some(connect_in_background(ctx, config).await?);
     }
     let s = session
         .as_mut()
@@ -4470,8 +4493,10 @@ async fn run_backfill_pool(
         }
         // Coalesce nudges that piled up while the previous drain ran.
         while rx.try_recv().is_ok() {}
-        // While the server asks to wait, downloads wait too.
-        if ctx.pace.account(account_id).paused().is_some() {
+        // While the server asks to wait, or refused the account's sign-in,
+        // downloads wait too.
+        let pace = ctx.pace.account(account_id);
+        if pace.paused().is_some() || pace.waits_to_sign_in() {
             continue;
         }
         if let Err(e) = drain_missing_bodies(&ctx, &config, &mut settings_rx).await {
@@ -4692,7 +4717,7 @@ async fn body_worker(
             detail: pause.reason,
         });
     }
-    let mut session = match connect(&ctx, &config).await {
+    let mut session = match connect_in_background(&ctx, &config).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(account_id, error = %e, "body worker: connect failed");
@@ -4769,7 +4794,7 @@ async fn body_worker(
                         pending.push_front(retry);
                     }
                     drop(session);
-                    match connect(&ctx, &config).await {
+                    match connect_in_background(&ctx, &config).await {
                         Ok(fresh) => {
                             session = fresh;
                             selected = None;
@@ -4792,7 +4817,7 @@ async fn body_worker(
                     if queue.lock().await.is_empty() {
                         return Ok(());
                     }
-                    session = connect(&ctx, &config).await?;
+                    session = connect_in_background(&ctx, &config).await?;
                     selected = None;
                     continue;
                 } else {
