@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-17 12:53+0000\n"
+"PO-Revision-Date: 2026-11-22 10:02+0000\n"
 "Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"X-Generator: Weblate 2026.11.2\n"
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Answer by AI"
@@ -20,39 +20,31 @@ msgstr ""
 
 #: ui/ai-summary.slint:65 ui/ai-summary.slint:87
 msgid "Summary by AI"
-msgstr ""
+msgstr "AIによる要約"
 
 #: ui/ai-summary.slint:93
 msgid "AI can be wrong. Check what matters in the messages."
 msgstr ""
 
 #: ui/ai-summary.slint:104
-#, fuzzy
-#| msgid "Close tab"
 msgid "Close the summary"
-msgstr "タブを閉じる"
+msgstr "要約を閉じる"
 
 #: ui/ai-summary.slint:110 ui/app.slint:659
-#, fuzzy
-#| msgid "Archive message"
 msgid "Asking the AI server…"
-msgstr "メールをアーカイブ"
+msgstr "AI サーバーに問い合わせ中…"
 
 #: ui/ai-summary.slint:110
-#, fuzzy
-#| msgid "Archive message"
 msgid "Summarizing the conversation…"
-msgstr "メールをアーカイブ"
+msgstr "スレッドを要約中…"
 
 #: ui/ai-summary.slint:119 ui/app.slint:653
 msgid "Set up an AI server in Settings to use AI features."
 msgstr ""
 
 #: ui/ai-summary.slint:127 ui/translation.slint:346
-#, fuzzy
-#| msgid "Account settings"
 msgid "AI settings"
-msgstr "アカウント設定"
+msgstr "AI 設定"
 
 #: ui/ai-summary.slint:127 ui/components/account-status.slint:155
 #: ui/translation.slint:156
@@ -64,10 +56,8 @@ msgid "A message in this conversation tries to instruct the AI."
 msgstr ""
 
 #: ui/ai-summary.slint:179
-#, fuzzy
-#| msgid "Next tab"
 msgid "Next: {}"
-msgstr "次のタブ"
+msgstr "次のアクション：{}"
 
 #: ui/ai-summary.slint:188
 msgid "Not in the messages, so don't trust these:"
@@ -94,10 +84,8 @@ msgid "Reply with this"
 msgstr ""
 
 #: ui/ai-summary.slint:260
-#, fuzzy
-#| msgid "Automatic"
 msgid "Suggest replies"
-msgstr "自動"
+msgstr "返信を提案"
 
 #: ui/ai-summary.slint:264
 msgid "Suggesting replies…"
@@ -108,13 +96,12 @@ msgid "The server didn't accept the key."
 msgstr ""
 
 #: ui/ai.slint:52
-#, fuzzy
-#| msgid "Could not save this profile. Check the name and try again."
 msgid ""
 "The server can't be reached. Check the address and that the server is "
 "running."
 msgstr ""
-"プロファイルを保存できませんでした。名前を確認して、もう一度お試しください。"
+"サーバーに接続できません。アドレスとサーバーが起動しているか確認してください"
+"。"
 
 #: ui/ai.slint:53 ui/translation.slint:81
 msgid ""
@@ -123,10 +110,8 @@ msgid ""
 msgstr ""
 
 #: ui/ai.slint:54
-#, fuzzy
-#| msgid "Collapse folder"
 msgid "Choose a model first."
-msgstr "フォルダーを折りたたむ"
+msgstr "先にモデルを選択してください。"
 
 #: ui/ai.slint:55
 msgid ""
@@ -149,10 +134,8 @@ msgid ""
 msgstr ""
 
 #: ui/ai.slint:127 ui/network.slint:128 ui/network.slint:144
-#, fuzzy
-#| msgid "Services"
 msgid "Server"
-msgstr "サービス"
+msgstr "サーバー"
 
 #: ui/ai.slint:129
 msgid ""
@@ -163,33 +146,27 @@ msgstr ""
 #: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4302
 #: ui/translation.slint:328
 msgid "Server address"
-msgstr ""
+msgstr "サーバーアドレス"
 
 #: ui/ai.slint:144 ui/ai.slint:156 ui/ai.slint:166
 msgid "Model"
-msgstr ""
+msgstr "モデル"
 
 #: ui/ai.slint:167
-#, fuzzy
-#| msgid "Nothing here"
 msgid "The model's name on the server"
-msgstr "表示するメールがありません"
+msgstr "サーバー上のモデル名"
 
 #: ui/ai.slint:173
-#, fuzzy
-#| msgid "Delete folder"
 msgid "List models"
-msgstr "フォルダーを削除"
+msgstr "モデル一覧を取得"
 
 #: ui/ai.slint:183 ui/translation.slint:353
 msgid "A key is saved."
-msgstr ""
+msgstr "API キーを保存しました。"
 
 #: ui/ai.slint:190 ui/translation.slint:360
-#, fuzzy
-#| msgid "Remove star"
 msgid "Remove key"
-msgstr "スターを外す"
+msgstr "API キーを削除"
 
 #: ui/ai.slint:195 ui/translation.slint:365
 msgid "API key, if the server asks for one"
@@ -202,17 +179,12 @@ msgid "Save"
 msgstr "保存"
 
 #: ui/ai.slint:217
-#, fuzzy
-#| msgid "Archive message"
 msgid "Checking the server…"
-msgstr "メールをアーカイブ"
+msgstr "サーバーを確認中…"
 
 #: ui/ai.slint:218
-#, fuzzy
-#| msgid "Message marked as read."
-#| msgid_plural "{0} messages marked as read."
 msgid "The server is ready."
-msgstr "{0}件のメールを既読にしました。"
+msgstr "サーバーの準備ができました。"
 
 #: ui/ai.slint:247
 msgid "Your prompts"
@@ -228,13 +200,11 @@ msgstr ""
 #: ui/ai.slint:258 ui/components/rule-editor.slint:354
 #: ui/views/files-view.slint:582
 msgid "Name"
-msgstr ""
+msgstr "名前"
 
 #: ui/ai.slint:259
-#, fuzzy
-#| msgid "Shortcuts"
 msgid "Shorter"
-msgstr "ショートカット"
+msgstr "短くする"
 
 #: ui/ai.slint:265
 msgid "What it asks for"
@@ -250,34 +220,24 @@ msgid "Remove"
 msgstr "削除"
 
 #: ui/ai.slint:276 ui/translation.slint:253
-#, fuzzy
-#| msgid "Remove"
 msgid "Remove {}"
-msgstr "削除"
+msgstr "{}を削除"
 
 #: ui/ai.slint:286
-#, fuzzy
-#| msgid "Add an account"
 msgid "Add a prompt"
-msgstr "アカウントを追加"
+msgstr "プロンプトを追加"
 
 #: ui/ai.slint:292
-#, fuzzy
-#| msgid "Save profile"
 msgid "Save prompts"
-msgstr "プロファイルを保存"
+msgstr "プロンプトを保存"
 
 #: ui/ai.slint:296
-#, fuzzy
-#| msgid "Profile saved."
 msgid "Prompts saved."
-msgstr "プロファイル設定を保存しました。"
+msgstr "プロンプトを保存しました。"
 
 #: ui/ai.slint:317
-#, fuzzy
-#| msgid "Archive message"
 msgid "What the server gets"
-msgstr "メールをアーカイブ"
+msgstr "サーバーに送信される内容"
 
 #: ui/ai.slint:319
 msgid ""
@@ -691,10 +651,8 @@ msgid "No connected account"
 msgstr ""
 
 #: ui/app.slint:260
-#, fuzzy
-#| msgid "Account settings"
 msgid "No account sends mail"
-msgstr "アカウント設定"
+msgstr "送信できるアカウントがありません"
 
 #: ui/app.slint:262
 msgid "{n} interaction"
@@ -737,11 +695,9 @@ msgid_plural "{n} unread messages"
 msgstr[0] "{n} 件の未読メール"
 
 #: ui/app.slint:279 ui/tray.slint:25
-#, fuzzy
-#| msgid "Next conversation"
 msgid "{n} unread conversation"
 msgid_plural "{n} unread conversations"
-msgstr[0] "次のスレッド"
+msgstr[0] "{n} 件の未読スレッド"
 
 #. Local mail has no archive or spam.
 #: ui/app.slint:281 ui/components/rule-editor.slint:70
@@ -871,16 +827,12 @@ msgid_plural "Rule applied to {0} messages."
 msgstr[0] "{0}件のメールにルールを適用しました。"
 
 #: ui/app.slint:345
-#, fuzzy
-#| msgid "Language preference saved."
 msgid "Cleanup preference saved."
-msgstr "言語設定を保存しました。"
+msgstr "自動削除の設定を保存しました。"
 
 #: ui/app.slint:346
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not save the cleanup preference: {}"
-msgstr "前後のメールに移動"
+msgstr "自動削除の設定を保存できませんでした：{}"
 
 #: ui/app.slint:347
 msgid "Notification preferences are active for this session."
@@ -891,66 +843,48 @@ msgid "Notification preferences saved."
 msgstr "通知設定を保存しました。"
 
 #: ui/app.slint:349
-#, fuzzy
-#| msgid "Theme preference saved."
 msgid "Update preference saved."
-msgstr "テーマ設定を保存しました。"
+msgstr "アップデート設定を保存しました。"
 
 #: ui/app.slint:350
 msgid "AI agents can be set up once an account is added."
 msgstr ""
 
 #: ui/app.slint:351
-#, fuzzy
-#| msgid "New folder"
 msgid "No folders"
-msgstr "新しいフォルダー"
+msgstr "フォルダーなし"
 
 #: ui/app.slint:352 ui/dialogs/move-dialog.slint:51
 msgid "All folders"
 msgstr "すべてのフォルダー"
 
 #: ui/app.slint:353
-#, fuzzy
-#| msgid "Add account"
 msgid "Listed accounts"
-msgstr "アカウントを追加"
+msgstr "アカウント一覧を取得"
 
 #: ui/app.slint:354
-#, fuzzy
-#| msgid "Delete folder"
 msgid "Listed folders"
-msgstr "フォルダーを削除"
+msgstr "フォルダー一覧を取得"
 
 #: ui/app.slint:355
-#, fuzzy
-#| msgid "Edit label"
 msgid "Listed labels"
-msgstr "ラベルを編集"
+msgstr "ラベル一覧を取得"
 
 #: ui/app.slint:356
-#, fuzzy
-#| msgid "New messages"
 msgid "Listed messages"
-msgstr "新しいメール"
+msgstr "メール一覧を取得"
 
 #: ui/app.slint:357
-#, fuzzy
-#| msgid "Star message"
 msgid "Searched messages"
-msgstr "スターを付ける"
+msgstr "メールを検索"
 
 #: ui/app.slint:358
-#, fuzzy
-#| msgid "New messages"
 msgid "Read a message"
-msgstr "新しいメール"
+msgstr "メールを閲覧"
 
 #: ui/app.slint:359
-#, fuzzy
-#| msgid "Next conversation"
 msgid "Read a conversation"
-msgstr "次のスレッド"
+msgstr "スレッドを閲覧"
 
 #: ui/app.slint:360
 msgid "Searched contacts"
@@ -961,44 +895,32 @@ msgid "Listed calendar events"
 msgstr ""
 
 #: ui/app.slint:362
-#, fuzzy
-#| msgid "Save draft"
 msgid "Wrote a draft"
-msgstr "下書きに保存"
+msgstr "下書きを作成"
 
 #: ui/app.slint:363 ui/dialogs/settings-dialog.slint:3462
 msgid "Mail on this device"
 msgstr ""
 
 #: ui/app.slint:364
-#, fuzzy
-#| msgid "Save draft"
 msgid "Changed a draft"
-msgstr "下書きに保存"
+msgstr "下書きを変更"
 
 #: ui/app.slint:365
-#, fuzzy
-#| msgid "Star message"
 msgid "Marked messages"
-msgstr "スターを付ける"
+msgstr "メールの状態を変更"
 
 #: ui/app.slint:366
-#, fuzzy
-#| msgid "New messages"
 msgid "Moved messages"
-msgstr "新しいメール"
+msgstr "メールを移動"
 
 #: ui/app.slint:367
-#, fuzzy
-#| msgid "New messages"
 msgid "Labeled messages"
-msgstr "新しいメール"
+msgstr "メールにラベルを付与"
 
 #: ui/app.slint:368
-#, fuzzy
-#| msgid "Remove from Windows"
 msgid "Asked to send a draft"
-msgstr "Windowsへの登録を解除"
+msgstr "下書きの送信確認をリクエスト"
 
 #: ui/app.slint:369
 msgid ""
@@ -1032,10 +954,8 @@ msgid "Failed"
 msgstr ""
 
 #: ui/app.slint:376
-#, fuzzy
-#| msgid "Other"
 msgid "Other apps"
-msgstr "その他"
+msgstr "その他のアプリ"
 
 #: ui/app.slint:377
 msgid ""
@@ -1086,16 +1006,12 @@ msgid "Add to LM Studio"
 msgstr ""
 
 #: ui/app.slint:387
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not save AI agent access: {}"
-msgstr "前後のメールに移動"
+msgstr "AI エージェントのアクセス設定を保存できませんでした：{}"
 
 #: ui/app.slint:388
-#, fuzzy
-#| msgid "All folders"
 msgid "All folders except {}"
-msgstr "すべてのフォルダー"
+msgstr "{}を除くすべてのフォルダー"
 
 #: ui/app.slint:389
 msgid "Only {}"
@@ -1106,12 +1022,9 @@ msgid "Used {}"
 msgstr ""
 
 #: ui/app.slint:391
-#, fuzzy
-#| msgid "{n} event"
-#| msgid_plural "{n} events"
 msgid "{n} result"
 msgid_plural "{n} results"
-msgstr[0] "{n}個の予定"
+msgstr[0] "{n} 件の結果"
 
 #: ui/app.slint:392
 msgid "Could not open the app: {}"
@@ -1130,23 +1043,17 @@ msgid "Environment: {}"
 msgstr ""
 
 #: ui/app.slint:396
-#, fuzzy
-#| msgid "Move to a folder"
 msgid "{0} of {n} folder"
 msgid_plural "{0} of {n} folders"
-msgstr[0] "フォルダーに移動"
+msgstr[0] "{0} / {n} フォルダー"
 
 #: ui/app.slint:397
-#, fuzzy
-#| msgid "Theme preference saved."
 msgid "Undo send preference saved."
-msgstr "テーマ設定を保存しました。"
+msgstr "送信取り消し設定を保存しました。"
 
 #: ui/app.slint:398
-#, fuzzy
-#| msgid "Theme preference saved."
 msgid "Text style preference saved."
-msgstr "テーマ設定を保存しました。"
+msgstr "書式設定を保存しました。"
 
 #: ui/app.slint:399
 msgid "Could not save notifications: {}"
@@ -1154,7 +1061,7 @@ msgstr ""
 
 #: ui/app.slint:400
 msgid "Could not save the update preference: {}"
-msgstr ""
+msgstr "アップデート設定を保存できませんでした：{}"
 
 #: ui/app.slint:401
 msgid "Could not save the undo send preference: {}"
@@ -1237,10 +1144,8 @@ msgid "Could not save message appearance: {}"
 msgstr ""
 
 #: ui/app.slint:421
-#, fuzzy
-#| msgid "Notification preferences saved."
 msgid "Reduce motion preference saved."
-msgstr "通知設定を保存しました。"
+msgstr "アニメーションを減らす設定を保存しました。"
 
 #: ui/app.slint:422
 msgid "Reduce motion updated for this session."
@@ -1427,10 +1332,8 @@ msgid "Message list preference updated for this session."
 msgstr ""
 
 #: ui/app.slint:468
-#, fuzzy
-#| msgid "Notification preferences saved."
 msgid "Message list preference saved."
-msgstr "通知設定を保存しました。"
+msgstr "メール一覧の設定を保存しました。"
 
 #: ui/app.slint:469
 msgid "Could not save message list preference: {}"
@@ -1830,23 +1733,17 @@ msgid "Could not disconnect CardDAV: {}"
 msgstr ""
 
 #: ui/app.slint:576
-#, fuzzy
-#| msgid "New folder"
 msgctxt "special folder"
 msgid "No folder"
-msgstr "新しいフォルダー"
+msgstr "フォルダーなし"
 
 #: ui/app.slint:577
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not read the folders: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "フォルダーを読み込めませんでした：{}"
 
 #: ui/app.slint:578
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not choose the folder: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "フォルダーを選択できませんでした：{}"
 
 #: ui/app.slint:583
 msgid "Connect an account before creating a backup."
@@ -2031,10 +1928,8 @@ msgid "Event deleted."
 msgstr ""
 
 #: ui/app.slint:640
-#, fuzzy
-#| msgid "Discovered from your email domain"
 msgid "Removed from your calendar."
-msgstr "メールアドレスのドメインから自動検出"
+msgstr "カレンダーから削除しました。"
 
 #: ui/app.slint:641
 msgid "Could not answer: {}"
@@ -2049,20 +1944,16 @@ msgid "Could not add the event: {}"
 msgstr ""
 
 #: ui/app.slint:644
-#, fuzzy
-#| msgid "Notification preferences saved."
 msgid "Calendar invitations preference saved."
-msgstr "通知設定を保存しました。"
+msgstr "カレンダーの招待設定を保存しました。"
 
 #: ui/app.slint:645
 msgid "Could not save the calendar invitations preference: {}"
 msgstr ""
 
 #: ui/app.slint:646
-#, fuzzy
-#| msgid "Notification preferences saved."
 msgid "Read receipt preference saved."
-msgstr "通知設定を保存しました。"
+msgstr "開封確認の設定を保存しました。"
 
 #: ui/app.slint:647
 msgid "Could not save the read receipt preference: {}"
@@ -2073,37 +1964,28 @@ msgid "Could not answer the read receipt request: {}"
 msgstr ""
 
 #: ui/app.slint:649
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not show the message: {}"
-msgstr "前後のメールに移動"
+msgstr "メールを表示できませんでした：{}"
 
 #: ui/app.slint:650
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not save the translation setting: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "翻訳設定を保存できませんでした：{}"
 
 #: ui/app.slint:651
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not remove the key: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "API キーを削除できませんでした：{}"
 
 #: ui/app.slint:652
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not save the prompts: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "プロンプトを保存できませんでした：{}"
 
 #: ui/app.slint:654
-#, fuzzy
-#| msgid "Could not save this profile. Check the name and try again."
 msgid ""
 "The AI server can't be reached. Check its address in Settings and that it's "
 "running."
 msgstr ""
-"プロファイルを保存できませんでした。名前を確認して、もう一度お試しください。"
+"AI サーバーに接続できません。アドレスの設定とサーバーが起動しているかを確認し"
+"てください。"
 
 #: ui/app.slint:655
 msgid ""
@@ -2140,10 +2022,8 @@ msgid "The AI server found nothing to change."
 msgstr ""
 
 #: ui/app.slint:665
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic ({})"
-msgstr "自動"
+msgstr "自動（{}）"
 
 #: ui/app.slint:666
 msgid "Could not mark all as read: {}"
@@ -2256,38 +2136,28 @@ msgid "Updating folder settings…"
 msgstr ""
 
 #: ui/app.slint:703
-#, fuzzy
-#| msgid "Folder created."
 msgid "Folder settings updated."
-msgstr "フォルダーを作りました。"
+msgstr "フォルダー設定を更新しました。"
 
 #: ui/app.slint:704
-#, fuzzy
-#| msgid "Could not delete the rule: {}"
 msgid "Could not update folder settings: {}"
-msgstr "ルールを削除できませんでした：{}"
+msgstr "フォルダー設定を更新できませんでした：{}"
 
 #: ui/app.slint:705
 msgid "Sync settings require local mail data."
 msgstr ""
 
 #: ui/app.slint:706
-#, fuzzy
-#| msgid "Open system settings"
 msgid "Updating sync settings…"
-msgstr "システム設定を開く"
+msgstr "同期設定を更新中…"
 
 #: ui/app.slint:707
-#, fuzzy
-#| msgid "Folder created."
 msgid "Sync settings updated."
-msgstr "フォルダーを作りました。"
+msgstr "同期設定を更新しました。"
 
 #: ui/app.slint:708
-#, fuzzy
-#| msgid "Could not delete the rule: {}"
 msgid "Could not update sync settings: {}"
-msgstr "ルールを削除できませんでした：{}"
+msgstr "同期設定を更新できませんでした：{}"
 
 #: ui/app.slint:709
 msgid "Mail history requires local mail data."
@@ -2413,42 +2283,32 @@ msgid "Snoozed until {}"
 msgstr ""
 
 #: ui/app.slint:743
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not snooze mail: {}"
-msgstr "前後のメールに移動"
+msgstr "メールをスヌーズできませんでした：{}"
 
 #: ui/app.slint:744
 msgid "Scheduled to send {}"
 msgstr ""
 
 #: ui/app.slint:745
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not schedule the message: {}"
-msgstr "前後のメールに移動"
+msgstr "メールの送信を予約できませんでした：{}"
 
 #: ui/app.slint:746
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not send the message: {}"
-msgstr "前後のメールに移動"
+msgstr "メールを送信できませんでした：{}"
 
 #: ui/app.slint:747
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not cancel the send: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "送信をキャンセルできませんでした：{}"
 
 #: ui/app.slint:748
 msgid "Send cancelled. The message is a draft again."
 msgstr ""
 
 #: ui/app.slint:749
-#, fuzzy
-#| msgid "Times appear as {}."
 msgid "This message is no longer scheduled."
-msgstr "時刻は{}のように表示されます。"
+msgstr "このメールの送信予約はすでに解除されています。"
 
 #: ui/app.slint:750
 msgid "Choose a reminder after the time the message goes out."
@@ -2459,26 +2319,20 @@ msgid "Reminds you {} if nobody replies"
 msgstr ""
 
 #: ui/app.slint:752
-#, fuzzy
-#| msgid "Could not save the rule: {}"
 msgid "Could not set the reminder: {}"
-msgstr "ルールを保存できませんでした：{}"
+msgstr "リマインダーを設定できませんでした：{}"
 
 #: ui/app.slint:753
-#, fuzzy
-#| msgid "Folder renamed."
 msgid "Reminder removed."
-msgstr "フォルダー名を変更しました。"
+msgstr "リマインダーを削除しました。"
 
 #: ui/app.slint:754
 msgid "Save recovery code"
 msgstr ""
 
 #: ui/app.slint:755
-#, fuzzy
-#| msgid "Text"
 msgid "Text files"
-msgstr "文字"
+msgstr "テキストファイル"
 
 #: ui/app.slint:756
 msgid "No folder to copy this mail to."
@@ -2605,10 +2459,8 @@ msgid "Could not unsubscribe: {}"
 msgstr ""
 
 #: ui/app.slint:783
-#, fuzzy
-#| msgid "Message from {}"
 msgid "Unsubscribed from {}."
-msgstr "{}からのメール"
+msgstr "{}の配信を停止しました。"
 
 #: ui/app.slint:784
 msgid "Unsubscribe request sent to {}."
@@ -2766,20 +2618,16 @@ msgid "Forwarded message"
 msgstr ""
 
 #: ui/app.slint:826
-#, fuzzy
-#| msgid "Add profile"
 msgid "All profiles"
-msgstr "プロファイルを追加"
+msgstr "すべてのプロファイル"
 
 #: ui/app.slint:827
 msgid "A saved search named “{}” already exists."
 msgstr ""
 
 #: ui/app.slint:828
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Couldn't save the search: {}"
-msgstr "前後のメールに移動"
+msgstr "検索条件を保存できませんでした：{}"
 
 #: ui/app.slint:829
 msgctxt "forwarded message header"
@@ -2844,17 +2692,13 @@ msgid "Could not add images: {}"
 msgstr ""
 
 #: ui/app.slint:843
-#, fuzzy
-#| msgid "Archive message"
 msgid "Attaching the message…"
 msgid_plural "Attaching {0} messages…"
-msgstr[0] "メールをアーカイブ"
+msgstr[0] "{0} 件のメールを添付中…"
 
 #: ui/app.slint:844
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not attach a forwarded message: {}"
-msgstr "前後のメールに移動"
+msgstr "転送するメールを添付できませんでした：{}"
 
 #: ui/app.slint:845
 msgid "{} isn't a PNG, JPEG, GIF or WebP image."
@@ -2873,10 +2717,8 @@ msgid "Formatting and pictures removed. Undo restores them."
 msgstr ""
 
 #: ui/app.slint:849
-#, fuzzy
-#| msgid "Signature name"
 msgid "Give the signature a name."
-msgstr "署名の名前"
+msgstr "署名の名前を入力してください。"
 
 #: ui/app.slint:850
 msgid "A signature can hold pictures, but not attachments."
@@ -3013,20 +2855,16 @@ msgid "password protected"
 msgstr ""
 
 #: ui/app.slint:883
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Remove {} to send the message."
-msgstr "前後のメールに移動"
+msgstr "メールを送信するには {} を削除してください。"
 
 #: ui/app.slint:884
 msgid "Files over the 25 MB limit go as links."
 msgstr ""
 
 #: ui/app.slint:885
-#, fuzzy
-#| msgid "Notification preferences saved."
 msgid "Large files preference saved."
-msgstr "通知設定を保存しました。"
+msgstr "大容量ファイル設定を保存しました。"
 
 #: ui/app.slint:886
 msgid "Could not save the large files preference: {}"
@@ -3098,23 +2936,19 @@ msgstr ""
 
 #: ui/app.slint:901
 msgid "Testing IMAP and SMTP connections…"
-msgstr ""
+msgstr "IMAP と SMTP の接続をテスト中…"
 
 #: ui/app.slint:902
 msgid "Testing POP3 and SMTP connections…"
-msgstr ""
+msgstr "POP3 と SMTP の接続をテスト中…"
 
 #: ui/app.slint:903
-#, fuzzy
-#| msgid "Archive message"
 msgid "Testing the IMAP connection…"
-msgstr "メールをアーカイブ"
+msgstr "IMAP の接続をテスト中…"
 
 #: ui/app.slint:904
-#, fuzzy
-#| msgid "Archive message"
 msgid "Testing the POP3 connection…"
-msgstr "メールをアーカイブ"
+msgstr "POP3 の接続をテスト中…"
 
 #: ui/app.slint:909
 msgid ""
@@ -3123,17 +2957,13 @@ msgid ""
 msgstr ""
 
 #: ui/app.slint:910
-#, fuzzy
-#| msgid "Add account"
 msgid "{n} account"
 msgid_plural "{n} accounts"
-msgstr[0] "アカウントを追加"
+msgstr[0] "{n} 件のアカウント"
 
 #: ui/app.slint:911
-#, fuzzy
-#| msgid "Message from {}"
 msgid "{} · from {}"
-msgstr "{}からのメール"
+msgstr "{}・{}から"
 
 #: ui/app.slint:913
 msgid ""
@@ -3216,16 +3046,12 @@ msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr ""
 
 #: ui/app.slint:930 ui/network.slint:194
-#, fuzzy
-#| msgid "Saved"
 msgid "Saved."
-msgstr "保存済み"
+msgstr "保存しました。"
 
 #: ui/app.slint:931
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Could not save automatic replies: {}"
-msgstr "前後のメールに移動"
+msgstr "自動返信を保存できませんでした：{}"
 
 #: ui/app.slint:932 ui/dialogs/settings-dialog.slint:2790
 #: ui/dialogs/settings-dialog.slint:2833 ui/views/onboarding-view.slint:174
@@ -3353,23 +3179,16 @@ msgid "Delete permanently"
 msgstr ""
 
 #: ui/app.slint:2794
-#, fuzzy
-#| msgid "Mark as read"
 msgid "Mark all as read?"
-msgstr "既読にする"
+msgstr "すべて既読にしますか？"
 
 #: ui/app.slint:2796
-#, fuzzy
-#| msgid "Message marked as read."
-#| msgid_plural "{0} messages marked as read."
 msgid "All unread messages in {} will be marked as read."
-msgstr "{0}件のメールを既読にしました。"
+msgstr "{}内の未読メールがすべて既読になります。"
 
 #: ui/app.slint:2798
-#, fuzzy
-#| msgid "Mark as read"
 msgid "Mark all as read"
-msgstr "既読にする"
+msgstr "すべて既読にする"
 
 #: ui/app.slint:2816
 msgid "Run this rule on the Inbox?"
@@ -3390,10 +3209,8 @@ msgid "Undo takes it back."
 msgstr ""
 
 #: ui/app.slint:2822
-#, fuzzy
-#| msgid "New label"
 msgid "Run rule"
-msgstr "新しいラベル"
+msgstr "ルールを実行"
 
 #: ui/app.slint:2841
 msgid "Replace changes made elsewhere?"
@@ -3592,20 +3409,14 @@ msgid "Provided by the server"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:158
-#, fuzzy
-#| msgid "Sender identities, signatures & OpenPGP"
 msgid "Sender identities, signatures, OpenPGP & automatic replies"
-msgstr "差出人情報・署名・OpenPGP"
+msgstr "差出人情報・署名・OpenPGP・自動返信"
 
 #: ui/components/account-mail-preferences.slint:159
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, and message "
-#| "protection."
 msgid ""
 "Choose an account to manage its sender identity, signature, message "
 "protection and automatic replies."
-msgstr "差出人情報・署名・OpenPGPを設定するアカウントを選択します。"
+msgstr "差出人情報・署名・メール保護・自動返信を管理するアカウントを選択します。"
 
 #: ui/components/account-mail-preferences.slint:170
 msgid "Signatures"
@@ -3616,10 +3427,8 @@ msgid "OpenPGP"
 msgstr "OpenPGP"
 
 #: ui/components/account-mail-preferences.slint:172
-#, fuzzy
-#| msgid "Automatic"
 msgid "Automatic replies"
-msgstr "自動"
+msgstr "自動返信"
 
 #: ui/components/account-mail-preferences.slint:177
 msgid "Default sender identity"
@@ -3667,19 +3476,14 @@ msgstr ""
 "す。差出人として選択したいアドレスを追加してください。"
 
 #: ui/components/account-mail-preferences.slint:206
-#, fuzzy
-#| msgid ""
-#| "Add an alias or another address your mail server lets you send from. The "
-#| "server decides when you send; Flectar shows whether it accepted the last "
-#| "message."
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
 "server decides when you send; Flectar Mail shows whether it accepted the "
 "last message."
 msgstr ""
 "メールサーバーで使用できるエイリアスや別の差出人アドレスを追加してください。"
-"そのアドレスから送信できるかどうかは、送信時にサーバーが判断します。Flectarに"
-"は、直前に送信したメールをサーバーが受け付けたかどうかが表示されます。"
+"そのアドレスから送信できるかどうかは、送信時にサーバーが判断します。Flectar "
+"Mailには、直前に送信したメールをサーバーが受け付けたかどうかが表示されます。"
 
 #: ui/components/account-mail-preferences.slint:208
 #: ui/dialogs/settings-dialog.slint:4446 ui/views/onboarding-view.slint:287
@@ -3734,10 +3538,8 @@ msgid "Saved separately for each account."
 msgstr "アカウントごとに保存されます。"
 
 #: ui/components/account-mail-preferences.slint:236
-#, fuzzy
-#| msgid "Signature name"
 msgid "Signature preview"
-msgstr "署名の名前"
+msgstr "署名のプレビュー"
 
 #: ui/components/account-mail-preferences.slint:239
 msgid ""
@@ -3774,10 +3576,8 @@ msgid "Save signature defaults"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:260
-#, fuzzy
-#| msgid "Message from {}"
 msgid "Message format"
-msgstr "{}からのメール"
+msgstr "メール形式"
 
 #: ui/components/account-mail-preferences.slint:260
 msgid "How new messages start. Each message can change it."
@@ -4005,10 +3805,8 @@ msgid "Couldn't check mail"
 msgstr ""
 
 #: ui/components/account-status.slint:11
-#, fuzzy
-#| msgid "Nothing here"
 msgid "Waiting for the server"
-msgstr "表示するメールがありません"
+msgstr "サーバーの応答待ち"
 
 #: ui/components/account-status.slint:19
 msgid "Last checked yesterday at {}"
@@ -4037,12 +3835,9 @@ msgid ""
 msgstr ""
 
 #: ui/components/account-status.slint:121
-#, fuzzy
-#| msgctxt "date and time"
-#| msgid "{0} at {1}"
 msgctxt "two parts of a status line"
 msgid "{0} · {1}"
-msgstr "{0} {1}"
+msgstr "{0}・{1}"
 
 #: ui/components/account-status.slint:122
 msgid "Retrying automatically"
@@ -4061,10 +3856,8 @@ msgid "Sign in again"
 msgstr ""
 
 #: ui/components/account-status.slint:155
-#, fuzzy
-#| msgid "Sync now"
 msgid "Try now"
-msgstr "今すぐ同期"
+msgstr "今すぐ再試行"
 
 #: ui/components/agent-access-page.slint:67
 msgid ""
@@ -4084,10 +3877,8 @@ msgid ""
 msgstr ""
 
 #: ui/components/agent-access-page.slint:93
-#, fuzzy
-#| msgid "Mark as read"
 msgid "What agents can read"
-msgstr "既読にする"
+msgstr "エージェントが読み取れる範囲"
 
 #: ui/components/agent-access-page.slint:100
 msgid "Add an email account, and agents can read it here."
@@ -4102,22 +3893,16 @@ msgid "Done"
 msgstr ""
 
 #: ui/components/agent-access-page.slint:134
-#, fuzzy
-#| msgid "Collapse folder"
 msgid "Choose folders"
-msgstr "フォルダーを折りたたむ"
+msgstr "フォルダーを選択"
 
 #: ui/components/agent-access-page.slint:174
-#, fuzzy
-#| msgid "Mark as read"
 msgid "What agents can do"
-msgstr "既読にする"
+msgstr "エージェントができること"
 
 #: ui/components/agent-access-page.slint:180
-#, fuzzy
-#| msgid "Edit draft"
 msgid "Write drafts"
-msgstr "下書きを編集"
+msgstr "下書きを作成"
 
 #: ui/components/agent-access-page.slint:181
 msgid ""
@@ -4126,20 +3911,16 @@ msgid ""
 msgstr ""
 
 #: ui/components/agent-access-page.slint:190
-#, fuzzy
-#| msgid "Star message"
 msgid "Mark messages"
-msgstr "スターを付ける"
+msgstr "メールの状態を変更"
 
 #: ui/components/agent-access-page.slint:191
 msgid "Agents can mark messages read or unread, and flag them."
 msgstr ""
 
 #: ui/components/agent-access-page.slint:200
-#, fuzzy
-#| msgid "New messages"
 msgid "Move messages"
-msgstr "新しいメール"
+msgstr "メールを移動"
 
 #: ui/components/agent-access-page.slint:201
 msgid ""
@@ -4148,20 +3929,16 @@ msgid ""
 msgstr ""
 
 #: ui/components/agent-access-page.slint:210
-#, fuzzy
-#| msgid "New messages"
 msgid "Label messages"
-msgstr "新しいメール"
+msgstr "メールのラベルを変更"
 
 #: ui/components/agent-access-page.slint:211
 msgid "Agents can add your labels to messages and take them off."
 msgstr ""
 
 #: ui/components/agent-access-page.slint:220
-#, fuzzy
-#| msgid "Always"
 msgid "Ask to send"
-msgstr "常に残す"
+msgstr "送信確認をリクエスト"
 
 #: ui/components/agent-access-page.slint:221
 msgid ""
@@ -4170,16 +3947,12 @@ msgid ""
 msgstr ""
 
 #: ui/components/agent-access-page.slint:230
-#, fuzzy
-#| msgid "Connect account"
 msgid "Connect an app"
-msgstr "アカウントを接続"
+msgstr "アプリを接続"
 
 #: ui/components/agent-access-page.slint:236
-#, fuzzy
-#| msgid "Apply"
 msgid "App"
-msgstr "適用"
+msgstr "アプリ"
 
 #: ui/components/agent-access-page.slint:237
 msgid "The app that runs your agent."
@@ -4214,10 +3987,8 @@ msgid "You can undo what agents change for a week."
 msgstr ""
 
 #: ui/components/agent-access-page.slint:374
-#, fuzzy
-#| msgid "Clear selection"
 msgid "Clear activity"
-msgstr "選択を解除"
+msgstr "履歴を消去"
 
 #: ui/components/agent-access-page.slint:382
 msgid ""
@@ -4330,13 +4101,9 @@ msgid "New event"
 msgstr "新しい予定"
 
 #: ui/components/calendar.slint:31
-#, fuzzy
-#| msgctxt "the first senders of new mail, then how many others"
-#| msgid "{0} and {n} more"
-#| msgid_plural "{0} and {n} more"
 msgid "+{n} more"
 msgid_plural "+{n} more"
-msgstr[0] "{0}と他{n}人"
+msgstr[0] "他 {n} 件"
 
 #: ui/components/calendar.slint:40
 msgid "Show all events on {}"
@@ -4543,26 +4310,18 @@ msgid "Light gray {0}"
 msgstr ""
 
 #: ui/components/composer-actions.slint:41
-#, fuzzy
-#| msgid "Graphite"
 msgid "White"
-msgstr "グラファイト"
+msgstr "白"
 
 #. A color's tint for screen readers, 3 the lightest.
 #: ui/components/composer-actions.slint:51
-#, fuzzy
-#| msgctxt "date and time"
-#| msgid "{0} at {1}"
 msgid "{0}, light {1}"
-msgstr "{0} {1}"
+msgstr "明るい{0} {1}"
 
 #. A color's shade for screen readers, 3 the darkest.
 #: ui/components/composer-actions.slint:76
-#, fuzzy
-#| msgctxt "date and time"
-#| msgid "{0} at {1}"
 msgid "{0}, dark {1}"
-msgstr "{0} {1}"
+msgstr "暗い{0} {1}"
 
 #: ui/components/composer-actions.slint:447
 msgid "Improving the text…"
@@ -4577,10 +4336,8 @@ msgid "Proofread"
 msgstr ""
 
 #: ui/components/composer-actions.slint:454
-#, fuzzy
-#| msgid "Working…"
 msgid "Translate…"
-msgstr "処理中…"
+msgstr "翻訳…"
 
 #: ui/components/composer-actions.slint:456
 msgid "Edit prompts…"
@@ -4591,8 +4348,6 @@ msgid "Font"
 msgstr ""
 
 #: ui/components/composer-actions.slint:478
-#, fuzzy
-#| msgid "Default"
 msgctxt "font"
 msgid "Default"
 msgstr "デフォルト"
@@ -4608,10 +4363,8 @@ msgid "Fixed width"
 msgstr ""
 
 #: ui/components/composer-actions.slint:492
-#, fuzzy
-#| msgid "Text"
 msgid "Text size"
-msgstr "文字"
+msgstr "文字サイズ"
 
 #: ui/components/composer-actions.slint:497
 msgctxt "text size"
@@ -4654,8 +4407,6 @@ msgid "Text color"
 msgstr ""
 
 #: ui/components/composer-actions.slint:515
-#, fuzzy
-#| msgid "Automatic"
 msgctxt "text color"
 msgid "Automatic"
 msgstr "自動"
@@ -4713,10 +4464,8 @@ msgid "Select text to add a link"
 msgstr ""
 
 #: ui/components/composer-actions.slint:571
-#, fuzzy
-#| msgid "Insert"
 msgid "Insert image"
-msgstr "挿入"
+msgstr "画像を挿入"
 
 #: ui/components/composer-actions.slint:576
 msgid "Email templates"
@@ -4767,10 +4516,8 @@ msgid "Shrink photos"
 msgstr ""
 
 #: ui/components/composer-actions.slint:844
-#, fuzzy
-#| msgid "Working…"
 msgid "Shrinking…"
-msgstr "処理中…"
+msgstr "縮小中…"
 
 #: ui/components/composer-actions.slint:846
 msgid "{n} photo, {0} ({1} at full size)"
@@ -4816,13 +4563,11 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:1032
 msgid "High importance"
-msgstr ""
+msgstr "重要度：高"
 
 #: ui/components/composer-actions.slint:1038
-#, fuzzy
-#| msgid "Important"
 msgid "Low importance"
-msgstr "重要"
+msgstr "重要度：低"
 
 #: ui/components/composer-actions.slint:1049
 msgid "Discard"
@@ -4858,10 +4603,8 @@ msgid "Alt text"
 msgstr ""
 
 #: ui/components/composer-actions.slint:1138
-#, fuzzy
-#| msgid "Remove star"
 msgid "Remove image"
-msgstr "スターを外す"
+msgstr "画像を削除"
 
 #: ui/components/composer-actions.slint:1287
 msgid ""
@@ -4870,10 +4613,8 @@ msgid ""
 msgstr ""
 
 #: ui/components/composer-actions.slint:1308
-#, fuzzy
-#| msgid "Insert"
 msgid "Describe the image"
-msgstr "挿入"
+msgstr "画像の説明を入力"
 
 #: ui/components/composer-actions.slint:1354
 msgid "Apply"
@@ -4896,16 +4637,12 @@ msgid "https://example.com"
 msgstr "https://example.com"
 
 #: ui/components/composer-actions.slint:1543
-#, fuzzy
-#| msgid "Clear selection"
 msgid "Translate the selection"
-msgstr "選択を解除"
+msgstr "選択範囲を翻訳"
 
 #: ui/components/composer-actions.slint:1543
-#, fuzzy
-#| msgid "Select message"
 msgid "Translate the message"
-msgstr "メールを選択"
+msgstr "メールを翻訳"
 
 #: ui/components/composer-actions.slint:1556
 msgid ""
@@ -4924,20 +4661,16 @@ msgid "Translate into"
 msgstr ""
 
 #: ui/components/composer-actions.slint:1600 ui/translation.slint:99
-#, fuzzy
-#| msgid "Working…"
 msgid "Translating…"
-msgstr "処理中…"
+msgstr "翻訳中…"
 
 #: ui/components/composer-actions.slint:1641
-#, fuzzy
-#| msgid "Discard this draft?"
 msgid "Discard changes to this signature?"
-msgstr "この下書きを破棄しますか？"
+msgstr "署名の変更を破棄しますか？"
 
 #: ui/components/composer-actions.slint:1641
 msgid "Discard this draft?"
-msgstr "この下書きを破棄しますか？"
+msgstr "下書きを破棄しますか？"
 
 #: ui/components/composer-actions.slint:1652
 msgid "What you changed since it was last saved won't be kept."
@@ -5087,20 +4820,16 @@ msgid "Ignore"
 msgstr ""
 
 #: ui/components/email-composer.slint:804
-#, fuzzy
-#| msgid "Text"
 msgid "Image size"
-msgstr "文字"
+msgstr "画像サイズ"
 
 #: ui/components/email-composer.slint:811
 msgid "Alt text…"
 msgstr ""
 
 #: ui/components/email-composer.slint:819
-#, fuzzy
-#| msgid "Custom"
 msgid "Cut"
-msgstr "カスタム"
+msgstr "切り取り"
 
 #: ui/components/email-composer.slint:829
 msgid "Paste"
@@ -5111,10 +4840,8 @@ msgid "Paste as plain text"
 msgstr ""
 
 #: ui/components/email-composer.slint:839
-#, fuzzy
-#| msgid "Select {}"
 msgid "Select all"
-msgstr "{}を選択"
+msgstr "すべて選択"
 
 #: ui/components/email-composer.slint:845
 msgid "Spelling"
@@ -5133,10 +4860,8 @@ msgid "Quoted text"
 msgstr ""
 
 #: ui/components/email-composer.slint:950
-#, fuzzy
-#| msgid "Archive selected message"
 msgid "Hide the quoted message"
-msgstr "選択したメールをアーカイブ"
+msgstr "引用メールを非表示"
 
 #: ui/components/email-composer.slint:950
 msgid "Show the quoted message"
@@ -5147,28 +4872,20 @@ msgid "Edit the quoted message as text"
 msgstr ""
 
 #: ui/components/email-composer.slint:972
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Remove the forwarded message"
-msgstr "前後のメールに移動"
+msgstr "転送元のメールを削除"
 
 #: ui/components/email-composer.slint:972
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Remove the quoted message"
-msgstr "前後のメールに移動"
+msgstr "引用メールを削除"
 
 #: ui/components/email-composer.slint:1003
-#, fuzzy
-#| msgid "Move between messages"
 msgid "Add the forwarded message back"
-msgstr "前後のメールに移動"
+msgstr "転送元のメールを元に戻す"
 
 #: ui/components/email-composer.slint:1003
-#, fuzzy
-#| msgid "Archive selected message"
 msgid "Add the quoted text back"
-msgstr "選択したメールをアーカイブ"
+msgstr "引用テキストを元に戻す"
 
 #: ui/components/email-composer.slint:1163
 msgid "Send without a subject?"
@@ -5191,22 +4908,16 @@ msgid "Send without subject"
 msgstr ""
 
 #: ui/components/email-composer.slint:1168
-#, fuzzy
-#| msgid "Sender name"
 msgid "Send anyway"
-msgstr "差出人の表示名"
+msgstr "そのまま送信"
 
 #: ui/components/email-composer.slint:1169
-#, fuzzy
-#| msgid "(No subject)"
 msgid "Add a subject"
-msgstr "（件名なし）"
+msgstr "件名を入力"
 
 #: ui/components/email-composer.slint:1170
-#, fuzzy
-#| msgid "Archive message"
 msgid "Attach files…"
-msgstr "メールをアーカイブ"
+msgstr "ファイルを添付…"
 
 #: ui/components/email-composer.slint:1237
 msgid "Drop to add to your message"
@@ -5287,10 +4998,8 @@ msgid "Recipient's full name"
 msgstr ""
 
 #: ui/components/email-templates.slint:340
-#, fuzzy
-#| msgid "Email address"
 msgid "Recipient's email address"
-msgstr "メールアドレス"
+msgstr "宛先のメールアドレス"
 
 #: ui/components/email-templates.slint:342
 msgid "Your first name"
@@ -5342,10 +5051,8 @@ msgid "You sent this invitation"
 msgstr ""
 
 #: ui/components/invitation-card.slint:73
-#, fuzzy
-#| msgid "Navigation"
 msgid "Invitation"
-msgstr "ナビゲーション"
+msgstr "招待"
 
 #: ui/components/invitation-card.slint:74
 msgid "{} invited you"
@@ -5428,35 +5135,26 @@ msgid "{} asked for the latest version of this event"
 msgstr ""
 
 #: ui/components/invitation-card.slint:95
-#, fuzzy
-#| msgid "Edit event"
 msgid "Event"
-msgstr "予定を編集"
+msgstr "予定"
 
 #: ui/components/invitation-card.slint:95
-#, fuzzy
-#| msgid "Message from {}"
 msgid "Event from {}"
-msgstr "{}からのメール"
+msgstr "{}からの予定"
 
 #: ui/components/invitation-card.slint:97
 msgid "With {}"
 msgstr ""
 
 #: ui/components/invitation-card.slint:98
-#, fuzzy
-#| msgctxt "date and time"
-#| msgid "{0} at {1}"
 msgid "With {} and one more"
 msgid_plural "With {} and {n} more"
-msgstr[0] "{0} {1}"
+msgstr[0] "{}と他{n}人"
 
 #: ui/components/invitation-card.slint:100
-#, fuzzy
-#| msgid "Accepted"
 msgid "One accepted"
 msgid_plural "{n} accepted"
-msgstr[0] "参加"
+msgstr[0] "{n} 人が承諾"
 
 #: ui/components/invitation-card.slint:102
 msgid "This occurrence"
@@ -5531,16 +5229,12 @@ msgid "Decline"
 msgstr ""
 
 #: ui/components/invitation-card.slint:264
-#, fuzzy
-#| msgid "Remove from Windows"
 msgid "Remove from calendar"
-msgstr "Windowsへの登録を解除"
+msgstr "カレンダーから削除"
 
 #: ui/components/invitation-card.slint:273
-#, fuzzy
-#| msgid "Remove from Windows"
 msgid "Add to calendar"
-msgstr "Windowsへの登録を解除"
+msgstr "カレンダーに追加"
 
 #: ui/components/kbd.slint:23
 msgctxt "Keyboard key"
@@ -5645,16 +5339,12 @@ msgid "Custom certificate added for this account."
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:211
-#, fuzzy
-#| msgid "Account settings"
 msgid "Advanced settings"
-msgstr "アカウント設定"
+msgstr "詳細設定"
 
 #: ui/components/mail-security-fields.slint:249
-#, fuzzy
-#| msgid "New mail"
 msgid "Send mail"
-msgstr "新しいメール"
+msgstr "メール送信"
 
 #: ui/components/mail-security-fields.slint:256
 msgid ""
@@ -5663,50 +5353,36 @@ msgid ""
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:282
-#, fuzzy
-#| msgid "Cancel sign-in"
 msgid "POP3 sign-in"
-msgstr "サインインをキャンセル"
+msgstr "POP3 サインイン"
 
 #: ui/components/mail-security-fields.slint:282
-#, fuzzy
-#| msgid "Cancel sign-in"
 msgid "IMAP sign-in"
-msgstr "サインインをキャンセル"
+msgstr "IMAP サインイン"
 
 #: ui/components/mail-security-fields.slint:288
 msgid "Automatic"
 msgstr "自動"
 
 #: ui/components/mail-security-fields.slint:301
-#, fuzzy
-#| msgid "Cancel sign-in"
 msgid "SMTP sign-in"
-msgstr "サインインをキャンセル"
+msgstr "SMTP サインイン"
 
 #: ui/components/mail-security-fields.slint:306
-#, fuzzy
-#| msgid "Cancel sign-in"
 msgid "No sign-in"
-msgstr "サインインをキャンセル"
+msgstr "サインインなし"
 
 #: ui/components/mail-security-fields.slint:314
-#, fuzzy
-#| msgid "SMTP server"
 msgid "SMTP username"
-msgstr "SMTP サーバー"
+msgstr "SMTP ユーザー名"
 
 #: ui/components/mail-security-fields.slint:316
-#, fuzzy
-#| msgid "All accounts"
 msgid "Same as the account's"
-msgstr "すべてのアカウント"
+msgstr "アカウントと同じ"
 
 #: ui/components/mail-security-fields.slint:321
-#, fuzzy
-#| msgid "Show password"
 msgid "SMTP password"
-msgstr "パスワードを表示する"
+msgstr "SMTP パスワード"
 
 #: ui/components/mail-security-fields.slint:324
 msgid "Leave blank to keep the current one"
@@ -5847,15 +5523,11 @@ msgid "From"
 msgstr ""
 
 #: ui/components/rule-editor.slint:15
-#, fuzzy
-#| msgid "To"
 msgctxt "rule field"
 msgid "To"
 msgstr "宛先"
 
 #: ui/components/rule-editor.slint:16
-#, fuzzy
-#| msgid "Cc"
 msgctxt "rule field"
 msgid "Cc"
 msgstr "CC"
@@ -5866,18 +5538,14 @@ msgid "To or Cc"
 msgstr ""
 
 #: ui/components/rule-editor.slint:18
-#, fuzzy
-#| msgid "Subject"
 msgctxt "rule field"
 msgid "Subject"
 msgstr "件名"
 
 #: ui/components/rule-editor.slint:19
-#, fuzzy
-#| msgid "Mail history"
 msgctxt "rule field"
 msgid "Mailing list"
-msgstr "メール履歴"
+msgstr "メーリングリスト"
 
 #: ui/components/rule-editor.slint:20
 msgctxt "rule field"
@@ -5895,18 +5563,14 @@ msgid "Body"
 msgstr ""
 
 #: ui/components/rule-editor.slint:23
-#, fuzzy
-#| msgid "Archive message"
 msgctxt "rule field"
 msgid "Attachments"
-msgstr "メールをアーカイブ"
+msgstr "添付ファイル"
 
 #: ui/components/rule-editor.slint:26 ui/components/rule-editor.slint:39
-#, fuzzy
-#| msgid "Contacts"
 msgctxt "rule comparison"
 msgid "contains"
-msgstr "アドレス帳"
+msgstr "を含む"
 
 #: ui/components/rule-editor.slint:27 ui/components/rule-editor.slint:40
 msgctxt "rule comparison"
@@ -5978,10 +5642,8 @@ msgid "Move to folder"
 msgstr ""
 
 #: ui/components/rule-editor.slint:67 ui/components/rule-editor.slint:77
-#, fuzzy
-#| msgid "Edit label"
 msgid "Add label"
-msgstr "ラベルを編集"
+msgstr "ラベルを付ける"
 
 #: ui/components/rule-editor.slint:69 ui/components/rule-editor.slint:79
 #: ui/views/mail-list-pane.slint:1712 ui/views/mail-reading-pane.slint:401
@@ -6046,20 +5708,16 @@ msgid "Comparison of condition {}"
 msgstr ""
 
 #: ui/components/rule-editor.slint:194
-#, fuzzy
-#| msgid "Remove account"
 msgid "Remove condition {}"
-msgstr "アカウントを削除"
+msgstr "条件 {} を削除"
 
 #: ui/components/rule-editor.slint:243
 msgid "Choose one account to use its folders."
 msgstr ""
 
 #: ui/components/rule-editor.slint:243
-#, fuzzy
-#| msgid "New label"
 msgid "No labels yet."
-msgstr "新しいラベル"
+msgstr "ラベルがまだありません。"
 
 #: ui/components/rule-editor.slint:247 ui/components/rule-editor.slint:257
 msgid "Action {}"
@@ -6074,10 +5732,8 @@ msgid "Label of action {}"
 msgstr ""
 
 #: ui/components/rule-editor.slint:277
-#, fuzzy
-#| msgid "Remove account"
 msgid "Remove action {}"
-msgstr "アカウントを削除"
+msgstr "アクション{}を削除"
 
 #: ui/components/rule-editor.slint:300
 msgid "When new mail meets"
@@ -6092,36 +5748,28 @@ msgid "any of these conditions"
 msgstr ""
 
 #: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:2457
-#, fuzzy
-#| msgid "New label"
 msgid "New rule"
-msgstr "新しいラベル"
+msgstr "新しいルール"
 
 #: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:4707
-#, fuzzy
-#| msgid "Edit profile"
 msgid "Edit rule"
-msgstr "プロファイルを編集"
+msgstr "ルールを編集"
 
 #: ui/components/rule-editor.slint:356
 msgid "Newsletters or Receipts"
 msgstr ""
 
 #: ui/components/rule-editor.slint:414
-#, fuzzy
-#| msgid "Add account"
 msgid "Add condition"
-msgstr "アカウントを追加"
+msgstr "条件を追加"
 
 #: ui/components/rule-editor.slint:424
 msgid "Do this"
 msgstr ""
 
 #: ui/components/rule-editor.slint:440
-#, fuzzy
-#| msgid "Add account"
 msgid "Add action"
-msgstr "アカウントを追加"
+msgstr "アクションを追加"
 
 #: ui/components/rule-editor.slint:453 ui/components/rule-editor.slint:468
 msgid "Stop here"
@@ -6189,26 +5837,20 @@ msgid ""
 msgstr ""
 
 #: ui/components/rule-editor.slint:483
-#, fuzzy
-#| msgid "Flectar Mail"
 msgid "Runs while Flectar Mail is open."
-msgstr "Flectar Mail"
+msgstr "Flectar Mail を開いている間に実行されます。"
 
 #: ui/components/rule-editor.slint:500
 msgid "Run on Inbox…"
 msgstr ""
 
 #: ui/components/rule-editor.slint:507
-#, fuzzy
-#| msgid "Delete profile"
 msgid "Delete rule"
-msgstr "プロファイルを削除"
+msgstr "ルールを削除"
 
 #: ui/components/rule-editor.slint:522
-#, fuzzy
-#| msgid "Save profile"
 msgid "Save rule"
-msgstr "プロファイルを保存"
+msgstr "ルールを保存"
 
 #: ui/components/search-tips.slint:16
 msgid "From or to a name or address"
@@ -6255,10 +5897,8 @@ msgid "Leave out what matches"
 msgstr ""
 
 #: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:467
-#, fuzzy
-#| msgid "Search mail"
 msgid "Search tips"
-msgstr "メールを検索"
+msgstr "検索のヒント"
 
 #: ui/components/search-tips.slint:72
 msgid ""
@@ -6275,10 +5915,8 @@ msgid "{}, {}"
 msgstr ""
 
 #: ui/components/sidebar-controls.slint:223
-#, fuzzy
-#| msgid "Mark as read"
 msgid "Mark all as read…"
-msgstr "既読にする"
+msgstr "すべて既読にする…"
 
 #: ui/components/sidebar-controls.slint:228
 msgid "New subfolder"
@@ -6709,10 +6347,8 @@ msgid "Yearly"
 msgstr ""
 
 #: ui/device-sync.slint:387 ui/dialogs/settings-dialog.slint:3812
-#, fuzzy
-#| msgid "Flectar Mail"
 msgid "Flectar Mail Sync"
-msgstr "Flectar Mail"
+msgstr "Flectar Mail 同期"
 
 #: ui/device-sync.slint:423
 msgid "All your devices, one subscription"
@@ -6749,16 +6385,12 @@ msgid "Save {}%"
 msgstr "保存"
 
 #: ui/device-sync.slint:520
-#, fuzzy
-#| msgid "1 year"
 msgid "/ year"
-msgstr "１年"
+msgstr "/ 年"
 
 #: ui/device-sync.slint:520
-#, fuzzy
-#| msgid "1 month"
 msgid "/ month"
-msgstr "１か月"
+msgstr "/ 月"
 
 #: ui/device-sync.slint:521
 msgid "Billed monthly"
@@ -9188,8 +8820,6 @@ msgid ""
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1669
-#, fuzzy
-#| msgid "Mark as read"
 msgid "Mark messages as read"
 msgstr "既読にする"
 
@@ -9628,7 +9258,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2576
 msgid "Clean up"
-msgstr ""
+msgstr "自動削除"
 
 #: ui/dialogs/settings-dialog.slint:2593
 msgid ""
@@ -10345,7 +9975,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3935
 msgid "Updates"
-msgstr ""
+msgstr "アップデート"
 
 #: ui/dialogs/settings-dialog.slint:3935
 msgid "Flectar Mail looks for new versions once a day."
