@@ -1,6 +1,7 @@
-import { VerticalBox, HorizontalBox, ComboBox, TextEdit } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Select } from "select.slint";
 import { Button } from "button.slint";
-import { Switch } from "controls.slint";
+import { Switch, TextEdit } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { FormField } from "settings-components.slint";
 import { AppTheme } from "../design-system.slint";
@@ -89,7 +90,7 @@ export component MailSecurityFields inherits VerticalBox {
             padding: 0px;
             spacing: 4px;
             Text { text: root.incoming-protocol == "pop3" ? @tr("POP3 encryption") : @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            incoming-encryption := ComboBox {
+            incoming-encryption := Select {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;
@@ -107,7 +108,7 @@ export component MailSecurityFields inherits VerticalBox {
             // Kept in the layout, so the IMAP selector stays half wide.
             visible: root.sends-mail;
             Text { text: @tr("SMTP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            smtp-encryption := ComboBox {
+            smtp-encryption := Select {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;
@@ -136,7 +137,7 @@ export component MailSecurityFields inherits VerticalBox {
             color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
         }
         Button { height: 36px; text: @tr("Import certificate file"); label-overflow: elide; enabled: root.enabled; clicked => { root.import-certificate(); } }
-        TextEdit { height: 90px; enabled: root.enabled; text <=> root.certificate-pem; wrap: word-wrap; }
+        TextEdit { height: 90px; enabled: root.enabled; text <=> root.certificate-pem; }
         Text { text: @tr("PEM certificate only. Do not paste a private key."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
         if root.certificate-pem != "" : Button { height: 36px; text: @tr("Remove certificate"); label-overflow: elide; enabled: root.enabled; clicked => { root.certificate-pem = ""; } }
     }
@@ -280,7 +281,7 @@ export component MailAdvancedFields inherits VerticalBox {
                 padding: 0px;
                 spacing: 4px;
                 Text { text: root.incoming-protocol == "pop3" ? @tr("POP3 sign-in") : @tr("IMAP sign-in"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-                ComboBox {
+                Select {
                     height: 36px;
                     min-width: 0px;
                     enabled: root.enabled;
@@ -299,7 +300,7 @@ export component MailAdvancedFields inherits VerticalBox {
                 spacing: 4px;
                 visible: root.sends-mail;
                 Text { text: @tr("SMTP sign-in"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-                ComboBox {
+                Select {
                     height: 36px;
                     min-width: 0px;
                     enabled: root.enabled;

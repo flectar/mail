@@ -1,9 +1,9 @@
-import { VerticalBox, HorizontalBox, ScrollView, TextEdit } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
 import { AccountRow } from "../models.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "button.slint";
-import { LineEdit } from "controls.slint";
+import { LineEdit, TextEdit } from "controls.slint";
 import { SettingsSelectRow, SettingsSwitchRow } from "settings-components.slint";
 import { SenderChoiceRow } from "sender-picker.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
@@ -292,7 +292,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
         { id: "replies", label: @tr("Automatic replies") },
     ];
     background: AppTheme.surface;
-    border-radius: 10px;
+    border-radius: LayoutMetrics.container-radius;
     border-width: 1px;
     border-color: AppTheme.input-border;
     vertical-stretch: 0;
@@ -472,7 +472,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                 }
                 if AccountMailPreferences.editing-id != "" : Rectangle {
                     min-height: signature-preview.preferred-height + 20px;
-                    border-radius: 8px;
+                    border-radius: LayoutMetrics.corner-radius;
                     border-width: 1px;
                     border-color: AppTheme.input-border;
                     signature-preview := Text {
@@ -571,7 +571,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                 }
                 Text { text: @tr("MESSAGE"); color: AppTheme.secondary; font-size: TypeScale.caption; font-weight: 700; overflow: elide; }
                 TextEdit {
-                    min-height: 120px; vertical-stretch: 0; wrap: word-wrap;
+                    min-height: 120px; vertical-stretch: 0;
                     text <=> AccountMailPreferences.auto-reply-text;
                     placeholder-text: @tr("Message, such as I'm away until Monday and will answer when I'm back.");
                     enabled: !AccountMailPreferences.auto-reply-saving;
@@ -624,7 +624,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                 }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Verified recipient keys"); color: AppTheme.heading; font-weight: 600; }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Compare fingerprints with recipients through a separate trusted channel, then enter one email=fingerprint per line. Importing a key alone does not verify it."); color: AppTheme.secondary; wrap: word-wrap; }
-                TextEdit { wrap: word-wrap; height: 130px; text <=> AccountMailPreferences.recipient-keys; placeholder-text: @tr("person@example.org=FULL_FINGERPRINT"); enabled: !AccountMailPreferences.busy; }
+                TextEdit { height: 130px; text <=> AccountMailPreferences.recipient-keys; placeholder-text: @tr("person@example.org=FULL_FINGERPRINT"); enabled: !AccountMailPreferences.busy; }
                 Button { text: @tr("Save OpenPGP settings"); primary: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-security(); } }
                 if !root.compact : HorizontalBox {
                     Button { text: @tr("Import key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("import"); } }
@@ -638,7 +638,7 @@ export component AccountMailPreferencesPanel inherits Rectangle {
                     Button { text: @tr("Show keys"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("list"); } }
                 }
                 Button { text: @tr("Open message file (.eml)"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("open"); } }
-                if AccountMailPreferences.key-inventory != "" : TextEdit { wrap: word-wrap; height: 150px; read-only: true; text: AccountMailPreferences.key-inventory; }
+                if AccountMailPreferences.key-inventory != "" : TextEdit { height: 150px; read-only: true; text: AccountMailPreferences.key-inventory; }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Manage expiry, revocation and private-key backups in GnuPG. Only public keys are exported here."); color: AppTheme.secondary; wrap: word-wrap; }
                 Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Subjects and addresses remain visible. Protected drafts stay on this device. Existing server drafts are not retroactively protected. S/MIME certificates are not supported."); color: AppTheme.secondary; wrap: word-wrap; }
             }
@@ -657,7 +657,7 @@ export component OpenPgpReader inherits Rectangle {
         padding: 24px; spacing: 12px;
         Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("OpenPGP message"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
         Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.reader-status; color: AppTheme.secondary; wrap: word-wrap; }
-        TextEdit { wrap: word-wrap; vertical-stretch: 1; read-only: true; text: AccountMailPreferences.reader-text; }
+        TextEdit { vertical-stretch: 1; read-only: true; text: AccountMailPreferences.reader-text; }
         Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Decrypted content is shown as text, without remote content. It is not added to search or saved to the mail database."); color: AppTheme.secondary; wrap: word-wrap; }
         Button { text: @tr("Export decrypted message"); enabled: AccountMailPreferences.reader-text != ""; clicked => { AccountMailPreferences.export-message(); } }
         Button { text: @tr("Close"); clicked => { AccountMailPreferences.close-reader(); AccountMailPreferences.reader-open = false; AccountMailPreferences.reader-text = ""; AccountMailPreferences.reader-status = ""; } }

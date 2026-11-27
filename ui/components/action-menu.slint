@@ -99,7 +99,7 @@ export component ActionMenu inherits Rectangle {
         forward-focus: menu-focus;
 
         menu-frame := Rectangle {
-            border-radius: 8px;
+            border-radius: LayoutMetrics.corner-radius;
             border-width: 1px;
             border-color: AppTheme.border;
             background: AppTheme.surface-raised;
@@ -162,7 +162,7 @@ export component ActionMenu inherits Rectangle {
 
                         for entry[index] in root.entries : menu-row := Rectangle {
                             height: root.item-height;
-                            border-radius: 5px;
+                            border-radius: LayoutMetrics.small-radius;
                             background: index == root.highlighted-index || menu-hit.has-hover
                                 ? AppTheme.control-bg : transparent;
                             opacity: entry.disabled ? 0.45 : 1;

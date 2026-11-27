@@ -1,4 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
+import { FocusRing } from "focus-ring.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
@@ -23,10 +24,13 @@ export component TextEdit inherits Rectangle {
     forward-focus: editor;
 
     min-height: 80px;
-    border-radius: LayoutMetrics.corner-radius - 2px;
+    border-radius: LayoutMetrics.corner-radius;
     border-width: 1px;
-    border-color: editor.has-focus ? AppTheme.accent : AppTheme.input-border;
+    border-color: editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
     background: root.background-color;
+    drop-shadow-blur: 2px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: AppTheme.control-shadow;
     opacity: root.enabled ? 1 : 0.5;
 
     Text {
@@ -77,6 +81,12 @@ export component TextEdit inherits Rectangle {
     select-all => { editor.select-all(); }
     copy => { editor.copy(); }
     set-selection(anchor, cursor) => { editor.set-selection-offsets(anchor, cursor); }
+
+    if editor.has-focus : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 export component Switch inherits Rectangle {
@@ -87,10 +97,9 @@ export component Switch inherits Rectangle {
 
     width: 38px;
     height: 22px;
-    border-radius: 11px;
+    border-radius: self.height / 2;
     background: root.checked ? AppTheme.accent : AppTheme.control-border;
-    border-width: switch-focus.focus-visible ? 2px : 0px;
-    border-color: AppTheme.heading;
+    border-width: 0px;
     opacity: root.enabled ? 1 : 0.45;
     animate background { duration: 140ms; easing: ease-out; }
 
@@ -99,7 +108,7 @@ export component Switch inherits Rectangle {
         y: 3px;
         width: 16px;
         height: 16px;
-        border-radius: 8px;
+        border-radius: self.width / 2;
         background: white;
         animate x { duration: 180ms; easing: spring(0.18); enabled: MotionSettings.movement; }
     }
@@ -143,6 +152,12 @@ export component Switch inherits Rectangle {
             mouse-cursor: pointer;
         }
     }
+
+    if switch-focus.focus-visible : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // Shared tri-state control for list selection. The component owns its hit
@@ -179,7 +194,7 @@ export component SelectionCheckBox inherits FocusVisibleScope {
         y: (parent.height - 24px) / 2;
         width: 24px;
         height: 24px;
-        border-radius: root.avatar-overlay ? self.width / 2 : 6px;
+        border-radius: root.avatar-overlay ? self.width / 2 : LayoutMetrics.small-radius;
         border-width: root.focus-visible ? 2px : 0px;
         border-color: AppTheme.accent;
         background: root.avatar-overlay ? AppTheme.surface.with-alpha(0.72) : transparent;
@@ -192,7 +207,7 @@ export component SelectionCheckBox inherits FocusVisibleScope {
             y: (parent.height - self.height) / 2;
             width: 18px;
             height: 18px;
-            border-radius: 4px;
+            border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
             border-width: root.checked || root.indeterminate ? 0px : 1px;
             border-color: AppTheme.secondary;
             background: root.checked || root.indeterminate ? AppTheme.accent : AppTheme.input-bg;
@@ -224,6 +239,92 @@ export component SelectionCheckBox inherits FocusVisibleScope {
     }
 }
 
+// A checkbox with its label, for forms and dialogs, saved with the rest of
+// them. The box and its label both toggle it, and the label wraps.
+export component CheckBox inherits FocusVisibleScope {
+    in property <string> text;
+    in-out property <bool> checked: false;
+    callback toggled;
+
+    function toggle() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+
+    preferred-width: 26px + label.preferred-width;
+    min-height: max(LayoutMetrics.small-control-height, label.preferred-height);
+    opacity: root.enabled ? 1 : 0.5;
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggle(); }
+    key-pressed(event) => {
+        if event.text == Key.Space {
+            root.toggle();
+            return accept;
+        }
+        reject
+    }
+
+    box := Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
+        border-width: root.checked ? 0px : 1px;
+        border-color: root.focus-visible ? AppTheme.focus-ring : AppTheme.secondary;
+        background: root.checked ? AppTheme.accent : AppTheme.input-bg;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: root.checked ? transparent : AppTheme.control-shadow;
+        animate background { duration: 120ms; easing: ease-out; }
+
+        Image {
+            visible: root.checked;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            source: @image-url("../icons/lucide/outline/check.svg");
+            colorize: white;
+            image-fit: contain;
+            accessible-role: none;
+        }
+        if root.focus-visible : FocusRing {
+            radius: box.border-radius;
+            around-width: box.width;
+            around-height: box.height;
+        }
+    }
+
+    label := Text {
+        x: 26px;
+        width: parent.width - 26px;
+        text: root.text;
+        color: AppTheme.body;
+        font-size: TypeScale.body;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.focus();
+            root.pointer-activated();
+            root.toggle();
+        }
+    }
+}
+
 export component RadioButton inherits Rectangle {
     in property <string> text;
     in property <bool> checked: false;
@@ -238,7 +339,7 @@ export component RadioButton inherits Rectangle {
         y: (parent.height - 16px) / 2;
         width: 16px;
         height: 16px;
-        border-radius: 8px;
+        border-radius: self.width / 2;
         border-width: 1px;
         border-color: root.checked ? AppTheme.accent : AppTheme.secondary;
         background: transparent;
@@ -249,7 +350,7 @@ export component RadioButton inherits Rectangle {
             y: 4px;
             width: 8px;
             height: 8px;
-            border-radius: 4px;
+            border-radius: self.width / 2;
             background: AppTheme.accent;
         }
     }
@@ -318,7 +419,7 @@ export component IconButton inherits Rectangle {
 
     width: 32px;
     height: 32px;
-    border-radius: LayoutMetrics.corner-radius - 2px;
+    border-radius: LayoutMetrics.corner-radius;
     private property <color> fill-color: root.primary
         ? (hit-area.pressed ? root.primary-pressed-background : hit-area.has-hover ? root.primary-hover-background : root.primary-background)
         : root.ghost
@@ -326,8 +427,8 @@ export component IconButton inherits Rectangle {
             : root.active ? root.active-background : hit-area.has-hover ? root.hover-background : root.idle-background;
     background: root.fill-color;
     forward-focus: keyboard;
-    border-width: keyboard.focus-visible ? 2px : 0px;
-    border-color: AppTheme.accent;
+    border-width: keyboard.focus-visible ? 1px : 0px;
+    border-color: AppTheme.focus-ring;
     opacity: root.interactive ? 1 : 0.42;
     animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
@@ -422,6 +523,12 @@ export component IconButton inherits Rectangle {
         y: root.tooltip-above ? -self.height - 2px : parent.height + 2px;
         caret-at: root.width / 2 - self.x;
     }
+
+    if keyboard.focus-visible : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // Primary actions that replace a collapsed workspace sidebar float above the
@@ -467,11 +574,14 @@ export component LineEdit inherits Rectangle {
 
     height: 36px;
     min-width: 80px;
-    border-radius: LayoutMetrics.corner-radius - 2px;
-    border-width: root.outlined || root.invalid || editor.has-focus ? 1px : 0px;
+    border-radius: LayoutMetrics.corner-radius;
+    border-width: editor.has-focus || root.outlined || root.invalid ? 1px : 0px;
     border-color: root.invalid ? AppTheme.destructive
-        : editor.has-focus ? AppTheme.accent : AppTheme.input-border;
+        : editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
     background: root.outlined ? AppTheme.input-bg : transparent;
+    drop-shadow-blur: 2px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: root.outlined ? AppTheme.control-shadow : transparent;
     opacity: root.enabled ? 1 : 0.5;
 
     Text {
@@ -542,6 +652,12 @@ export component LineEdit inherits Rectangle {
 
     select-all => { editor.select-all(); }
     copy => { editor.copy(); }
+
+    if editor.has-focus && root.enabled : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 export component FloatingActionButton inherits IconButton {

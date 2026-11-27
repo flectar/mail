@@ -9,6 +9,9 @@ work is ongoing while the app is in development.
 - Keyboard navigation for the message list and reader, including arrow keys,
   Home/End, Page Up/Page Down, Enter, Space, and F6.
 - Keyboard shortcuts for tabs, with the available shortcuts listed in Settings.
+- Buttons, fields, selects, tabs, switches, and checkboxes show the same focus
+  ring when the keyboard reaches them. Selects and tabs follow the WAI-ARIA
+  keyboard patterns, and a select changes its value only when one is chosen.
 - Full and minimal desktop layouts, plus a compact layout for smaller screens.
 - Light and dark themes, built-in and custom color palettes, and independent
   message appearance settings. Reader mode provides another way to read mail.

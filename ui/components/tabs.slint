@@ -1,0 +1,180 @@
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { FocusRing } from "focus-ring.slint";
+
+// A tab's label, raised on the track while it's the chosen tab.
+component TabTrigger inherits Rectangle {
+    in property <string> label;
+    in property <int> index;
+    in property <bool> current;
+    in property <bool> stacked;
+    in property <bool> focus-ring;
+    in property <length> padding-x;
+    in property <length> min-row-height;
+    callback activate();
+
+    // A row keeps each label whole. A stacked tab takes the whole width and
+    // wraps a label that is longer still.
+    min-width: root.stacked ? 0px : label.preferred-width + 2 * root.padding-x;
+    preferred-width: label.preferred-width + 2 * root.padding-x;
+    min-height: max(root.min-row-height, label.preferred-height + 8px);
+    horizontal-stretch: 1;
+    border-radius: LayoutMetrics.corner-radius;
+    border-width: 1px;
+    border-color: root.focus-ring ? AppTheme.focus-ring : root.current && AppTheme.dark ? AppTheme.control-border : transparent;
+    background: !root.current ? transparent : AppTheme.dark ? AppTheme.muted-control-bg.mix(white, 0.95) : AppTheme.surface;
+    drop-shadow-blur: 3px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: root.current ? AppTheme.raised-shadow : transparent;
+    animate background, border-color, drop-shadow-color { duration: 150ms; easing: ease-out; }
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-index: root.index;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.current;
+    accessible-action-default => { root.activate(); }
+
+    if root.focus-ring : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
+
+    label := Text {
+        x: root.padding-x;
+        width: parent.width - 2 * root.padding-x;
+        text: root.label;
+        color: root.current || touch.has-hover ? AppTheme.heading : AppTheme.secondary;
+        font-size: TypeScale.body;
+        font-weight: 500;
+        horizontal-alignment: root.stacked ? left : center;
+        vertical-alignment: center;
+        wrap: root.stacked ? word-wrap : no-wrap;
+        accessible-role: none;
+        animate color { duration: 150ms; easing: ease-out; }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activate(); }
+    }
+}
+
+// Tabs on a muted track, the chosen one raised on it. Arrow keys move to the
+// tab before or after and choose it, and Home and End to the first and last,
+// as the WAI-ARIA tabs pattern has it. The tabs stack when their labels don't
+// fit side by side, unless `stack-when-narrow` is off.
+export component Tabs inherits Rectangle {
+    in property <[string]> labels;
+    // The chosen tab. Choosing another one only reports it through `chosen`.
+    in property <int> current;
+    in property <bool> stack-when-narrow: true;
+    // The height of a tab, track included, while the tabs are in a row.
+    in property <length> row-height: LayoutMetrics.medium-control-height;
+    out property <bool> stacked: root.stack-when-narrow && root.width < row-measure.preferred-width - 0.5px;
+    callback chosen(index: int);
+
+    private property <length> inset: 3px;
+    private property <length> padding-x: LayoutMetrics.button-padding;
+
+    function choose(index: int) {
+        if index != root.current {
+            root.chosen(index);
+        }
+    }
+
+    min-width: root.stack-when-narrow ? 64px : row-measure.preferred-width;
+    preferred-width: row-measure.preferred-width;
+    min-height: body.min-height;
+    preferred-height: body.preferred-height;
+    max-height: body.preferred-height;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    background: AppTheme.muted-control-bg;
+    border-radius: LayoutMetrics.container-radius;
+    accessible-role: tab-list;
+    accessible-item-count: root.labels.length;
+    accessible-delegate-focus: root.current;
+
+    // The width the labels take side by side.
+    row-measure := HorizontalLayout {
+        visible: false;
+        padding: root.inset;
+        for label in root.labels : HorizontalLayout {
+            padding-left: root.padding-x;
+            padding-right: root.padding-x;
+            Text { text: label; font-size: TypeScale.body; font-weight: 500; accessible-role: none; }
+        }
+    }
+
+    scope := FocusVisibleScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if event.modifiers.control || event.modifiers.alt || event.modifiers.meta || root.labels.length == 0 {
+                return reject;
+            }
+            if event.text == (root.stacked ? Key.UpArrow : Key.LeftArrow) {
+                root.choose(root.current > 0 ? root.current - 1 : root.labels.length - 1);
+                return accept;
+            }
+            if event.text == (root.stacked ? Key.DownArrow : Key.RightArrow) {
+                root.choose(root.current < root.labels.length - 1 ? root.current + 1 : 0);
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.choose(0);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.choose(root.labels.length - 1);
+                return accept;
+            }
+            reject
+        }
+
+        // Placed, so that the track's size is the one set above.
+        body := VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: root.inset;
+            if !root.stacked : HorizontalLayout {
+                min-height: root.row-height - 2 * root.inset;
+                for label[index] in root.labels : TabTrigger {
+                    label: label;
+                    index: index;
+                    current: index == root.current;
+                    padding-x: root.padding-x;
+                    focus-ring: self.current && scope.focus-visible;
+                    activate => {
+                        scope.focus();
+                        scope.pointer-activated();
+                        root.choose(index);
+                    }
+                }
+            }
+            if root.stacked : VerticalLayout {
+                spacing: 2px;
+                for label[index] in root.labels : TabTrigger {
+                    min-row-height: root.row-height - 2 * root.inset;
+                    label: label;
+                    index: index;
+                    current: index == root.current;
+                    stacked: true;
+                    padding-x: root.padding-x;
+                    focus-ring: self.current && scope.focus-visible;
+                    activate => {
+                        scope.focus();
+                        scope.pointer-activated();
+                        root.choose(index);
+                    }
+                }
+            }
+        }
+    }
+}
