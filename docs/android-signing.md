@@ -91,17 +91,22 @@ passwords on the command line or paste them into issues, chat, or logs.
 
 ## Release behavior
 
-Both workflows restore and validate the shared key before compilation, use
-`scripts/build-android-release.sh`, verify the finished APK against the same
-pin, and remove the runner's keystore before emulator tests. Signing passwords
-are supplied only to the restore and build steps. Pull request checks use
-temporary fixture keys and never receive the release environment's secrets.
+The native artifact workflow restores the app signing key from the
+`android-release` environment. The Google Play workflow restores the upload
+key from the `google-play` environment, described below, and never sees the
+app signing key. Both validate their key against its pin before compilation,
+build with `scripts/build-android-release.sh`, check that the finished APK and
+App Bundle are signed by the pinned key, and remove the runner's keystore
+before emulator tests. Signing passwords are supplied only to the restore and
+build steps. Pull request checks use temporary fixture keys and never receive
+either environment's secrets.
 
 The native artifact workflow publishes the signed APK for both prereleases
-and stable tags. `--preview` permits missing bundled OAuth registrations only
-for prerelease versions; it never changes the signing key. The production
-candidate workflow requires complete OAuth registrations. Both emit an APK
-and an AAB into `target/android/release/`; the native release publishes the APK.
+and stable tags. The Google Play workflow keeps only the App Bundle. Its APK
+is signed with the upload key and exists only to be checked. In both,
+`--preview` permits missing bundled OAuth registrations for prerelease
+versions only, and it never changes the signing key. Stable versions require
+complete OAuth registrations.
 
 Version codes are derived by `scripts/android-version-code.py`:
 
@@ -131,19 +136,40 @@ secrets are not a downloadable backup. If a secret is deleted, restore the
 same keystore and credentials. Never regenerate the key or change the pin to
 make a failed release pass.
 
-When enrolling in Play App Signing, supply this existing **app signing key**
-so that Play and GitHub APKs have the same signing identity. Having Google
-generate a different app key would break this update path. Configure a
-separate **upload key** for later AAB submissions; that key authorizes uploads
-and must not replace the key signing GitHub APKs. The current AAB is signed
-with the app key for initial enrollment; separate upload-key automation must
-be configured when Play is introduced.
+Google Play signs the copies it installs with this same **app signing key**.
+A copy of it was given to Play App Signing with Google's PEPK tool when the
+Play app was created, in November 2026, so Play and GitHub installs update each
+other. `platform/android/app-signing-certificate.pem` is the key's public
+certificate. Builds signed with the upload key take the Microsoft redirect
+from it, because the copies people install carry the app signing key.
+
+Bundles sent to Google Play are signed with a separate **upload key**, pinned
+in `platform/android/play-upload-certificate.sha256`. The `google-play`
+environment holds it and has the same protection as `android-release`, which
+is only the default branch and `v*` tags, and an approval for every run.
+
+| Secret | Value |
+| --- | --- |
+| `FLECTAR_PLAY_UPLOAD_KEYSTORE_BASE64` | Base64 encoding of the upload keystore (PKCS12, alias `upload`) |
+| `FLECTAR_PLAY_UPLOAD_KEYSTORE_PASSWORD` | Its password, which is also the key's |
+
+Keep the upload keystore and its password in the same backup as the app
+signing key. Unlike the app signing key, an upload key that is lost or leaked
+can be replaced. Request an upload key reset on the **App signing** page in
+Play Console, then pin the new certificate and replace both secrets.
+
+To publish on Google Play, run the **Google Play bundle** workflow from `main`
+with the release version and approve it. Upload the `.aab` from its
+`flectar-mail-google-play-<version>` artifact to a track in Play Console.
+Play and GitHub share the version sequence above, and Play accepts each
+version code only once.
 
 Before shipping, verify an actual update on an emulator or test device:
 install a first signed APK, create test app data, and install the newer APK
 without uninstalling (`adb install -r newer.apk`). Confirm that the data and
 account settings survive and that both APK certificate fingerprints match
-the committed pin. The keystore regression tests alone do not exercise the
+the committed pin. For Google Play, also check that a GitHub APK updates the
+copy Play installed. The keystore regression tests alone do not exercise the
 Android package manager or application data migrations.
 
 References: [Android app signing](https://developer.android.com/studio/publish/app-signing),

@@ -171,12 +171,13 @@ use one package (`com.flectar.mail`) and one persistent signing identity. Later
 versions can update the app in place and retain local data. Alpha 6 and alpha 7
 used different keys and cannot update to this signing identity.
 
-Both Android release workflows use the `android-release` GitHub environment.
-They require the same keystore and password secrets, verify the public
-certificate against `platform/android/app-signing-certificate.sha256`, and
-derive Android version codes from the release version. A missing or different
-key blocks publication. **Do not generate a replacement key or change the
-pinned fingerprint for a routine release.** Password changes preserve the
+Release APKs are signed in the `android-release` GitHub environment, which
+verifies the public certificate against
+`platform/android/app-signing-certificate.sha256` and derives Android version
+codes from the release version. Google Play signs the copies it installs with
+the same key, so Play and GitHub installs update each other. A missing or
+different key blocks publication. **Do not generate a replacement key or change
+the pinned fingerprint for a routine release.** Password changes preserve the
 identity when the original private key and certificate are retained.
 
 See [Android signing setup and recovery](android-signing.md) for the one-time
