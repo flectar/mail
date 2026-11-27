@@ -2354,8 +2354,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    contacts-settings-scroll := ScrollView {
-                        visible: root.settings_tab == "Contacts";
+                    if root.settings_tab == "Contacts" : contacts-settings-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -2552,8 +2551,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    translation-settings-scroll := ScrollView {
-                        visible: root.settings_tab == "Translation";
+                    if root.settings_tab == "Translation" : translation-settings-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -3826,8 +3824,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    data-scroll := ScrollView {
-                        visible: root.settings_tab == "Data";
+                    if root.settings_tab == "Data" : data-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -3925,8 +3922,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    notifications-scroll := ScrollView {
-                        visible: root.settings_tab == "Notifications";
+                    if root.settings_tab == "Notifications" : notifications-scroll := ScrollView {
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
                         content-width: self.visible-width;
@@ -4157,8 +4153,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    agents-scroll := ScrollView {
-                        visible: root.settings_tab == "Agents";
+                    if root.settings_tab == "Agents" : agents-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -4186,8 +4181,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    services-scroll := ScrollView {
-                        visible: root.settings_tab == "Services";
+                    if root.settings_tab == "Services" : services-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -4290,8 +4284,7 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    about-scroll := ScrollView {
-                        visible: root.settings_tab == "About";
+                    if root.settings_tab == "About" : about-scroll := ScrollView {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
