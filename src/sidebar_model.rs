@@ -2108,6 +2108,41 @@ mod interaction_tests {
         }
     }
 
+    /// The centre of the shown control labelled `label`, so the clicks follow
+    /// the sidebars' layout rather than fixed coordinates.
+    fn control_centre(app: &AppWindow, label: &str) -> (f32, f32) {
+        use i_slint_core::accessibility::AccessibleStringProperty;
+        use i_slint_core::item_tree::ItemRc;
+        use i_slint_core::items::AccessibleRole;
+        use i_slint_core::window::WindowInner;
+        use std::ops::ControlFlow;
+        let inner = WindowInner::from_pub(app.window());
+        let item = ItemRc::new_root(inner.component())
+            .visit_descendants(|item| {
+                if item.is_visible()
+                    && matches!(
+                        item.accessible_role(),
+                        AccessibleRole::Button | AccessibleRole::Checkbox
+                    )
+                    && item
+                        .accessible_string_property(AccessibleStringProperty::Label)
+                        .as_deref()
+                        == Some(label)
+                {
+                    ControlFlow::Break(item.clone())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap_or_else(|| panic!("no control labelled {label:?}"));
+        let geometry = item.geometry();
+        let origin = item.map_to_window(geometry.origin);
+        (
+            origin.x + geometry.width() / 2.,
+            origin.y + geometry.height() / 2.,
+        )
+    }
+
     #[test]
     fn workspace_sidebars_survive_scrolling_and_layout_recreation() {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
@@ -2242,14 +2277,8 @@ mod interaction_tests {
         };
         let closed_frame = draw_after(Duration::from_secs(1));
         assert!(model.row_count() > 1_000);
-        // Desktop workspaces sit below the 44px top bar; the compact drawer
-        // starts at the top of the window.
-        const TOP_BAR_HEIGHT: f32 = 44.;
-        const COMPACT_CATEGORY_HEADER_CENTER_Y: f32 = 169.;
-        const COMPACT_ACCOUNT_HEADER_CENTER_Y: f32 = 232.;
-        const CATEGORY_HEADER_CENTER_Y: f32 = COMPACT_CATEGORY_HEADER_CENTER_Y + TOP_BAR_HEIGHT;
-        const ACCOUNT_HEADER_CENTER_Y: f32 = COMPACT_ACCOUNT_HEADER_CENTER_Y + TOP_BAR_HEIGHT;
-        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        let categories = control_centre(&app, "Categories");
+        dispatch_click(categories.0, categories.1);
         assert!(!collapsed.borrow().contains("categories"));
         assert!(
             model
@@ -2275,7 +2304,7 @@ mod interaction_tests {
             sidebar_region(&opening_frame),
             sidebar_region(&opened_frame)
         );
-        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        dispatch_click(categories.0, categories.1);
         assert!(collapsed.borrow().contains("categories"));
         assert!(
             model
@@ -2293,15 +2322,16 @@ mod interaction_tests {
         );
         draw();
         app.global::<MotionSettings>().set_enabled(false);
-        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        dispatch_click(categories.0, categories.1);
         assert!(!collapsed.borrow().contains("categories"));
         assert!(model.iter().all(|row| !row.reveal_row));
-        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        dispatch_click(categories.0, categories.1);
         assert!(collapsed.borrow().contains("categories"));
         assert!(model.iter().all(|row| row.show_row));
         app.global::<MotionSettings>().set_enabled(true);
         draw();
-        click(140., ACCOUNT_HEADER_CENTER_Y);
+        let account = control_centre(&app, "Large account");
+        click(account.0, account.1);
         assert!(collapsed.borrow().contains("account:1"));
         assert!(model.row_count() < 10);
         // Hiding/showing the whole sidebar and switching desktop layouts
@@ -2314,7 +2344,8 @@ mod interaction_tests {
         app.set_workspace_layout("default".into());
         draw();
         assert!(collapsed.borrow().contains("account:1"));
-        click(140., ACCOUNT_HEADER_CENTER_Y);
+        let account = control_centre(&app, "Large account");
+        click(account.0, account.1);
         assert!(!collapsed.borrow().contains("account:1"));
         assert!(model.row_count() > 1_000);
         // Virtualized rows are recreated after scrolling in both directions.
@@ -2328,16 +2359,19 @@ mod interaction_tests {
             });
             draw();
         }
-        click(140., CATEGORY_HEADER_CENTER_Y);
+        let categories = control_centre(&app, "Categories");
+        click(categories.0, categories.1);
         assert!(!collapsed.borrow().contains("categories"));
         app.window().set_size(slint::PhysicalSize::new(390, 844));
         draw();
         click(31., 29.); // Open the compact folder drawer.
-        click(140., COMPACT_CATEGORY_HEADER_CENTER_Y);
+        let categories = control_centre(&app, "Categories");
+        click(categories.0, categories.1);
         assert!(collapsed.borrow().contains("categories"));
         click(340., 200.); // Close the drawer through its backdrop.
         click(31., 29.);
-        click(140., COMPACT_ACCOUNT_HEADER_CENTER_Y);
+        let account = control_centre(&app, "Large account");
+        click(account.0, account.1);
         assert!(collapsed.borrow().contains("account:1"));
         // Contacts uses the same retained update machinery and shared row controls.
         app.window().set_size(slint::PhysicalSize::new(1320, 800));
@@ -2380,14 +2414,11 @@ mod interaction_tests {
             *selected_for_click.borrow_mut() = scope.to_string()
         });
         draw();
-        const CONTACT_FAVORITES_CENTER_Y: f32 = 182. + TOP_BAR_HEIGHT;
-        // The account disclosure follows the unified heading/section, three
-        // unified scopes, and the accounts heading. Keep the click centered
-        // in the 45 px Account 1 row rather than on the heading above it.
-        const CONTACT_ACCOUNT_SECTION_CENTER_Y: f32 = 303. + TOP_BAR_HEIGHT;
-        click(140., CONTACT_FAVORITES_CENTER_Y);
+        let favorites = control_centre(&app, "Favorites");
+        click(favorites.0, favorites.1);
         assert_eq!(*selected_scope.borrow(), "Favorites");
-        click(140., CONTACT_ACCOUNT_SECTION_CENTER_Y);
+        let account = control_centre(&app, "Account 1");
+        click(account.0, account.1);
         assert!(contacts.borrow().collapsed_sections.contains("account:1"));
         for delta_y in [-10_000., 1_000_000.] {
             app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -2402,7 +2433,8 @@ mod interaction_tests {
         app.set_contacts_sidebar_collapsed(false);
         draw();
         assert!(contacts.borrow().collapsed_sections.contains("account:1"));
-        click(140., CONTACT_ACCOUNT_SECTION_CENTER_Y);
+        let account = control_centre(&app, "Account 1");
+        click(account.0, account.1);
         assert!(!contacts.borrow().collapsed_sections.contains("account:1"));
 
         // Calendar source toggles survive recycling and unrelated date changes.
@@ -2438,7 +2470,8 @@ mod interaction_tests {
             calendar::apply_calendar(&weak.unwrap(), &state, today);
         });
         draw();
-        click(82., 372. + TOP_BAR_HEIGHT); // The first calendar's visibility toggle.
+        let toggle = control_centre(&app, "Hide Calendar 1");
+        click(toggle.0, toggle.1);
         assert!(!calendar.borrow().sources[0].enabled);
         for delta_y in [-10_000., 1_000_000.] {
             app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -2459,7 +2492,8 @@ mod interaction_tests {
         app.set_active_view("calendar".into());
         draw();
         assert!(!calendar.borrow().source_rows.row_data(0).unwrap().enabled);
-        click(82., 372. + TOP_BAR_HEIGHT); // The first calendar's visibility toggle.
+        let toggle = control_centre(&app, "Show Calendar 1");
+        click(toggle.0, toggle.1);
         assert!(calendar.borrow().sources[0].enabled);
         app.hide().unwrap();
     }
