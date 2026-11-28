@@ -7,6 +7,16 @@ on:
         description: Release version, for example 0.1.0-beta.1
         required: true
         type: string
+      track:
+        description: Google Play testing track to release it on, or none to only build it
+        required: true
+        type: choice
+        default: internal
+        options:
+          - internal
+          - closed
+          - open
+          - none
 
 permissions:
   contents: read
@@ -19,6 +29,10 @@ jobs:
     # people install with its own copy of the app signing key, which this job
     # never sees. Same version sequence as the APKs on GitHub.
     environment: google-play
+    permissions:
+      contents: read
+      # The GitHub token that Google exchanges for Play access.
+      id-token: write
     env:
       FLECTAR_ANDROID_SIGNING_KEY: upload
     steps:
@@ -121,3 +135,27 @@ jobs:
           path: target/android/release/flectar-mail-*.aab
           if-no-files-found: error
           retention-days: 30
+
+      # Workload Identity Federation: Google trusts this repository's
+      # google-play environment, so no Google key is stored anywhere. The
+      # service account can release to testing tracks, not to production.
+      - name: Sign in to Google Play
+        if: inputs.track != 'none'
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.FLECTAR_PLAY_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.FLECTAR_PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+      - name: Release on Google Play
+        if: inputs.track != 'none'
+        env:
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+          FLECTAR_ANDROID_VERSION_NAME: ${{ inputs.version_name }}
+          FLECTAR_PLAY_TRACK: ${{ inputs.track }}
+        run: |
+          python3 scripts/google-play.py release \
+            "target/android/release/flectar-mail-$FLECTAR_ANDROID_VERSION_NAME.aab" \
+            --track "$FLECTAR_PLAY_TRACK" --name "$FLECTAR_ANDROID_VERSION_NAME"
