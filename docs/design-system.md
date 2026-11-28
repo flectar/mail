@@ -19,7 +19,7 @@ see the dark theme.
 | --- | --- | --- |
 | Small control | 32 px tall | `LayoutMetrics.small-control-height` |
 | Control | 36 px tall | `LayoutMetrics.medium-control-height` |
-| Large control, such as a search field in a toolbar | 40 px tall | `LayoutMetrics.control-height` |
+| Large control | 40 px tall | `LayoutMetrics.control-height` |
 | Phone control | 44 px tall | `LayoutMetrics.touch-target` |
 | Corner base | 10 px | `LayoutMetrics.corner-base` |
 | Control corners | 8 px, four fifths of the base | `LayoutMetrics.corner-radius` |
@@ -92,6 +92,11 @@ anything. Finding a value by typing its first letters isn't there yet.
 
 **Text field** (`LineEdit` in `controls.slint`) and **text area** (`TextEdit`
 in `controls.slint`) take typed text. A text area is at least 80 px tall.
+
+**Search fields** are text fields with `filled`: a soft `fill-subtle` with no
+edge at rest, which becomes an outlined field while it has the focus, as the
+search fields of macOS, Android and GNOME do. The list's search is 36 px in its
+toolbar, with the filter button inside it; a sidebar's is 32 px.
 
 **Switch** turns a setting on or off at once. **Checkbox** (`CheckBox`, with its
 label) is for a form saved with a button, `SelectionCheckBox` chooses items in a

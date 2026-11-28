@@ -3619,10 +3619,10 @@ msgstr ""
 msgid "Turn off"
 msgstr ""
 
-#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:801
-#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:801
-#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:801
-#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:801 ui/translation.slint:155
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:803
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:803
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:803
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:803 ui/translation.slint:155
 msgid "Settings"
 msgstr ""
 
@@ -5356,11 +5356,11 @@ msgstr ""
 msgid "Select"
 msgstr ""
 
-#: ui/components/controls.slint:704
+#: ui/components/controls.slint:708
 msgid "Hide password"
 msgstr ""
 
-#: ui/components/controls.slint:704
+#: ui/components/controls.slint:708
 msgid "Show password"
 msgstr ""
 
@@ -6520,7 +6520,7 @@ msgstr ""
 msgid "Leave out what matches"
 msgstr ""
 
-#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:470
+#: ui/components/search-tips.slint:48 ui/components/workspace-layout.slint:474
 msgid "Search tips"
 msgstr ""
 
@@ -6978,15 +6978,15 @@ msgstr ""
 msgid "Save palette"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:449
+#: ui/components/workspace-layout.slint:453
 msgid "Newest first"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:456
+#: ui/components/workspace-layout.slint:460
 msgid "Oldest first"
 msgstr ""
 
-#: ui/components/workspace-layout.slint:464
+#: ui/components/workspace-layout.slint:468
 msgid "Save search…"
 msgstr ""
 
