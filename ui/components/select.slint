@@ -194,11 +194,11 @@ export component Select inherits Rectangle {
         Rectangle {
             border-radius: LayoutMetrics.corner-radius;
             border-width: 1px;
-            border-color: AppTheme.border;
-            background: AppTheme.surface-raised;
-            drop-shadow-blur: 18px;
-            drop-shadow-offset-y: 5px;
-            drop-shadow-color: #0000002e;
+            border-color: AppTheme.control-edge;
+            background: AppTheme.popover-bg;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: AppTheme.popover-shadow;
             clip: true;
 
             list-focus := FocusScope {
@@ -262,7 +262,7 @@ export component Select inherits Rectangle {
                         for value[index] in root.model : Rectangle {
                             height: root.item-height;
                             border-radius: LayoutMetrics.small-radius;
-                            background: index == root.highlighted-index ? AppTheme.control-bg : transparent;
+                            background: index == root.highlighted-index ? AppTheme.popover-hover : transparent;
 
                             Text {
                                 x: 8px;
