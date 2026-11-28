@@ -1,7 +1,8 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
 import { ActionTooltip, ActionTooltipSource } from "tooltip-bubble.slint";
-import { LayoutMetrics, MotionSettings } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
+import { IconButton } from "controls.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 import { MailProfileRow } from "../models.slint";
 import { ProfileSwitcher } from "profile-switcher.slint";
@@ -12,6 +13,8 @@ import { MailboxWords } from "../mailbox-words.slint";
 export { TabRow, TabsUi }
 
 
+// A destination in the desktop strip: the shared icon button, chosen with
+// the soft accent and its filled icon. The strip draws the help beside it.
 component ProductRailItem inherits Rectangle {
     in property <string> label;
     in property <image> outline-icon;
@@ -20,50 +23,29 @@ component ProductRailItem inherits Rectangle {
     in property <color> accent-color;
     in property <color> accent-background;
     in property <color> muted-color;
-    out property <bool> hovered: item-hit.has-hover;
+    out property <bool> hovered: button.hovered || button.focus-visible;
     callback clicked;
 
     // Desktop navigation is icon-only. The target and selected surface remain
     // square so each destination has an even, predictable hit area.
     height: 48px;
-    background: transparent;
 
-    Rectangle {
+    button := IconButton {
         x: (parent.width - self.width) / 2;
         y: 4px;
-        width: 40px;
-        height: 40px;
-        border-radius: 10px;
-        background: root.active || item-hit.has-hover ? root.accent-background : transparent;
-        animate background { duration: 140ms; easing: ease-out; }
-        Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
-            height: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
-            source: root.active ? root.filled-icon : root.outline-icon;
-            colorize: root.active ? root.accent-color : root.muted-color;
-            animate colorize { duration: 140ms; easing: ease-out; }
-            animate width, height { duration: 180ms; easing: spring(0.12); enabled: MotionSettings.movement; }
-            image-fit: contain;
-            accessible-role: none;
-        }
-        item-hit := TouchArea {
-            accessible-role: button;
-            accessible-label: root.label;
-            accessible-checked: root.active;
-            accessible-action-default => { root.clicked(); }
-            clicked => { root.clicked(); }
-            // Pointing at an item hands help back to the pointer.
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.move {
-                    ActionTooltip.keyboard = false;
-                }
-            }
-            mouse-cursor: pointer;
-        }
+        width: LayoutMetrics.desktop-icon-button-size;
+        height: LayoutMetrics.desktop-icon-button-size;
+        ghost: true;
+        icon: root.active ? root.filled-icon : root.outline-icon;
+        icon-size: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
+        icon-color: root.active ? root.accent-color : root.muted-color;
+        hover-background: AppTheme.fill-hover;
+        active: root.active;
+        active-background: root.accent-background;
+        accessible-label: root.label;
+        accessible-checked: root.active;
+        clicked => { root.clicked(); }
     }
-
 }
 
 // The product rail is deliberately narrow: it switches workspaces without

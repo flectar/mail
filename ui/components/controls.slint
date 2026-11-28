@@ -432,6 +432,8 @@ export component IconButton inherits Rectangle {
     in property <bool> active: false;
     in property <bool> interactive: true;
     out property <bool> focus-visible: keyboard.focus-visible;
+    // The pointer is on it, for a parent that draws the help itself.
+    out property <bool> hovered: hit-area.has-hover;
     in property <length> icon-size: LayoutMetrics.icon-size;
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;

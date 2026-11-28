@@ -33,7 +33,7 @@
   "ui/components/tooltip-bubble.slint": 1,
   "ui/components/workspace-layout.slint": 1,
   "ui/components/workspace-list.slint": 1,
-  "ui/components/workspace-navigation.slint": 3,
+  "ui/components/workspace-navigation.slint": 2,
   "ui/device-sync.slint": 10,
   "ui/dialogs/block-sender-dialog.slint": 2,
   "ui/dialogs/calendar-event-dialog.slint": 2,
