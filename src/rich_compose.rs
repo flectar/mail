@@ -355,9 +355,15 @@ impl FontFamily {
     }
 
     fn from_css(value: &str) -> Option<Self> {
+        // A saved signature comes back as its cleaner writes CSS, with spaces around commas.
+        let value = value
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(", ");
         [Self::Serif, Self::Monospace]
             .into_iter()
-            .find(|family| family.css() == Some(value))
+            .find(|family| family.css() == Some(value.as_str()))
     }
 }
 
@@ -5860,5 +5866,19 @@ mod tests {
             assert_eq!(document.load_html(html, text), None, "{html}");
             assert_eq!(document.text(), "unchanged");
         }
+    }
+
+    #[test]
+    fn signatures_keep_their_formatting_through_their_cleaner() {
+        // The cleaner writes font lists with spaces around their commas.
+        let mut written = RichComposeDocument::default();
+        written.load("Zoë Ortiz\n", 0, 0);
+        written.format("family:serif", "Zoë Ortiz\n", 0, "Zoë Ortiz".len() as i32);
+        let saved = flectar_mail_core::signatures::sanitize_html(&written.body_html().unwrap());
+        assert!(saved.contains("Times New Roman , Times , serif"), "{saved}");
+        assert!(import_body_html(&saved).is_some(), "{saved}");
+        let mut reopened = RichComposeDocument::default();
+        reopened.load_signature_html(&saved);
+        assert_eq!(reopened.style_at(0).unwrap().family, FontFamily::Serif);
     }
 }

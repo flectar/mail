@@ -47,15 +47,94 @@ pub fn text_html(text: &str) -> String {
     html
 }
 
+/// The CSS properties signatures keep, for their type, colors and the boxes of their layout.
+/// None of them takes a picture or another address, so nothing in a signature's CSS loads
+/// from the web.
+const STYLE_PROPERTIES: &[&str] = &[
+    "color",
+    "background-color",
+    "font",
+    "font-family",
+    "font-size",
+    "font-stretch",
+    "font-style",
+    "font-variant",
+    "font-weight",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+    "text-align",
+    "text-decoration",
+    "text-decoration-color",
+    "text-decoration-line",
+    "text-decoration-style",
+    "text-indent",
+    "text-transform",
+    "white-space",
+    "word-break",
+    "word-wrap",
+    "overflow-wrap",
+    "vertical-align",
+    "direction",
+    "display",
+    "width",
+    "min-width",
+    "max-width",
+    "height",
+    "min-height",
+    "max-height",
+    "box-sizing",
+    "overflow",
+    "float",
+    "clear",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-width",
+    "border-style",
+    "border-color",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-top-style",
+    "border-right-style",
+    "border-bottom-style",
+    "border-left-style",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "border-radius",
+    "border-collapse",
+    "border-spacing",
+    "table-layout",
+    "list-style-type",
+    "list-style-position",
+];
+
 /// The formatting the composer writes, and pictures the signature holds itself: no active
 /// HTML, pictures from the web or other remote requests in signature settings.
-pub(crate) fn sanitize_html(html: &str) -> String {
+pub fn sanitize_html(html: &str) -> String {
     static SANITIZER: std::sync::LazyLock<ammonia::Builder<'static>> =
         std::sync::LazyLock::new(|| {
             let mut builder = ammonia::Builder::default();
             builder
                 .add_generic_attributes(["style", "align", "dir"])
                 .add_url_schemes(["data"])
+                .filter_style_properties(STYLE_PROPERTIES.iter().copied().collect())
                 .attribute_filter(|element, attribute, value| match (element, attribute) {
                     ("img", "src") => is_embedded_picture(value).then(|| value.into()),
                     (_, "href") if has_data_scheme(value) => None,
@@ -358,5 +437,26 @@ mod tests {
                 "<p>a &lt;img&gt; bc<img alt=\"Logo &quot;Zoë&quot; &gt;\" src=\"{logo}\">d</p>"
             )
         );
+    }
+
+    #[test]
+    fn signature_css_loads_nothing_from_the_web() {
+        let clean = sanitize_html(
+            "<span style=\"color:#333;background-image:url(https://tracker.example/a.png);\
+             padding:4px\">a</span><div style=\"background:url('https://tracker.example/b.png') \
+             #fff;list-style-image:url(https://tracker.example/c.png);border-image:\
+             url(https://tracker.example/d.png) 30;content:url(https://tracker.example/e.png);\
+             cursor:url(https://tracker.example/f.cur),auto;text-align:center\">b</div>",
+        );
+        assert!(!clean.contains("tracker.example"), "{clean}");
+        assert!(clean.contains("style=\"text-align:center\""), "{clean}");
+        // The text and the rest of its formatting stay.
+        let clean = sanitize_html(
+            "<span style=\"background-image:url(https://tracker.example/a.png);color:#333;\
+             font-family:Times New Roman, Times, serif\">c</span>",
+        );
+        assert!(!clean.contains("tracker.example"), "{clean}");
+        assert!(clean.contains("color:#333"), "{clean}");
+        assert!(clean.contains("font-family:Times New Roman"), "{clean}");
     }
 }
