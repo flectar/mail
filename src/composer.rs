@@ -4,7 +4,7 @@
 //! main window free to read mail or start another message.
 
 use super::*;
-use crate::rich_compose::{EditMark, EditState};
+use crate::rich_compose::{EditMark, EditState, PastedLayout};
 use flectar_mail_core::models::{
     Address, AttachmentMeta, AutomaticCopies, CancelledSend, Importance, SaveDraftArgs,
     SenderIdentity, Settings, Signature,
@@ -527,7 +527,8 @@ pub(super) fn save_open_messages() {
 }
 
 /// The message colors changed, with the theme or the reader's choice: an
-/// original already drawn below a composer takes them on too.
+/// original already drawn below a composer takes them on too, as do layout
+/// blocks in the text.
 pub(super) fn message_colors_changed(app: &AppWindow) {
     let colors = crate::message_appearance::EmailAppearance::from_app(app);
     with_composers(|composers| {
@@ -538,11 +539,32 @@ pub(super) fn message_colors_changed(app: &AppWindow) {
                 .borrow_mut()
                 .as_mut()
                 .is_some_and(|renderer| renderer.set_appearance(colors));
-            if changed && let Some(host) = session.host() {
+            let Some(host) = session.host() else {
+                continue;
+            };
+            if changed {
                 session.render_quote(&host);
+            }
+            let document = session.document.borrow();
+            if document.layouts().next().is_some() {
+                apply_compose_editor_surface(
+                    &host.view(),
+                    &document,
+                    document.selection(),
+                    &mut session.editor.borrow_mut(),
+                );
             }
         }
     });
+}
+
+/// The colors messages show in, as the main window has them: layout blocks in the text are
+/// drawn in them, as the original below a reply is.
+pub(super) fn message_colors() -> crate::message_appearance::EmailAppearance {
+    with_composers(|composers| composers.app.upgrade())
+        .flatten()
+        .map(|app| crate::message_appearance::EmailAppearance::from_app(&app))
+        .unwrap_or_default()
 }
 
 /// The main window stops or resumes painting. Its own composer lets go of
@@ -671,6 +693,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_active_image_alt(from.get_active_image_alt());
     to.set_active_image_width(from.get_active_image_width());
     to.set_active_image_shown_width(from.get_active_image_shown_width());
+    to.set_active_layout(from.get_active_layout());
     to.set_quote(from.get_quote());
     to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());
@@ -1406,7 +1429,7 @@ impl Composers {
                 // Images the HTML no longer holds leave no mark in the text.
                 let text = draft
                     .body_text
-                    .replace(crate::rich_compose::IMAGE_PLACEHOLDER, "");
+                    .replace(crate::rich_compose::OBJECT_PLACEHOLDER, "");
                 let cursor = i32::try_from(text.len()).unwrap_or(i32::MAX);
                 document.load(&text, cursor, cursor);
             }
@@ -2671,8 +2694,15 @@ impl ComposeSession {
     }
 
     /// Pastes `html` over the selection, unless it holds no text, or images that would take the
-    /// message's images and attachments past what a message carries. Returns whether it went in.
+    /// message's images and attachments past what a message carries. A signature keeps a layout
+    /// its text's lines can't hold, such as a table with a logo beside the text (#549), and a
+    /// message takes the text in its own formatting. Returns whether it went in.
     fn paste_html(&self, host: &HostRef, html: &str) -> bool {
+        let layout = if self.signature_target.borrow().is_some() {
+            PastedLayout::Keep
+        } else {
+            PastedLayout::Merge
+        };
         {
             let files = self
                 .files
@@ -2685,7 +2715,7 @@ impl ComposeSession {
                 files.saturating_add(self.photos.image_bytes(document))
             };
             let before = carried(&document);
-            let Some(mut selection) = document.paste_html(html) else {
+            let Some(mut selection) = document.paste_html(html, layout) else {
                 return false;
             };
             if carried(&document) > before.max(MAX_COMPOSE_ATTACHMENT_BYTES) {

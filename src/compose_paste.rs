@@ -9,8 +9,8 @@
 //! colors, highlights and alignment.
 
 use crate::rich_compose::{
-    Alignment, BOLD, CODE, CharacterStyle, ComposeStyleRun, FontFamily, IMAGE_PLACEHOLDER, ITALIC,
-    InlineImage, QUOTE_MARKER, Rgb, STRIKE, TextSize, UNDERLINE,
+    Alignment, BOLD, CODE, CharacterStyle, ComposeStyleRun, Embed, FontFamily, ITALIC, InlineImage,
+    OBJECT_PLACEHOLDER, QUOTE_MARKER, Rgb, STRIKE, TextSize, UNDERLINE,
 };
 use html5ever::tokenizer::{
     BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind,
@@ -31,16 +31,8 @@ pub(crate) fn styled_text(
     if html.len() > MAX_HTML_BYTES {
         return None;
     }
-    let tokenizer = Tokenizer::new(Sink(RefCell::default()), Default::default());
-    let input = BufferQueue::default();
-    input.push_back(html.into());
-    let _ = tokenizer.feed(&input);
-    tokenizer.end();
-    let parts = tokenizer.sink.0.into_inner();
-    // Browsers mark what was copied, with the elements that hold it around it.
-    let marked = parts
-        .iter()
-        .any(|part| matches!(part, Part::Comment(text) if text.trim() == "StartFragment"));
+    let parts = parts(html);
+    let marked = is_marked(&parts);
     // Mail written in Outlook spaces its paragraphs with empty ones, in a style sheet that takes
     // their margins off, which a copy can leave out: there, each paragraph is a line.
     let paragraph_breaks = if has_empty_paragraph(&parts) { 1 } else { 2 };
@@ -49,6 +41,148 @@ pub(crate) fn styled_text(
         reader.part(part);
     }
     reader.finish(base)
+}
+
+/// The HTML that was copied, when it lays what it holds out in a way the composer's lines
+/// can't: in a table, such as a signature with a logo beside its text, or with rules across
+/// it. A signature keeps such a layout as it is (#549), where a message takes the text in its
+/// own formatting. What the copy holds that doesn't show, such as its head and scripts, is
+/// left out, and the HTML isn't cleaned yet.
+pub(crate) fn layout_html(html: &str) -> Option<String> {
+    if html.len() > MAX_HTML_BYTES {
+        return None;
+    }
+    let parts = parts(html);
+    let mut layout = false;
+    let mut copied = String::with_capacity(html.len());
+    for part in shown_parts(&parts) {
+        match part {
+            Part::Start {
+                name, attributes, ..
+            } if !DOCUMENT_ELEMENTS.contains(&name.as_str()) => {
+                layout |= matches!(name.as_str(), "table" | "hr");
+                push_start_tag(
+                    &mut copied,
+                    name,
+                    attributes
+                        .iter()
+                        .map(|(name, value)| (name.as_str(), value.as_str())),
+                );
+            }
+            Part::End(name) if !DOCUMENT_ELEMENTS.contains(&name.as_str()) => {
+                copied.push_str("</");
+                copied.push_str(name);
+                copied.push('>');
+            }
+            Part::Text(text) => push_text(&mut copied, text),
+            _ => {}
+        }
+    }
+    layout.then_some(copied)
+}
+
+/// The tags and text of `parts` that were copied and show: those inside the marks browsers put
+/// around what was copied, when there are any, and outside elements that hide what's in them,
+/// such as a document's head and its scripts.
+fn shown_parts(parts: &[Part]) -> Vec<&Part> {
+    let mut copying = !is_marked(parts);
+    // The elements that hide what's in them, innermost last.
+    let mut hidden: Vec<&str> = Vec::new();
+    let mut shown = Vec::new();
+    for part in parts {
+        match part {
+            Part::Comment(comment) => match comment.trim() {
+                "StartFragment" => copying = true,
+                "EndFragment" => copying = false,
+                _ => {}
+            },
+            // What a document shows is in its body, whichever head came before it.
+            Part::Start { name, .. } if name == "body" => {
+                hidden.clear();
+                if copying {
+                    shown.push(part);
+                }
+            }
+            Part::Start {
+                name, self_closing, ..
+            } if HIDDEN_ELEMENTS.contains(&name.as_str()) => {
+                if !self_closing {
+                    hidden.push(name);
+                }
+            }
+            Part::End(name) if hidden.last() == Some(&name.as_str()) => {
+                hidden.pop();
+            }
+            _ => {
+                if copying && hidden.is_empty() {
+                    shown.push(part);
+                }
+            }
+        }
+    }
+    shown
+}
+
+/// Elements whose content doesn't show, as browsers render them.
+const HIDDEN_ELEMENTS: [&str; 19] = [
+    "head", "template", "noscript", "svg", "math", "select", "object", "audio", "video", "canvas",
+    "style", "script", "title", "textarea", "xmp", "iframe", "noembed", "noframes", "button",
+];
+
+/// The tags that make a document of a copy, rather than show anything.
+const DOCUMENT_ELEMENTS: [&str; 5] = ["html", "body", "meta", "link", "base"];
+
+/// Writes the start tag of `name` with `attributes`, as HTML.
+pub(crate) fn push_start_tag<'a>(
+    output: &mut String,
+    name: &str,
+    attributes: impl IntoIterator<Item = (&'a str, &'a str)>,
+) {
+    output.push('<');
+    output.push_str(name);
+    for (attribute, value) in attributes {
+        output.push(' ');
+        output.push_str(attribute);
+        output.push_str("=\"");
+        for character in value.chars() {
+            match character {
+                '&' => output.push_str("&amp;"),
+                '"' => output.push_str("&quot;"),
+                character => output.push(character),
+            }
+        }
+        output.push('"');
+    }
+    output.push('>');
+}
+
+/// Writes `text` as HTML.
+pub(crate) fn push_text(output: &mut String, text: &str) {
+    for character in text.chars() {
+        match character {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            character => output.push(character),
+        }
+    }
+}
+
+/// The tags, text and comments of `html`, in order.
+fn parts(html: &str) -> Vec<Part> {
+    let tokenizer = Tokenizer::new(Sink(RefCell::default()), Default::default());
+    let input = BufferQueue::default();
+    input.push_back(html.into());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    tokenizer.sink.0.into_inner()
+}
+
+/// Whether browsers marked what was copied, with the elements that hold it around it.
+fn is_marked(parts: &[Part]) -> bool {
+    parts
+        .iter()
+        .any(|part| matches!(part, Part::Comment(text) if text.trim() == "StartFragment"))
 }
 
 /// Whether a paragraph holds no text, only spaces.
@@ -84,6 +218,8 @@ enum Part {
     Start {
         name: String,
         attributes: Vec<(String, String)>,
+        /// Written as `<name/>`, which closes it where it's foreign content such as SVG.
+        self_closing: bool,
     },
     End(String),
     Text(String),
@@ -120,7 +256,11 @@ impl TokenSink for Sink {
                         )
                     })
                     .collect();
-                parts.push(Part::Start { name, attributes });
+                parts.push(Part::Start {
+                    name,
+                    attributes,
+                    self_closing: tag.self_closing,
+                });
                 if let Some(raw) = raw.filter(|_| !tag.self_closing) {
                     return TokenSinkResult::RawData(raw);
                 }
@@ -246,7 +386,9 @@ impl Reader {
 
     fn part(&mut self, part: Part) {
         match part {
-            Part::Start { name, attributes } => self.start(name, &attributes),
+            Part::Start {
+                name, attributes, ..
+            } => self.start(name, &attributes),
             Part::End(name) => self.end(&name),
             Part::Text(text) => {
                 let look = self.look();
@@ -300,7 +442,7 @@ impl Reader {
                             .and_then(|width| width.trim().parse::<u32>().ok())
                             .filter(|width| *width > 0 && *width != image.width);
                         let mut placeholder = [0; 4];
-                        let text = IMAGE_PLACEHOLDER.encode_utf8(&mut placeholder);
+                        let text = OBJECT_PLACEHOLDER.encode_utf8(&mut placeholder);
                         self.write_piece(text, Piece::Image(Arc::new(image), look.clone()), &look);
                     }
                 }
@@ -661,7 +803,7 @@ impl Reader {
                     Piece::Image(image, look) => CharacterStyle {
                         link: look.link,
                         align: look.align,
-                        image: Some(image),
+                        embed: Some(Embed::Image(image)),
                         ..CharacterStyle::default()
                     },
                     Piece::Text(look) => {
@@ -705,7 +847,7 @@ impl Reader {
                             size,
                             family,
                             align: look.align,
-                            image: None,
+                            embed: None,
                         }
                     }
                 };
@@ -1090,6 +1232,50 @@ mod tests {
     }
 
     #[test]
+    fn a_copied_layout_comes_as_the_html_that_shows() {
+        // A browser's copy of a signature laid out in a table, with the logo beside the text and
+        // a rule between its lines.
+        let copied = layout_html(concat!(
+            "<html><head><title>Signature</title><style>td { color: red }</style></head><body>\n",
+            "<p>Before</p><!--StartFragment--><table cellpadding=\"0\"><tr>",
+            "<td><img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"Logo &amp; mark\"></td>",
+            "<td><b>Zoë</b> &lt;CTO&gt;<hr><a href=\"https://example.org/?a=1&amp;b=&quot;2&quot;\">",
+            "example.org</a><script>alert(1)</script><svg/>Tail</td></tr></table>",
+            "<!--EndFragment--><p>After</p>\n</body></html>",
+        ))
+        .expect("a layout");
+        assert_eq!(
+            copied,
+            concat!(
+                "<table cellpadding=\"0\"><tr><td><img src=\"data:image/png;base64,iVBORw0KGgo=\" ",
+                "alt=\"Logo &amp; mark\"></td><td><b>Zoë</b> &lt;CTO&gt;<hr><a ",
+                "href=\"https://example.org/?a=1&amp;b=&quot;2&quot;\">example.org</a>Tail</td>",
+                "</tr></table>",
+            )
+        );
+
+        // A copy without the marks is all of what its body shows.
+        assert_eq!(
+            layout_html("<meta charset=\"utf-8\"><div>Ana</div><hr><div>Sales</div>").as_deref(),
+            Some("<div>Ana</div><hr><div>Sales</div>")
+        );
+    }
+
+    #[test]
+    fn text_the_lines_can_hold_has_no_layout_to_keep() {
+        for html in [
+            "<div><b>Zoë Ortiz</b><br><a href=\"https://example.org\">example.org</a></div>",
+            "<ul><li>one</li></ul><blockquote>quoted</blockquote><p align=\"center\">c</p>",
+            // A table outside what was copied is only around it.
+            "<table><tr><td><!--StartFragment-->In a cell<!--EndFragment--></td></tr></table>",
+            "<head><style>table { width: 100% }</style></head><body>Text</body>",
+            "",
+        ] {
+            assert_eq!(layout_html(html), None, "{html}");
+        }
+    }
+
+    #[test]
     fn a_web_page_keeps_its_emphasis_and_drops_its_page_style() {
         let pasted = paste(concat!(
             "<html><body>\n<!--StartFragment-->",
@@ -1329,7 +1515,7 @@ mod tests {
              and <img src=\"https://example.com/remote.png\" alt=\"Remote\">.</p>"
         ));
         assert_eq!(pasted.0, "See \u{fffc} and .");
-        let image = style(&pasted, "\u{fffc}").image.clone().unwrap();
+        let image = style(&pasted, "\u{fffc}").image().cloned().unwrap();
         assert_eq!(
             (image.width, image.height, image.shown_width, &*image.alt),
             (8, 6, Some(4), "Chart")

@@ -65,11 +65,11 @@ export global ComposerUi {
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
     // Where the selected image shows, when the selection is one image.
-    in property <bool> editor-image-shown: false;
-    in property <float> editor-image-x: 0;
-    in property <float> editor-image-y: 0;
-    in property <float> editor-image-width: 0;
-    in property <float> editor-image-height: 0;
+    in property <bool> editor-object-shown: false;
+    in property <float> editor-object-x: 0;
+    in property <float> editor-object-y: 0;
+    in property <float> editor-object-width: 0;
+    in property <float> editor-object-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
@@ -91,6 +91,9 @@ export global ComposerUi {
     in property <int> active-image-width: 0;
     // The width it shows at, in CSS pixels.
     in property <int> active-image-shown-width: 0;
+    // Whether the selection is one layout block, a part of the text kept in the layout it was
+    // pasted with, such as a signature laid out in a table (#549).
+    in property <bool> active-layout: false;
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
     // When the message reminds the user unless someone replies, as shown,
@@ -263,11 +266,11 @@ export component BoundComposer inherits EmailComposer {
     editor-caret-x: ComposerUi.editor-caret-x;
     editor-caret-y: ComposerUi.editor-caret-y;
     editor-caret-height: ComposerUi.editor-caret-height;
-    editor-image-shown: ComposerUi.editor-image-shown;
-    editor-image-x: ComposerUi.editor-image-x;
-    editor-image-y: ComposerUi.editor-image-y;
-    editor-image-width: ComposerUi.editor-image-width;
-    editor-image-height: ComposerUi.editor-image-height;
+    editor-object-shown: ComposerUi.editor-object-shown;
+    editor-object-x: ComposerUi.editor-object-x;
+    editor-object-y: ComposerUi.editor-object-y;
+    editor-object-width: ComposerUi.editor-object-width;
+    editor-object-height: ComposerUi.editor-object-height;
     bold-active: ComposerUi.bold-active;
     italic-active: ComposerUi.italic-active;
     underline-active: ComposerUi.underline-active;
@@ -283,6 +286,7 @@ export component BoundComposer inherits EmailComposer {
     active-image-alt: ComposerUi.active-image-alt;
     active-image-width: ComposerUi.active-image-width;
     active-image-shown-width: ComposerUi.active-image-shown-width;
+    active-layout: ComposerUi.active-layout;
     can-pop-out: ComposerUi.can-pop-out;
     remind-time: ComposerUi.remind-time;
     quote: ComposerUi.quote;

@@ -1141,6 +1141,57 @@ export component ImageBar inherits Rectangle {
     }
 }
 
+// The controls of a selected layout block, a part of the text kept in the layout it was pasted
+// with, such as a signature laid out in a table: turning it into text to edit, which leaves its
+// layout behind, and taking it out.
+export component LayoutBar inherits Rectangle {
+    in property <color> body-color;
+    in property <color> control-hover-color;
+    in property <color> raised-color;
+    in property <color> secondary-color;
+    in property <color> subtle-border-color;
+    callback apply-format(string);
+
+    width: bar-row.preferred-width;
+    height: 38px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.subtle-border-color;
+    background: root.raised-color;
+    drop-shadow-blur: 10px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #00000030;
+
+    // Presses on the bar stay off the text under it.
+    TouchArea { }
+
+    bar-row := HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        alignment: start;
+
+        BarButton {
+            text: @tr("Edit as text");
+            text-color: root.body-color;
+            hover-background: root.control-hover-color;
+            clicked => { root.apply-format("layout-text"); }
+        }
+
+        Rectangle {
+            width: 1px;
+            Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 18px; background: root.subtle-border-color; }
+        }
+
+        ToolbarButton {
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            icon-color: root.secondary-color;
+            hover-background: root.control-hover-color;
+            tooltip-text: @tr("Remove");
+            clicked => { root.apply-format("delete"); }
+        }
+    }
+}
+
 // A handle on each corner of a selected image, to drag it to the width wanted. While one
 // moves, an outline shows the size the image will have from the opposite corner, and the
 // image takes that width when the drag ends. Images keep their shape and never grow past

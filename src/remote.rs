@@ -495,7 +495,7 @@ fn proxied_client(proxy: reqwest::Url) -> Option<reqwest::Client> {
     Some(client)
 }
 
-fn load_data_image(url: &str) -> Option<Vec<u8>> {
+pub(crate) fn load_data_image(url: &str) -> Option<Vec<u8>> {
     // Base64 overhead is 4/3; this pre-check bounds allocation even before
     // the streaming decoder sees the data.
     if url.len() > MAX_EMBEDDED_RESOURCE_BYTES.saturating_mul(2) {

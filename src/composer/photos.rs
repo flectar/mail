@@ -67,15 +67,21 @@ impl MessagePhotos {
         self.images.borrow().get(&image.id).cloned().flatten()
     }
 
-    /// The size the images in `document` go out at.
+    /// The size the images in `document` go out at, those in its layout blocks counted by the
+    /// HTML that holds them.
     pub(super) fn image_bytes(&self, document: &RichComposeDocument) -> u64 {
-        document
+        let images = document
             .images()
             .map(|image| {
                 self.shrunk(image)
                     .map_or(image.data.len(), |data| data.len()) as u64
             })
-            .sum()
+            .sum::<u64>();
+        let layouts = document
+            .layouts()
+            .map(|block| block.html.len() as u64)
+            .sum::<u64>();
+        images.saturating_add(layouts)
     }
 
     /// Whether `path` waits to be attached once it's shrunk.

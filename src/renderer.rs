@@ -6,6 +6,7 @@ mod details;
 mod details_tests;
 mod embedded;
 mod interaction;
+mod layout_block;
 #[cfg(test)]
 mod regression;
 mod semantics;
@@ -26,6 +27,7 @@ use details::FindMatch;
 pub(crate) use details::set_default_summary;
 pub(crate) use embedded::{HEADER_VALUE, HeaderLines, set_header_lines};
 use keyboard_types::{Key, NamedKey};
+pub(crate) use layout_block::{LayoutPicture, paint_layout_block};
 use parley::layout::PositionedLayoutItem;
 use semantics::*;
 #[cfg(feature = "gpu-renderer")]
@@ -1914,6 +1916,12 @@ fn layout_nodes(document: &BaseDocument) -> Vec<NodeId> {
 }
 
 fn content_surface_height(document: &HtmlDocument) -> f32 {
+    (content_bottom(document) + EMAIL_SURFACE_BOTTOM_PAD)
+        .clamp(MIN_EMAIL_SURFACE_HEIGHT, MAX_EMAIL_SURFACE_HEIGHT)
+}
+
+/// Where the document's content ends, in CSS pixels from its top.
+fn content_bottom(document: &HtmlDocument) -> f32 {
     let mut content_bottom = 0.0_f32;
 
     for node in layout_nodes(document)
@@ -1951,8 +1959,7 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
         }
     }
 
-    (content_bottom + EMAIL_SURFACE_BOTTOM_PAD)
-        .clamp(MIN_EMAIL_SURFACE_HEIGHT, MAX_EMAIL_SURFACE_HEIGHT)
+    content_bottom
 }
 
 /// Blitz may leave pixels beyond the document's own painted boxes
