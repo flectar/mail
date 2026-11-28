@@ -1,0 +1,316 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { FocusRing } from "focus-ring.slint";
+
+// Chooses one value from a list: a field showing the chosen value with a
+// chevron, whose list opens below it in the style of the app's menus. Keys
+// follow the WAI-ARIA select-only combobox. Down, Alt+Down, Return and Space
+// open the list on the chosen value, Up and Home on the first one, End on the
+// last. In the list the arrows, Home, End, Page Up and Page Down move, Return,
+// Space and Alt+Up choose and close, Tab chooses and moves on, and Escape
+// closes it unchanged. The value changes only when one is chosen, so moving
+// through the list never saves anything.
+export component Select inherits Rectangle {
+    in property <[string]> model;
+    in property <bool> enabled: true;
+    in-out property <int> current-index: 0;
+    out property <string> current-value: root.current-index >= 0 && root.current-index < root.model.length
+        ? root.model[root.current-index] : "";
+    // Shown while nothing is chosen.
+    in property <string> placeholder;
+    // Touch-sized rows in the list, as on phones.
+    in property <bool> compact: false;
+    in property <length> max-list-height: 320px;
+    out property <bool> has-focus: trigger.has-focus;
+    callback selected(current-value: string);
+
+    private property <length> item-height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.medium-control-height;
+    private property <int> highlighted-index: -1;
+    private property <length> scroll-y: 0px;
+    private property <length> list-visible-height: 0px;
+    private property <bool> open: list-popup.is-open;
+    // The list's height, before its scroll view reports the height it shows.
+    private property <length> list-height: min(root.max-list-height, root.model.length * root.item-height + 8px);
+
+    min-width: 120px;
+    preferred-width: 210px;
+    height: LayoutMetrics.medium-control-height;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    border-radius: LayoutMetrics.corner-radius;
+    forward-focus: trigger;
+    accessible-role: combobox;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-expanded: root.open;
+    accessible-value: root.current-value;
+    accessible-action-expand => { root.open-list(root.current-index); }
+    accessible-action-default => { root.open-list(root.current-index); }
+
+    // Opens the list on the chosen value.
+    public function show-list() {
+        root.open-list(root.current-index);
+    }
+
+    // Opens the list with `index` highlighted, or the first value when that
+    // is none of them.
+    function open-list(index: int) {
+        if !root.enabled || root.model.length == 0 {
+            return;
+        }
+        root.highlighted-index = index >= 0 && index < root.model.length ? index : 0;
+        root.scroll-y = 0px;
+        list-popup.show();
+        root.bring-highlight-into-view();
+    }
+
+    function move-highlight(steps: int) {
+        if root.model.length == 0 {
+            return;
+        }
+        root.highlighted-index = max(0, min(root.model.length - 1, root.highlighted-index + steps));
+        root.bring-highlight-into-view();
+    }
+
+    function bring-highlight-into-view() {
+        if root.highlighted-index < 0 {
+            return;
+        }
+        let item-y = 4px + root.highlighted-index * root.item-height;
+        let visible = root.list-visible-height > 0px ? root.list-visible-height : root.list-height - 8px;
+        if item-y + root.scroll-y < 0px {
+            root.scroll-y = -item-y;
+        } else if item-y + root.item-height + root.scroll-y > visible {
+            root.scroll-y = visible - item-y - root.item-height;
+        }
+    }
+
+    // Takes the highlighted value, if it's another one, and closes the list.
+    function choose-highlighted() {
+        let index = root.highlighted-index;
+        list-popup.close();
+        trigger.focus();
+        if index >= 0 && index < root.model.length && index != root.current-index {
+            root.current-index = index;
+            root.selected(root.current-value);
+        }
+    }
+
+    trigger := FocusVisibleScope {
+        enabled: root.enabled;
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.modifiers.control || event.modifiers.meta {
+                return reject;
+            }
+            if event.text == Key.DownArrow || event.text == Key.Return || event.text == Key.Space {
+                root.open-list(root.current-index);
+                return accept;
+            }
+            if event.text == Key.UpArrow || event.text == Key.Home {
+                root.open-list(0);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.open-list(root.model.length - 1);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => {
+                trigger.focus();
+                trigger.pointer-activated();
+                if root.open {
+                    list-popup.close();
+                } else {
+                    root.open-list(root.current-index);
+                }
+            }
+        }
+    }
+
+    if trigger.focus-visible : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
+
+    // The face draws the select and the root stays a plain box. A root with a
+    // shadow, an opacity or an animated color makes Slint copy the whole select,
+    // list and all, into each of its uses; this way it builds it once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: trigger.focus-visible ? AppTheme.focus-ring : AppTheme.input-border;
+        background: !root.enabled ? AppTheme.disabled-bg
+            : touch.has-hover || root.open ? AppTheme.control-bg : AppTheme.input-bg;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: root.enabled ? AppTheme.control-shadow : transparent;
+        opacity: root.enabled ? 1 : 0.5;
+        animate background { duration: 120ms; easing: ease-out; }
+
+        HorizontalLayout {
+            padding-left: LayoutMetrics.field-padding;
+            padding-right: 10px;
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.current-value != "" ? root.current-value : root.placeholder;
+                color: root.current-value != "" ? AppTheme.heading : AppTheme.placeholder;
+                font-size: TypeScale.body;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+            Image {
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("../icons/lucide/outline/chevron-down.svg");
+                colorize: AppTheme.secondary;
+                image-fit: contain;
+                accessible-role: none;
+            }
+        }
+    }
+
+    list-popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: max(root.width, 160px);
+        height: root.list-height;
+        close-policy: close-on-click-outside;
+        forward-focus: list-focus;
+
+        Rectangle {
+            border-radius: LayoutMetrics.corner-radius;
+            border-width: 1px;
+            border-color: AppTheme.border;
+            background: AppTheme.surface-raised;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            clip: true;
+
+            list-focus := FocusScope {
+                capture-key-pressed(event) => {
+                    if event.text == Key.DownArrow {
+                        root.move-highlight(1);
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow && event.modifiers.alt {
+                        root.choose-highlighted();
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow {
+                        root.move-highlight(-1);
+                        return accept;
+                    }
+                    if event.text == Key.PageDown {
+                        root.move-highlight(10);
+                        return accept;
+                    }
+                    if event.text == Key.PageUp {
+                        root.move-highlight(-10);
+                        return accept;
+                    }
+                    if event.text == Key.Home {
+                        root.move-highlight(-root.model.length);
+                        return accept;
+                    }
+                    if event.text == Key.End {
+                        root.move-highlight(root.model.length);
+                        return accept;
+                    }
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.choose-highlighted();
+                        return accept;
+                    }
+                    if event.text == Key.Escape {
+                        list-popup.close();
+                        trigger.focus();
+                        return accept;
+                    }
+                    if event.text == Key.Tab {
+                        root.choose-highlighted();
+                        return reject;
+                    }
+                    reject
+                }
+
+                ScrollView {
+                    accessible-role: list;
+                    accessible-item-count: root.model.length;
+                    accessible-delegate-focus: root.highlighted-index;
+                    content-y <=> root.scroll-y;
+                    content-height: max(self.visible-height, root.model.length * root.item-height + 8px);
+                    horizontal-scrollbar-policy: always-off;
+                    changed visible-height => { root.list-visible-height = self.visible-height; }
+
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 0px;
+                        for value[index] in root.model : Rectangle {
+                            height: root.item-height;
+                            border-radius: LayoutMetrics.small-radius;
+                            background: index == root.highlighted-index ? AppTheme.control-bg : transparent;
+
+                            Text {
+                                x: 8px;
+                                width: parent.width - 40px;
+                                height: parent.height;
+                                text: value;
+                                color: AppTheme.heading;
+                                font-size: TypeScale.body;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                accessible-role: none;
+                            }
+                            if index == root.current-index : Image {
+                                x: parent.width - self.width - 10px;
+                                y: (parent.height - self.height) / 2;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../icons/lucide/outline/check.svg");
+                                colorize: AppTheme.accent;
+                                image-fit: contain;
+                                accessible-role: none;
+                            }
+                            option-touch := TouchArea {
+                                accessible-role: list-item;
+                                accessible-label: value;
+                                accessible-item-index: index;
+                                accessible-item-selectable: true;
+                                accessible-item-selected: index == root.current-index;
+                                accessible-action-default => {
+                                    root.highlighted-index = index;
+                                    root.choose-highlighted();
+                                }
+                                mouse-cursor: pointer;
+                                changed has-hover => {
+                                    if self.has-hover {
+                                        root.highlighted-index = index;
+                                    }
+                                }
+                                clicked => {
+                                    root.highlighted-index = index;
+                                    root.choose-highlighted();
+                                    trigger.pointer-activated();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

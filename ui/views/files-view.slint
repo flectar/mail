@@ -1,7 +1,8 @@
 import { DocumentPreview, TextPreview } from "../components/document-preview.slint";
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
-import { HorizontalBox, VerticalBox, ListView, ScrollView, ComboBox, CheckBox } from "std-widgets.slint";
+import { HorizontalBox, VerticalBox, ListView, ScrollView } from "std-widgets.slint";
+import { Select } from "../components/select.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
@@ -11,7 +12,7 @@ import { DialogArea } from "../components/window-backdrop.slint";
 import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
-import { FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
+import { CheckBox, FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 
 export struct FileRow {
@@ -593,8 +594,8 @@ export component FilesView inherits Rectangle {
                 Text { text: FilesUi.dialog == "delete" ? @tr("Delete permanently?") : FilesUi.dialog == "share" ? @tr("Share file or folder") : FilesUi.dialog == "folder" ? @tr("New folder") : FilesUi.dialog == "rename" ? @tr("Rename") : FilesUi.dialog == "move" ? @tr("Move to folder") : FilesUi.dialog == "copy" ? @tr("Copy to folder") : FilesUi.dialog == "metadata" ? @tr("File properties") : FilesUi.dialog == "lock" ? @tr("Lock file or folder") : FilesUi.dialog == "filter" ? @tr("Filter and sort files") : @tr("Manage file"); color: AppTheme.heading; font-size: TypeScale.title; font-weight: 700; }
                 if FilesUi.dialog == "filter" : VerticalBox {
                     padding:0px;spacing:8px;
-                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Files and folders"),@tr("Files"),@tr("Folders")];current-index <=> FilesUi.file-kind;}
-                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Name"),@tr("Size"),@tr("Kind")];current-index <=> FilesUi.file-sort;}
+                    Select {height:36px;vertical-stretch:0;model:[@tr("Files and folders"),@tr("Files"),@tr("Folders")];current-index <=> FilesUi.file-kind;}
+                    Select {height:36px;vertical-stretch:0;model:[@tr("Name"),@tr("Size"),@tr("Kind")];current-index <=> FilesUi.file-sort;}
                     CheckBox {text:@tr("Descending order");checked <=> FilesUi.descending;}
                     if FilesUi.file-kind!=2 : LineEdit {input-label:@tr("Minimum bytes");placeholder-text:@tr("Minimum bytes (optional)");text <=> FilesUi.min-size;}
                     if FilesUi.file-kind!=2 : LineEdit {input-label:@tr("Maximum bytes");placeholder-text:@tr("Maximum bytes (optional)");text <=> FilesUi.max-size;}
@@ -618,7 +619,7 @@ export component FilesView inherits Rectangle {
                 if FilesUi.dialog == "folder" || FilesUi.dialog == "rename" || FilesUi.dialog == "move" || FilesUi.dialog == "copy" : LineEdit { text <=> root.value; input-label: @tr("Name"); placeholder-text: @tr("Name"); }
                 if FilesUi.dialog == "move" || FilesUi.dialog == "copy" : VerticalBox {
                     padding: 0px; spacing: 8px;
-                    if FilesUi.dialog == "copy" && !FilesUi.webdav : ComboBox { height: 36px; vertical-stretch: 0; model: FilesUi.storage-accounts; current-index <=> root.copy-space; }
+                    if FilesUi.dialog == "copy" && !FilesUi.webdav : Select { height: 36px; vertical-stretch: 0; model: FilesUi.storage-accounts; current-index <=> root.copy-space; }
                     Text { text: @tr("Destination folder path (for example /Documents). Leave empty for the current folder, or the root of another storage space."); wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
                     LineEdit { text <=> root.destination; input-label: @tr("Destination folder"); placeholder-text: "/Documents"; }
                 }
@@ -646,7 +647,7 @@ export component FilesView inherits Rectangle {
                 if FilesUi.dialog=="copy" || FilesUi.dialog=="move" || FilesUi.dialog=="rename" || (FilesUi.dialog=="folder" && !FilesUi.webdav) : VerticalBox {
                     padding:0px;spacing:8px;
                     Text {text:@tr("If a name already exists");color:AppTheme.secondary;}
-                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Stop and report conflict"),@tr("Keep both with a new name"),@tr("Replace existing"),@tr("Keep newest")];current-index <=> FilesUi.collision;}
+                    Select {height:36px;vertical-stretch:0;model:[@tr("Stop and report conflict"),@tr("Keep both with a new name"),@tr("Replace existing"),@tr("Keep newest")];current-index <=> FilesUi.collision;}
                     if FilesUi.collision>=2 : Text {text:@tr("This can replace existing content at the destination.");color:AppTheme.secondary;wrap:word-wrap;}
                     if !FilesUi.webdav : CheckBox {text:@tr("Compare names without case");checked <=> FilesUi.case-insensitive;}
                 }
@@ -721,7 +722,7 @@ export component FilesView inherits Rectangle {
                 Text { text: @tr("Uses the selected account’s saved credentials."); color: AppTheme.secondary; font-size: TypeScale.caption; }
                 VerticalBox {
                     alignment: start; padding: 0px; spacing: 8px;
-                    ComboBox { height: 36px; vertical-stretch: 0; model: ["JMAP", "WebDAV"]; current-index: FilesUi.webdav ? 1 : 0; enabled: !FilesUi.busy; selected(value) => { FilesUi.webdav = self.current-index == 1; } }
+                    Select { height: 36px; vertical-stretch: 0; model: ["JMAP", "WebDAV"]; current-index: FilesUi.webdav ? 1 : 0; enabled: !FilesUi.busy; selected(value) => { FilesUi.webdav = self.current-index == 1; } }
                     LineEdit { text <=> FilesUi.endpoint; input-label: @tr("Storage URL"); placeholder-text: FilesUi.webdav ? "https://mail.example.com/dav/file/username/" : "https://mail.example.com"; enabled: !FilesUi.busy; horizontal-stretch: 1; }
                     Button { text: @tr("Connect"); primary: true; enabled: FilesUi.account > 0 && !FilesUi.busy; clicked => { root.connection-attempted = true; FilesUi.command("connect", FilesUi.endpoint, FilesUi.webdav ? "dav" : "jmap"); } }
                 }

@@ -1128,16 +1128,23 @@ fn states() -> Vec<State> {
             app.set_caldav_url("https://dav.example.com/".into());
             app.set_caldav_username("alex.morgan@example.com".into());
         }),
-        state("settings account composing", |app| {
+    ];
+    // The first account's card on each tab of its mail settings. The tabs
+    // are a row on a desktop and a column on a phone.
+    for tab in ["Signatures", "Composing", "OpenPGP", "Automatic replies"] {
+        states.push(state(&format!("settings account {tab}"), move |app| {
             app.set_settings_tab("Accounts".into());
             app.invoke_open_settings();
+            app.set_settings_open_account(1);
             let preferences = app.global::<AccountMailPreferences>();
             preferences.set_account_id(1);
-            preferences.set_account_label("alex.morgan@example.com".into());
-            // The tabs are a row on desktop and a column on phones.
-            press(app, "Composing");
-        }),
-    ];
+            preferences.set_auto_reply_supported(true);
+            preferences.set_auto_reply_subject_available(true);
+            // A card opens on General.
+            slint::platform::update_timers_and_animations();
+            press(app, tab);
+        }));
+    }
     for tab in [
         "General",
         "Accounts",

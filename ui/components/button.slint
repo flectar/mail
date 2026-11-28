@@ -2,8 +2,12 @@ import { HorizontalBox } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { FocusRing } from "focus-ring.slint";
 
 // Application-owned button with deterministic geometry across compositors.
+// Outlined by default; `primary` fills it with the brand color for the main
+// action of a view, `destructive` for removing something, and `selected`
+// marks a toggle that is on (docs/design-system.md).
 export component Button inherits Rectangle {
     in property <string> text;
     in property <image> icon;
@@ -31,25 +35,23 @@ export component Button inherits Rectangle {
     out property <bool> focus-visible: keyboard.focus-visible;
     callback clicked;
 
-    height: 32px;
+    height: LayoutMetrics.medium-control-height;
     min-width: 64px;
-    border-radius: LayoutMetrics.corner-radius - 2px;
+    border-radius: LayoutMetrics.corner-radius;
     forward-focus: keyboard;
-    border-width: keyboard.focus-visible ? 2px : root.primary || root.destructive ? 0px : 1px;
-    border-color: keyboard.focus-visible || root.selected ? AppTheme.accent : AppTheme.control-border;
-    private property <color> fill-color: !root.enabled ? AppTheme.disabled-bg
-        : root.destructive ? (button-area.pressed ? AppTheme.destructive-pressed : button-area.has-hover ? AppTheme.destructive-hover : AppTheme.destructive)
-        : root.primary ? (button-area.pressed ? AppTheme.primary-pressed : button-area.has-hover ? AppTheme.primary-hover : AppTheme.primary)
-        : root.selected ? AppTheme.accent-soft
-        : button-area.pressed ? AppTheme.muted-control-bg
-        : button-area.has-hover ? AppTheme.control-bg.brighter(AppTheme.dark ? 8% : 2%)
-        : AppTheme.surface;
+    private property <bool> filled: root.primary || root.destructive;
+    private property <bool> hovered: button-area.has-hover && root.enabled;
+    // Filled buttons take their color, a step darker under the pointer or a
+    // press; outlined ones a face lit from above, and a toggle that's on, or
+    // a press, looks pushed in.
+    private property <color> fill-color: root.destructive
+        ? (button-area.pressed ? AppTheme.destructive-pressed : root.hovered ? AppTheme.destructive-hover : AppTheme.destructive)
+        : root.primary ? (button-area.pressed ? AppTheme.primary-pressed : root.hovered ? AppTheme.primary-hover : AppTheme.primary)
+        : root.selected || button-area.pressed ? AppTheme.control-on
+        : root.hovered ? AppTheme.control-hover-bottom : AppTheme.control-face-bottom;
     private property <color> foreground: root.destructive ? white
         : root.primary ? ThemeUtilities.contrasting-foreground(root.fill-color)
-        : root.selected ? AppTheme.accent : AppTheme.heading;
-    background: root.fill-color;
-    opacity: root.enabled ? 1 : 0.5;
-    animate background { duration: 120ms; easing: ease-out; }
+        : AppTheme.heading;
     accessible-role: button;
     accessible-label: root.text;
     accessible-checkable: root.checkable;
@@ -60,34 +62,65 @@ export component Button inherits Rectangle {
         }
     }
 
-    label-row := HorizontalBox {
-        y: button-area.pressed ? 1px : 0px;
-        animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 7px;
-        alignment: center;
-        cross-axis-alignment: center;
+    // The face draws the button and the root stays a plain box. A root with a
+    // shadow, an opacity or an animated color makes Slint copy the whole
+    // button into each of its hundreds of uses, more than the release build's
+    // memory allows; this way it builds the button once.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.filled ? @linear-gradient(180deg, root.fill-color.brighter(6%) 0%, root.fill-color 100%)
+            : root.selected || button-area.pressed ? @linear-gradient(180deg, root.fill-color 0%, root.fill-color 100%)
+            : root.hovered ? @linear-gradient(180deg, AppTheme.control-hover-top 0%, AppTheme.control-hover-bottom 100%)
+            : @linear-gradient(180deg, AppTheme.control-face-top 0%, AppTheme.control-face-bottom 100%);
+        border-width: 1px;
+        border-color: keyboard.focus-visible ? AppTheme.focus-ring
+            : root.filled ? root.fill-color.darker(14%) : AppTheme.control-edge;
+        drop-shadow-blur: root.filled ? 3px : 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: !root.enabled || root.selected || button-area.pressed ? transparent
+            : root.primary ? AppTheme.primary-shadow
+            : root.destructive ? AppTheme.destructive-shadow : AppTheme.control-shadow;
+        opacity: root.enabled ? 1 : 0.5;
+        // Every face is a two-stop gradient, so a change fades stop by stop.
+        animate background, border-color, drop-shadow-color { duration: 120ms; easing: ease-out; }
 
-        if root.has-icon : Image {
-            width: root.icon-size;
-            height: root.icon-size;
-            source: root.icon;
-            colorize: root.colorize-icon ? (root.primary || root.destructive ? root.foreground : AppTheme.body) : transparent;
-            image-fit: contain;
-            accessible-role: none;
-        }
+        label-row := HorizontalBox {
+            y: button-area.pressed ? 1px : 0px;
+            animate y { duration: 140ms; easing: spring(0); enabled: MotionSettings.movement; }
+            padding-left: LayoutMetrics.button-padding;
+            padding-right: LayoutMetrics.button-padding;
+            spacing: 7px;
+            alignment: center;
+            cross-axis-alignment: center;
 
-        Text {
-            text: root.text;
-            color: root.foreground;
-            font-size: TypeScale.body;
-            font-weight: root.primary || root.destructive || root.selected ? 600 : 500;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: root.label-overflow;
-            wrap: root.wrap-label ? word-wrap : no-wrap;
+            if root.has-icon : Image {
+                width: root.icon-size;
+                height: root.icon-size;
+                source: root.icon;
+                colorize: root.colorize-icon ? (root.primary || root.destructive ? root.foreground : AppTheme.body) : transparent;
+                image-fit: contain;
+                accessible-role: none;
+            }
+
+            Text {
+                text: root.text;
+                color: root.foreground;
+                font-size: TypeScale.body;
+                font-weight: 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: root.label-overflow;
+                wrap: root.wrap-label ? word-wrap : no-wrap;
+            }
         }
+    }
+
+    if keyboard.focus-visible : FocusRing {
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
     }
 
     keyboard := FocusVisibleScope {

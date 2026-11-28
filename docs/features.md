@@ -366,21 +366,22 @@ own choice.
 
 An account can send from more addresses than the one it signs in with. Gmail's
 send-as addresses and a JMAP server's identities come from the provider, and for
-other servers you add the aliases they let you send from in the account's
-**Signatures** tab in Settings → Accounts, which also chooses the one new
+other servers you add the aliases they let you send from on the **Signatures**
+tab of the account's card in Settings → Accounts, which also chooses the one new
 messages start from. In the composer, the **From** menu lists your accounts and
 then the chosen account's addresses. An account keeps up to 1,000. Past ten, the
-menu's **Choose another address…** and Settings' **Default sender identity** open
-a picker that finds an address by its name or address as you type, and Settings
-lists 50 at a time with a search for the others.
+menu's **Choose another address…** and Settings' **Default sender identity**
+open a picker that finds an address by its name or address as you type, and
+Settings lists 50 at a time with a search for the others.
 
 ## Automatic Cc and Bcc
 
 Every message you write from an account can start with copies to the same
 addresses, such as a colleague in Cc or your archive in Bcc. Set them under
-**Automatic Cc and Bcc** in the account's **Signatures** tab in Settings →
-Accounts. **Edit** on a sender address adds copies of its own, and an address a
-JMAP server gives also gets the Bcc the server keeps for it (RFC 8621).
+**Automatic Cc and Bcc** on the **Signatures** tab of the account's card in
+Settings → Accounts. **Edit** on a sender address adds copies of its own, and an
+address a JMAP server gives also gets the Bcc the server keeps for it (RFC
+8621).
 
 New messages, replies, replies to all and forwards start with the copies, in Cc
 and Bcc, where you see them and can take them out before sending. An address the
@@ -571,8 +572,9 @@ address book. **Export contacts…** saves every contact to one vCard file.
 
 ## Signatures and OpenPGP
 
-Settings → Accounts → Signatures & OpenPGP provides named signatures, separate
-new-message and reply defaults, and a composer signature selector. Desktop
+The **Signatures** tab of an account's card in Settings → Accounts provides
+named signatures, separate new-message and reply defaults, and a composer
+signature selector, and its **OpenPGP** tab sets up message protection. Desktop
 OpenPGP/MIME signing and encryption use installed GnuPG 2.x with pinentry for
 private-key passphrases. Required encryption blocks delivery when recipient keys
 are missing or invalid; protected drafts remain local until Send.
@@ -604,15 +606,15 @@ S/MIME and mobile OpenPGP are not currently supported.
 
 ## Automatic replies
 
-Settings → Accounts → Automatic replies sets the replies a Gmail or Microsoft
-account's server sends while you're away: a message, an optional first and
-last day, and whether only your contacts or, in a work account, only your
-organization get one. Gmail replies have a subject of their own, and Gmail
-answers each sender once, and again after four days, never answering mailing
-lists or spam. Outlook answers each sender once while replies are on, and
-replies that start on a first day need a last day too. The first save asks
-Google or Microsoft to let Flectar Mail change those settings, and signing in
-again keeps that.
+The **Automatic replies** tab of an account's card in Settings → Accounts sets
+the replies a Gmail or Microsoft account's server sends while you're away: a
+message, an optional first and last day, and whether only your contacts or, in a
+work account, only your organization get one. Gmail replies have a subject of
+their own, and Gmail answers each sender once, and again after four days, never
+answering mailing lists or spam. Outlook answers each sender once while replies
+are on, and replies that start on a first day need a last day too. The first
+save asks Google or Microsoft to let Flectar Mail change those settings, and
+signing in again keeps that.
 
 The replies are kept on the server, so they go out while Flectar Mail is
 closed. Syncing reads them back, so replies set on the web show too, and a
@@ -701,9 +703,9 @@ and writes each link's address after its text, and Undo brings them back. A
 plain-text message shows the original it answers as the quoted text that goes
 out, its signature goes in as text, and pictures dropped on it are attached.
 **Formatted text** switches back. Each account chooses how its messages start
-in the **Composing** tab of Settings → Accounts, beside its sender identities
-and signatures, and replies and forwards to plain-text messages start as plain
-text unless that's turned off there. In plain text, quotes are written with
+on the **Composing** tab of its card in Settings → Accounts, and replies and
+forwards to plain-text messages start as plain text unless that's turned off
+there. In plain text, quotes are written with
 `>` as they go out, and with **Plain text in a fixed-width font** the message
 is written in the font it's read in. A draft opens again as it was saved.
 
