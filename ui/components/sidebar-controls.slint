@@ -9,6 +9,7 @@ import { WorkspaceMiniHeading } from "workspace-layout.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { PopupMenu } from "popup-menu.slint";
+import { Badge } from "badge.slint";
 
 component SidebarIcon {
     in property <image> icon;
@@ -27,33 +28,6 @@ component SidebarIcon {
         colorize: root.color;
         image-fit: contain;
         accessible-role: none;
-    }
-}
-
-// Counts are compact status badges rather than loose right-aligned text. This
-// keeps large unread values visually grouped and gives selected rows a clear
-// accent treatment without changing the row's geometry.
-component SidebarCountBadge inherits Rectangle {
-    in property <string> count;
-    in property <bool> selected: false;
-    in property <color> accent-color;
-    in property <color> muted-color;
-
-    visible: root.count != "";
-    width: min(52px, max(24px, count-label.preferred-width + 12px));
-    height: 20px;
-    border-radius: LayoutMetrics.small-radius;
-    background: root.selected
-        ? root.accent-color.transparentize(0.78)
-        : root.muted-color.transparentize(0.86);
-
-    count-label := Text {
-        text: root.count;
-        color: root.selected ? root.accent-color : root.muted-color;
-        font-size: TypeScale.caption;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
     }
 }
 
@@ -215,13 +189,14 @@ export component SidebarItem inherits SidebarRowSurface {
         overflow: elide;
     }
 
-    count-badge := SidebarCountBadge {
+    // The unread count, in the accent on the selected row.
+    count-badge := Badge {
         x: parent.width - self.width - 6px;
         y: (root.row-height - self.height) / 2;
-        count: root.count;
-        selected: root.selected;
-        accent-color: root.accent-color;
-        muted-color: root.muted-color;
+        width: min(52px, self.preferred-width);
+        visible: root.count != "";
+        text: root.count;
+        tone: root.selected ? "accent" : "neutral";
     }
 
     // Folder and label actions. Rows without any keep the area disabled.
@@ -467,12 +442,12 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     }
 
 
-    count-badge := SidebarCountBadge {
+    count-badge := Badge {
         x: parent.width - self.width - 6px;
         y: (parent.height - self.height) / 2;
-        count: root.count;
-        accent-color: root.muted-color;
-        muted-color: root.muted-color;
+        width: min(52px, self.preferred-width);
+        visible: root.count != "";
+        text: root.count;
     }
 
     private property <bool> heading-menu-enabled: root.interactive && root.account-menu;

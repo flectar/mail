@@ -127,6 +127,14 @@ a line between groups, and destructive entries in red.
   close it. Opened from the keyboard, it highlights its first entry. A
   disabled entry can be highlighted but not chosen.
 
+**Badge** (`badge.slint`) shows a short status or count beside what it
+describes, such as a folder's unread count, This device or Coming soon. As
+shadcn's Badge, it has the control corners and 12 px medium text, and it's
+20 px tall. `neutral` is a count or a plain fact, `accent` what's current or
+new, `solid` a strong label such as a calendar's provider, and `destructive` a
+problem. The accent tint is see-through, so a selected row's count still
+shows.
+
 **Switch** turns a setting on or off at once. **Checkbox** (`CheckBox`, with its
 label) is for a form saved with a button, `SelectionCheckBox` chooses items in a
 list, and **radio buttons** choose one of a few options shown together.
