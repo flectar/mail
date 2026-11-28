@@ -8,6 +8,7 @@ import { FocusVisibleScope } from "components/focus-visible-scope.slint";
 import { SettingsCard } from "components/settings-components.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { TypeScale } from "typography.slint";
+import { Badge } from "components/badge.slint";
 
 export struct SyncDeviceRow {
     id: string,
@@ -189,20 +190,10 @@ component DeviceRow inherits Rectangle {
                     overflow: elide;
                     vertical-alignment: center;
                 }
-                if root.device.this-device : Rectangle {
-                    width: this-label.preferred-width + 14px;
-                    height: 18px;
+                if root.device.this-device : Badge {
                     y: (parent.height - self.height) / 2;
-                    border-radius: 9px;
-                    background: root.accent-soft;
-                    this-label := Text {
-                        text: @tr("This device");
-                        color: root.accent;
-                        font-size: TypeScale.caption;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                    text: @tr("This device");
+                    tone: "accent";
                 }
             }
             Text {
@@ -324,21 +315,9 @@ component PeriodChoice inherits FocusVisibleScope {
             }
             if root.badge != "" : VerticalLayout {
                 alignment: center;
-                Rectangle {
-                    height: 20px;
-                    border-radius: 10px;
-                    background: AppTheme.accent-soft;
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        Text {
-                            text: root.badge;
-                            color: AppTheme.accent;
-                            font-size: TypeScale.micro;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
+                Badge {
+                    text: root.badge;
+                    tone: "accent";
                 }
             }
         }

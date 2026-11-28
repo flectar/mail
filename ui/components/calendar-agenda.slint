@@ -6,6 +6,7 @@ import { Button } from "button.slint";
 import { ToolbarIconButton } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { ScrollFade } from "scroll-fade.slint";
+import { Badge } from "badge.slint";
 
 export global CalendarAgendaStyle {
     public pure function color(index: int) -> color {
@@ -207,13 +208,7 @@ export component CalendarAgenda inherits Rectangle {
                     spacing: 8px;
                     cross-axis-alignment: center;
                     Text { text: row.date-label; color: row.is-today ? AppTheme.accent : AppTheme.heading; font-size: TypeScale.secondary; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
-                    if row.is-today: Rectangle {
-                        width: max(48px, today-label.preferred-width + 12px);
-                        height: max(22px, today-label.preferred-height + 4px);
-                        border-radius: self.height / 2;
-                        background: AppTheme.accent-soft;
-                        today-label := Text { text: @tr("Today"); color: AppTheme.accent; font-size: TypeScale.caption; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                    }
+                    if row.is-today: Badge { text: @tr("Today"); tone: "accent"; }
                     Text { text: @tr("{n} event" | "{n} events" % row.count); color: AppTheme.muted; font-size: TypeScale.caption; }
                 }
                 if row.kind == "day": Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: AppTheme.border-subtle; }

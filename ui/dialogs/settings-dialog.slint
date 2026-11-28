@@ -54,6 +54,7 @@ import { Numbers } from "../numbers.slint";
 import { BlockSender } from "../block-sender.slint";
 import { MailRules } from "../rules.slint";
 import { RuleEditor } from "../components/rule-editor.slint";
+import { Badge } from "../components/badge.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -308,27 +309,6 @@ component StorageUsageCard inherits Rectangle {
     }
 }
 
-component ServiceBadge inherits Rectangle {
-    in property <string> text;
-    in property <color> foreground;
-    in property <color> fill;
-
-    width: badge-label.preferred-width + 16px;
-    height: max(20px, badge-label.preferred-height);
-    border-radius: self.height / 2;
-    background: root.fill;
-
-    badge-label := Text {
-        x: 8px;
-        height: parent.height;
-        text: root.text;
-        color: root.foreground;
-        font-size: TypeScale.caption;
-        font-weight: 600;
-        vertical-alignment: center;
-    }
-}
-
 // Paid Flectar services. One that is still planned is previewed without
 // implying anything is connected; one that is `available` opens its settings.
 component ServicePreviewCard inherits Rectangle {
@@ -385,16 +365,16 @@ component ServicePreviewCard inherits Rectangle {
                 spacing: 6px;
                 alignment: end;
                 cross-axis-alignment: center;
-                ServiceBadge { text: @tr("Paid"); foreground: root.secondary-text; fill: root.card-border-color; }
-                if !root.available : ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
+                Badge { text: @tr("Paid"); }
+                if !root.available : Badge { text: @tr("Coming soon"); tone: "accent"; }
             }
         }
         if root.compact : HorizontalBox {
             padding: 0px;
             spacing: 6px;
             alignment: start;
-            ServiceBadge { text: @tr("Paid"); foreground: root.secondary-text; fill: root.card-border-color; }
-            if !root.available : ServiceBadge { text: @tr("Coming soon"); foreground: root.accent; fill: root.accent-soft; }
+            Badge { text: @tr("Paid"); }
+            if !root.available : Badge { text: @tr("Coming soon"); tone: "accent"; }
         }
 
         Text { height: max(root.compact ? 51px : 34px, self.preferred-height); text: root.description; color: root.body-text; font-size: TypeScale.secondary; wrap: word-wrap; }
@@ -1777,7 +1757,7 @@ export component SettingsDialog inherits Rectangle {
                                     HorizontalBox {
                                         spacing: 8px;
                                         Text { horizontal-stretch: 1; text: @tr("Unified Inbox"); color: root.body-text; font-size: TypeScale.body; wrap: word-wrap; }
-                                        Text { text: @tr("DEFAULT"); color: root.accent; font-size: TypeScale.caption; font-weight: 700; }
+                                        Badge { text: @tr("DEFAULT"); tone: "accent"; }
                                     }
                                     Text { height: max(root.compact ? 34px : 17px, self.preferred-height); text: @tr("Combines incoming messages from every connected account."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                                     Rectangle { height: 1px; background: root.border-subtle; }

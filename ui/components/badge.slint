@@ -1,0 +1,50 @@
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// A short status or count beside what it describes, such as a folder's unread
+// count, This device or Coming soon (docs/design-system.md, Badges). It
+// follows shadcn's Badge: the control corners, 12 px medium text and 8 px each
+// side, 20 px tall like a sidebar's count.
+//
+// `neutral` is a count or a plain fact, `accent` what's current or new,
+// `solid` a strong label such as an account's provider, and `destructive` a
+// problem.
+export component Badge {
+    in property <string> text;
+    in property <string> tone: "neutral";
+
+    // The accent tint is see-through, so it still shows on a selected row,
+    // which is tinted the same.
+    private property <color> fill: root.tone == "accent" ? AppTheme.accent.with-alpha(0.18)
+        : root.tone == "solid" ? AppTheme.primary
+        : root.tone == "destructive" ? AppTheme.destructive
+        : AppTheme.fill-pressed;
+    private property <color> ink: root.tone == "accent" ? AppTheme.accent
+        : root.tone == "solid" || root.tone == "destructive" ? white
+        : AppTheme.secondary;
+
+    min-width: 20px;
+    height: 20px;
+    // As wide as its text in a layout, never stretched.
+    horizontal-stretch: 0;
+    preferred-width: max(20px, label.preferred-width + 16px);
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+
+    Rectangle {
+        border-radius: LayoutMetrics.corner-radius;
+        background: root.fill;
+
+        label := Text {
+            x: (parent.width - self.width) / 2;
+            width: min(self.preferred-width, parent.width - 12px);
+            text: root.text;
+            color: root.ink;
+            font-size: TypeScale.caption;
+            font-weight: 500;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
+}

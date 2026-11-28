@@ -2,6 +2,7 @@ import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { Badge } from "../components/badge.slint";
 
 component DetailField inherits Rectangle {
     in property <string> label;
@@ -236,23 +237,14 @@ export component CalendarDetailsDialog inherits Rectangle {
                 overflow: elide;
                 vertical-alignment: center;
             }
-            provider-pill := Rectangle {
+            provider-pill := Badge {
                 x: 74px;
                 y: details-subtitle.y + details-subtitle.height + 4px;
-                width: provider-label.preferred-width + 16px;
-                height: max(22px, provider-label.preferred-height + 4px);
-                border-radius: self.height / 2;
-                background: root.accent;
-                provider-label := Text {
-                    text: root.provider == "gmail" ? @tr("Gmail")
-                        : root.provider == "microsoft" ? @tr("Outlook")
-                        : root.provider == "local" ? @tr("Local") : @tr("CalDAV");
-                    color: white;
-                    font-size: TypeScale.caption;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+                width: self.preferred-width;
+                text: root.provider == "gmail" ? @tr("Gmail")
+                    : root.provider == "microsoft" ? @tr("Outlook")
+                    : root.provider == "local" ? @tr("Local") : @tr("CalDAV");
+                tone: "solid";
             }
         }
 
