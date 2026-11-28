@@ -432,6 +432,8 @@ export component IconButton inherits Rectangle {
     in property <bool> active: false;
     in property <bool> interactive: true;
     out property <bool> focus-visible: keyboard.focus-visible;
+    // The pointer is on it, for a parent that draws the help itself.
+    out property <bool> hovered: hit-area.has-hover;
     in property <length> icon-size: LayoutMetrics.icon-size;
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
@@ -599,9 +601,12 @@ export component LineEdit inherits Rectangle {
     in property <color> leading-icon-color: AppTheme.secondary;
     in property <length> trailing-content-width: 0px;
     // Outlined and filled like a form field, or at rest only its text and
-    // icon on what is behind it, as the search field in a toolbar. Focus and
-    // invalid input still draw the outline.
+    // icon on what is behind it. Focus and invalid input still draw the
+    // outline.
     in property <bool> outlined: true;
+    // A search field: a soft fill with no edge at rest, which turns into a
+    // form field while it has the focus (docs/design-system.md).
+    in property <bool> filled: false;
     private property <length> text-inset: root.show-leading-icon ? 40px : 12px;
     // Password fields can be shown while typing (NIST SP 800-63B-4
     // 3.1.1.2), on desktop only: a shown password is plain text to the input
@@ -640,7 +645,8 @@ export component LineEdit inherits Rectangle {
         border-width: editor.has-focus || root.outlined || root.invalid ? 1px : 0px;
         border-color: root.invalid ? AppTheme.destructive
             : editor.has-focus ? AppTheme.focus-ring : AppTheme.input-border;
-        background: root.outlined ? AppTheme.input-bg : transparent;
+        background: root.outlined || (root.filled && editor.has-focus) ? AppTheme.input-bg
+            : root.filled ? AppTheme.fill-subtle : transparent;
         drop-shadow-blur: 2px;
         drop-shadow-offset-y: 1px;
         drop-shadow-color: root.outlined ? AppTheme.control-shadow : transparent;

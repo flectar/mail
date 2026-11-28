@@ -402,29 +402,33 @@ export component WorkspaceSearchToolbar inherits Rectangle {
         }
 
         search-field := Rectangle {
-            height: LayoutMetrics.control-height;
+            height: LayoutMetrics.medium-control-height;
             horizontal-stretch: 1;
 
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
                 outlined: false;
+                filled: true;
                 text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
                 leading-icon: @image-url("../icons/lucide/outline/search.svg");
                 leading-icon-color: AppTheme.secondary;
-                trailing-content-width: LayoutMetrics.control-height;
+                trailing-content-width: LayoutMetrics.medium-control-height;
                 edited(value) => { root.edited(value); }
                 accepted(value) => { root.submitted(value); }
             }
 
             filter-menu := ContextMenuArea {
-                x: parent.width - LayoutMetrics.control-height;
-                width: LayoutMetrics.control-height;
-                height: LayoutMetrics.control-height;
+                x: parent.width - LayoutMetrics.medium-control-height;
+                width: LayoutMetrics.medium-control-height;
+                height: LayoutMetrics.medium-control-height;
 
                 ToolbarIconButton {
+                    // Inside the field, as tall as it.
+                    width: parent.width;
+                    height: parent.height;
                     icon: root.filter-active
                         ? @image-url("../icons/lucide/outline/list-filter-plus.svg")
                         : @image-url("../icons/lucide/outline/list-filter.svg");

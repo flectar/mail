@@ -659,6 +659,8 @@ export component SidebarSearch inherits Rectangle {
     LineEdit {
         width: parent.width;
         height: parent.height;
+        outlined: false;
+        filled: true;
         text <=> root.query;
         placeholder-text: root.placeholder;
         input-label: root.placeholder;

@@ -19,7 +19,7 @@ see the dark theme.
 | --- | --- | --- |
 | Small control | 32 px tall | `LayoutMetrics.small-control-height` |
 | Control | 36 px tall | `LayoutMetrics.medium-control-height` |
-| Large control, such as a search field in a toolbar | 40 px tall | `LayoutMetrics.control-height` |
+| Large control | 40 px tall | `LayoutMetrics.control-height` |
 | Phone control | 44 px tall | `LayoutMetrics.touch-target` |
 | Corner base | 10 px | `LayoutMetrics.corner-base` |
 | Control corners | 8 px, four fifths of the base | `LayoutMetrics.corner-radius` |
@@ -30,7 +30,9 @@ see the dark theme.
 | Edge of a button | 1 px of the text color at 13%, white at 12% in dark mode | `AppTheme.control-edge` |
 | Edge of a field or select | 1 px `input-border` | `AppTheme.input-border` |
 | Face of a button | lit from above, a step darker under the pointer | `AppTheme.control-face-top`, `control-face-bottom`, `control-hover-top`, `control-hover-bottom` |
-| Toggle that is on | a neutral pushed-in fill | `AppTheme.control-on` |
+| Neutral fills, faint to strong | the text color over the surface at 4.5%, 7.5% and 10.5% (5%, 8% and 11% in dark mode) | `AppTheme.fill-subtle`, `fill-hover`, `fill-pressed` |
+| Under the pointer: a row, a ghost button, the strip's buttons, and a tab track | `fill-hover` | `AppTheme.muted-control-bg` |
+| Toggle that is on, a selected list row | `fill-pressed` | `AppTheme.control-on`, `selected-row` |
 | Shadow under an outlined control | 1 px down, 2 px blur, 6% black, light theme only | `AppTheme.control-shadow` |
 | Shadow under a raised control, such as the chosen tab | 1 px down, 3 px blur, 12% black, light theme only | `AppTheme.raised-shadow` |
 | Shadow under a primary or destructive button | its own color at 28%, light theme only | `AppTheme.primary-shadow`, `destructive-shadow` |
@@ -40,6 +42,11 @@ see the dark theme.
 
 In the dark theme shadows don't read, so a control's border marks its edge on
 its own. A disabled control keeps its look at half opacity.
+
+The neutral fills come from one scale, so a hovered row, a hovered toolbar
+button and a tab track are the same gray everywhere. Being the text color over
+the surface, they follow every palette and both themes. Use them, or the names
+built on them, rather than a gray of a control's own.
 
 Every corner follows the corner base, so one value makes the whole app squarer
 or rounder, as shadcn derives its corners from one `--radius`. Things round by
@@ -85,6 +92,11 @@ anything. Finding a value by typing its first letters isn't there yet.
 
 **Text field** (`LineEdit` in `controls.slint`) and **text area** (`TextEdit`
 in `controls.slint`) take typed text. A text area is at least 80 px tall.
+
+**Search fields** are text fields with `filled`: a soft `fill-subtle` with no
+edge at rest, which becomes an outlined field while it has the focus, as the
+search fields of macOS, Android and GNOME do. The list's search is 36 px in its
+toolbar, with the filter button inside it; a sidebar's is 32 px.
 
 **Switch** turns a setting on or off at once. **Checkbox** (`CheckBox`, with its
 label) is for a form saved with a button, `SelectionCheckBox` chooses items in a
