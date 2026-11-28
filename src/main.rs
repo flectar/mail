@@ -769,6 +769,9 @@ struct InboxState {
     /// read from here, and the list offers the rows before.
     window_start: Option<MailCursor>,
     selected_id: Option<i32>,
+    /// The message a step back last closed, which forward opens again until
+    /// another message or folder opens.
+    reopen_id: Option<i32>,
     /// Conversation to select once the next replacing page arrives, for a
     /// tab restored without cached rows.
     pending_selection: Option<i32>,
@@ -1442,6 +1445,7 @@ impl InboxState {
             next_cursor: None,
             window_start: None,
             selected_id: None,
+            reopen_id: None,
             pending_selection: None,
             pending_selection_opens: false,
             restore_thread_message: None,
@@ -6777,6 +6781,34 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_back = Rc::clone(&state);
+    app.on_close_preview_for_back(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        {
+            let mut state = state_for_back.borrow_mut();
+            let open = state.selected_id.filter(|_| !state.preview_closed);
+            state.reopen_id = open;
+        }
+        app.invoke_close_preview();
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_forward = Rc::clone(&state);
+    app.on_reopen_closed_email(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return false;
+        };
+        let reopen = state_for_forward.borrow_mut().reopen_id.take();
+        let Some(id) = reopen else {
+            return false;
+        };
+        app.invoke_select_email(id);
+        true
+    });
+
+    let app_weak = app.as_weak();
     let state_for_print = Rc::clone(&state);
     app.on_print_message(move || {
         let Some(app) = app_weak.upgrade() else {
@@ -7814,6 +7846,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        state_for_scope.borrow_mut().reopen_id = None;
         mail_pagination_generation_for_scope
             .set(mail_pagination_generation_for_scope.get().wrapping_add(1));
         mail_pagination_in_progress_for_scope.set(false);
@@ -8058,6 +8091,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        state_for_selection.borrow_mut().reopen_id = None;
         // Opening another message ends the wait for the one before, which
         // stays unread.
         read_marking::cancel();

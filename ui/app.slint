@@ -1151,6 +1151,10 @@ export component AppWindow inherits Window {
     callback search_mail_labels(string);
     callback compose_message_action(string);
     callback close_preview();
+    // Closes the open message for a step back and keeps it, so forward can
+    // open it again; and opens it again, false when there's none.
+    callback close_preview_for_back();
+    callback reopen_closed_email() -> bool;
     callback print_message();
     callback open_message_in_browser();
     callback save_theme(string);
@@ -1274,6 +1278,11 @@ export component AppWindow inherits Window {
     callback load-contacts();
     callback load-more-contacts();
     callback system-back-requested() -> bool;
+    // A step back, and forward again, from Android's back gesture (a close
+    // request on a phone) or a mouse's back and forward buttons. True when
+    // something changed.
+    callback navigate-back() -> bool;
+    callback navigate-forward() -> bool;
     callback retry-startup();
 
     // Host-internal wakeups. Background work only schedules these when data is
@@ -1873,58 +1882,96 @@ export component AppWindow inherits Window {
         root.folder-dialog-open = true;
     }
 
-    system-back-requested => {
+    // One step back through the app's screens: what Android's back and a
+    // mouse's back button do. "" when there's nothing to go back to, and then
+    // Android leaves the app. Without `navigating` it's what the window's own
+    // close button does first on a desktop: it closes what covers the window,
+    // never Settings, the open message or a Files folder.
+    pure function back-step(navigating: bool) -> string {
         // The import dialog covers everything; accounts being written cannot
         // be abandoned, so back waits for that step to finish.
-        if AccountImport.open {
+        if AccountImport.open { return "import"; }
+        if MailAttachments.open { return "attachments"; }
+        if root.active_view == "files" {
+            if FilesUi.transfers-open { return "files-transfers"; }
+            if FilesUi.dialog != "" { return "files-dialog"; }
+            if FilesUi.setup-open { return "files-setup"; }
+            if FilesUi.navigation-open { return "files-navigation"; }
+            if FilesUi.preview-open { return "files-preview"; }
+            if navigating && FilesUi.can-up && !FilesUi.busy { return "files-up"; }
+        }
+        if root.folder-dialog-open { return "folder-dialog"; }
+        if root.trash-delete-open { return "trash-delete"; }
+        if !root.compact-layout && !navigating { return ""; }
+        if TabsUi.overview-open { return "tab-overview"; }
+        if root.compact-layout && ComposerUi.open { return "composer"; }
+        if root.compact-layout && root.calendar-editor-shown { return "calendar-editor"; }
+        if root.settings-open { return "settings"; }
+        if root.active_view == "mail" && root.compact-layout && root.mail-folders-open { return "mail-folders"; }
+        // A phone goes back from the message to the list; a desktop closes
+        // the open message, which leaves the list as it was.
+        if root.active_view == "mail" && (root.compact-layout ? root.mail-compact-page == "message" : root.has_selected) { return "mail-message"; }
+        if root.active_view == "contacts" && root.compact-layout && root.contacts-detail-visible { return "contact"; }
+        return "";
+    }
+
+    // Takes the step `back-step` chose; false when there was none.
+    function take-back-step(step: string) -> bool {
+        if step == "import" {
             if AccountImport.stage != "importing" { AccountImport.close(); }
-            return true;
-        }
-        if MailAttachments.open { MailAttachments.command("close", ""); return true; }
-        if root.active_view == "files" && FilesUi.transfers-open {FilesUi.transfers-open=false;return true;}
-        if root.active_view == "files" && FilesUi.dialog != "" { FilesUi.dialog = ""; return true; }
-        if root.active_view == "files" && FilesUi.setup-open { FilesUi.setup-open = false; return true; }
-        if root.active_view == "files" && FilesUi.navigation-open { FilesUi.navigation-open = false; return true; }
-        if root.active_view == "files" && FilesUi.preview-open { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); return true; }
-        if root.active_view == "files" && FilesUi.can-up && !FilesUi.busy { FilesUi.command("up", "", ""); return true; }
-        if (root.folder-dialog-open) {
+        } else if step == "attachments" {
+            MailAttachments.command("close", "");
+        } else if step == "files-transfers" {
+            FilesUi.transfers-open = false;
+        } else if step == "files-dialog" {
+            FilesUi.dialog = "";
+        } else if step == "files-setup" {
+            FilesUi.setup-open = false;
+        } else if step == "files-navigation" {
+            FilesUi.navigation-open = false;
+        } else if step == "files-preview" {
+            FilesUi.preview-open = false;
+            if FilesUi.busy { FilesUi.command("cancel", "", ""); }
+            FilesUi.command("release-preview", "", "");
+        } else if step == "files-up" {
+            FilesUi.command("up", "", "");
+        } else if step == "folder-dialog" {
             root.folder-dialog-open = false;
-            return true;
-        }
-        if (root.trash-delete-open) {
+        } else if step == "trash-delete" {
             root.trash-delete-open = false;
-            return true;
-        }
-        if (!root.compact-layout) {
+        } else if step == "tab-overview" {
+            TabsUi.overview-open = false;
+        } else if step == "composer" {
+            root.compose-back-request += 1;
+        } else if step == "calendar-editor" {
+            root.calendar_editor_open = false;
+        } else if step == "settings" {
+            root.close-settings();
+        } else if step == "mail-folders" {
+            root.mail-folders-open = false;
+        } else if step == "mail-message" {
+            root.mail-compact-page = "list";
+            root.close_preview_for_back();
+        } else if step == "contact" {
+            root.contacts-detail-visible = false;
+        } else {
             return false;
         }
-        if TabsUi.overview-open {
-            TabsUi.overview-open = false;
-            return true;
-        }
-        if (ComposerUi.open) {
-            root.compose-back-request += 1;
-            return true;
-        }
-        if (root.calendar-editor-shown) {
-            root.calendar_editor_open = false;
-            return true;
-        }
-        if (root.settings-open) {
-            root.close-settings();
-            return true;
-        }
-        if (root.active_view == "mail" && root.mail-folders-open) {
-            root.mail-folders-open = false;
-            return true;
-        }
-        if (root.active_view == "mail" && root.mail-compact-page == "message") {
-            root.mail-compact-page = "list";
-            root.close_preview();
-            return true;
-        }
-        if (root.active_view == "contacts" && root.contacts-detail-visible) {
-            root.contacts-detail-visible = false;
+        return true;
+    }
+
+    system-back-requested => {
+        return root.take-back-step(root.back-step(false));
+    }
+    navigate-back => {
+        return root.take-back-step(root.back-step(true));
+    }
+    // Forward opens again the message back just closed, as a browser does.
+    navigate-forward => {
+        if root.active_view == "mail" && root.reopen_closed_email() {
+            if root.compact-layout {
+                root.mail-compact-page = "message";
+            }
             return true;
         }
         return false;

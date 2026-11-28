@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct the pinned Slint Android pointer scroll backport."""
+"""Reconstruct the pinned Slint Android backend and its patches."""
 
 import hashlib
 import io
@@ -66,7 +66,7 @@ def main():
         raise RuntimeError(f"{lockfile.relative_to(ROOT)}: {CRATE} must resolve to the local backport")
     if [p["version"] for p in packages if p["name"] == "slint"] != [version]:
         raise RuntimeError(f"{lockfile.relative_to(ROOT)}: the backport targets Slint {version}")
-    print("Slint Android source checksum, pointer scroll backport, manifest, and lockfile verified.")
+    print("Slint Android source checksum, patches, manifest, and lockfile verified.")
 
 
 if __name__ == "__main__":

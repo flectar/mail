@@ -376,6 +376,33 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_kept_as_it_was_sent_splits_into_the_users_text_and_its_quote() {
+        // Undo, or a send that failed, keeps a reply as it was sent: what the user wrote reads
+        // as plain text there, with its link's address written out.
+        let quote = ComposeQuote::reply("Maya wrote:", "Original", Some("<p>Original</p>"));
+        let mut written = crate::rich_compose::RichComposeDocument::default();
+        written.load("Thanks for the plan.", 0, 0);
+        let plan = "Thanks for the ".len() as i32;
+        let source = written.text().to_owned();
+        written.set_link("https://example.org/plan", &source, plan, plan + 4);
+        let (text, html) =
+            quote.below(&written.plain_text(), written.body_html_with(true, |_| None));
+        let text = crate::rich_compose::with_plain_text_quotes(&text);
+        assert!(
+            text.starts_with("Thanks for the plan <https://example.org/plan>.\n\n"),
+            "{text}"
+        );
+
+        let mut document = crate::rich_compose::RichComposeDocument::default();
+        let saved =
+            ComposeQuote::split_saved(&html, &text, |own| document.load_html_start(own, &text))
+                .unwrap();
+        assert_eq!(document.text(), written.text());
+        assert_eq!(document.body_html(), written.body_html());
+        assert_eq!(saved, quote);
+    }
+
+    #[test]
     fn a_saved_draft_splits_into_the_users_text_and_its_quote() {
         let quote = ComposeQuote::reply("Maya wrote:", "Original", Some("<p>Original</p>"));
         let (text, html) = quote.below("Thanks!\n", Some("<div>Thanks!</div>".to_owned()));

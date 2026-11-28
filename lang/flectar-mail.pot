@@ -753,8 +753,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:275 ui/app.slint:1592 ui/components/composer-fields.slint:95
-#: ui/app.slint:275 ui/app.slint:1592 ui/components/composer-fields.slint:95 ui/components/email-composer.slint:61
+#: ui/app.slint:275 ui/app.slint:1601 ui/components/composer-fields.slint:95
+#: ui/app.slint:275 ui/app.slint:1601 ui/components/composer-fields.slint:95 ui/components/email-composer.slint:61
 msgid "No connected account"
 msgstr ""
 
@@ -3465,149 +3465,149 @@ msgstr ""
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1858 ui/app.slint:1871
+#: ui/app.slint:1867 ui/app.slint:1880
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2802
+#: ui/app.slint:2849
 msgid "Drop to start a new message"
 msgstr ""
 
-#: ui/app.slint:2810 ui/components/email-composer.slint:1319
+#: ui/app.slint:2857 ui/components/email-composer.slint:1319
 msgid "Pictures go in the text, and other files are attached."
 msgstr ""
 
-#: ui/app.slint:2876
+#: ui/app.slint:2923
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2876 ui/reader-window.slint:152 ui/views/files-view.slint:676
+#: ui/app.slint:2923 ui/reader-window.slint:152 ui/views/files-view.slint:676
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2880
+#: ui/app.slint:2927
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2881
+#: ui/app.slint:2928
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2883
+#: ui/app.slint:2930
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2884 ui/reader-window.slint:153
+#: ui/app.slint:2931 ui/reader-window.slint:153
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2885 ui/app.slint:2911 ui/components/calendar.slint:1291
-#: ui/app.slint:2885 ui/app.slint:2911 ui/components/calendar.slint:1291 ui/reader-window.slint:154
+#: ui/app.slint:2932 ui/app.slint:2958 ui/components/calendar.slint:1291
+#: ui/app.slint:2932 ui/app.slint:2958 ui/components/calendar.slint:1291 ui/reader-window.slint:154
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2886 ui/dialogs/settings-dialog.slint:2788
+#: ui/app.slint:2933 ui/dialogs/settings-dialog.slint:2788
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2886 ui/reader-window.slint:155 ui/views/files-view.slint:758
-#: ui/app.slint:2886 ui/reader-window.slint:155 ui/views/files-view.slint:758
+#: ui/app.slint:2933 ui/reader-window.slint:155 ui/views/files-view.slint:758
+#: ui/app.slint:2933 ui/reader-window.slint:155 ui/views/files-view.slint:758
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2908
+#: ui/app.slint:2955
 msgid "Mark all as read?"
 msgstr ""
 
-#: ui/app.slint:2910
+#: ui/app.slint:2957
 msgid "All unread messages in {} will be marked as read."
 msgstr ""
 
-#: ui/app.slint:2912
+#: ui/app.slint:2959
 msgid "Mark all as read"
 msgstr ""
 
-#: ui/app.slint:2930
+#: ui/app.slint:2977
 msgid "Run this rule on the Inbox?"
 msgstr ""
 
-#: ui/app.slint:2932
+#: ui/app.slint:2979
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2934
+#: ui/app.slint:2981
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/app.slint:2935
+#: ui/app.slint:2982
 msgid "Undo takes it back."
 msgstr ""
 
-#: ui/app.slint:2936
+#: ui/app.slint:2983
 msgid "Run rule"
 msgstr ""
 
-#: ui/app.slint:2955
+#: ui/app.slint:3002
 msgid "Replace changes made elsewhere?"
 msgstr ""
 
-#: ui/app.slint:2956
+#: ui/app.slint:3003
 msgid "Run replies before your filters?"
 msgstr ""
 
-#: ui/app.slint:2959
+#: ui/app.slint:3006
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
 msgstr ""
 
-#: ui/app.slint:2960
+#: ui/app.slint:3007
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
 msgstr ""
 
-#: ui/app.slint:2962
+#: ui/app.slint:3009
 msgid "Saving replaces those changes with what you set here."
 msgstr ""
 
-#: ui/app.slint:2963
+#: ui/app.slint:3010
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 
-#: ui/app.slint:2964
+#: ui/app.slint:3011
 msgid "Replace changes"
 msgstr ""
 
-#: ui/app.slint:2964
+#: ui/app.slint:3011
 msgid "Run both"
 msgstr ""
 
-#: ui/app.slint:3198
+#: ui/app.slint:3245
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:3204
+#: ui/app.slint:3251
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:3217
+#: ui/app.slint:3264
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:3220
+#: ui/app.slint:3267
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:3225
+#: ui/app.slint:3272
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:3233 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3280 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 

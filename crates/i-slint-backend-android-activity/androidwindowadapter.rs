@@ -331,6 +331,9 @@ impl AndroidWindowAdapter {
                             self.show_cursor_handles.set(false);
                             InputStatus::Handled
                         }
+                        Ok(_) if key_event.key_code() == Keycode::Back => {
+                            self.unhandled_back(key_event.action())
+                        }
                         Ok(_) => InputStatus::Unhandled,
                         Err(e) => {
                             result = Err(e);
@@ -828,6 +831,19 @@ fn button_for_event(
 }
 
 impl AndroidWindowAdapter {
+    /// Back that no element took, before Android 14: the app gets it as a close
+    /// request when it's released, as before Slint 1.18, and keeps the window by
+    /// refusing it. The press waits for that, so Android doesn't act on it.
+    fn unhandled_back(&self, action: KeyAction) -> InputStatus {
+        if action == KeyAction::Up
+            && WindowInner::from_pub(&self.window).request_close()
+            && let Err(e) = self.java_helper.finish_activity()
+        {
+            i_slint_core::debug_log!("finish_activity failed: {e:#?}");
+        }
+        InputStatus::Handled
+    }
+
     fn map_key_event(&self, key_event: &android_activity::input::KeyEvent) -> Option<WindowEvent> {
         let text = match self.layout_aware_text(key_event) {
             LayoutKey::Text(t) => t,
