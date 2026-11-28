@@ -1711,6 +1711,45 @@ pub struct Label {
     /// at sync time, never pushed to IMAP, not deletable.
     #[serde(default)]
     pub is_auto: bool,
+    /// How a Gmail label shows in the sidebar, as Gmail's own label list
+    /// shows it (#253). Every other label shows.
+    #[serde(default)]
+    pub list_visibility: LabelListVisibility,
+}
+
+/// Gmail's "Show in label list" choice for a label, its `labelListVisibility`
+/// (#253): a label that doesn't show sits under More, as in Gmail.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LabelListVisibility {
+    /// `labelShow`, which a label Gmail sends without a choice has too.
+    #[default]
+    Show,
+    /// `labelShowIfUnread`: it shows while it has unread mail.
+    ShowIfUnread,
+    /// `labelHide`.
+    Hide,
+}
+
+impl LabelListVisibility {
+    /// The value Gmail's API names it by.
+    pub const fn as_gmail(self) -> &'static str {
+        match self {
+            Self::Show => "labelShow",
+            Self::ShowIfUnread => "labelShowIfUnread",
+            Self::Hide => "labelHide",
+        }
+    }
+
+    /// The choice Gmail's API names `value`, and a label shown for one it
+    /// doesn't name.
+    pub fn from_gmail(value: Option<&str>) -> Self {
+        match value {
+            Some("labelShowIfUnread") => Self::ShowIfUnread,
+            Some("labelHide") => Self::Hide,
+            _ => Self::Show,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -294,8 +294,8 @@ fn update_folder_choices(
     super::accounts::set_settings(conn, account_id, &config.settings)
 }
 
-/// Whether a folder of an IMAP account always syncs: the Inbox, and Sent and
-/// Drafts, which Flectar Mail files its own mail in (#253).
+/// Whether a folder of an IMAP or JMAP account always syncs: the Inbox, and
+/// Sent and Drafts, which Flectar Mail files its own mail in (#253).
 pub fn always_synced(path: &str, role: Option<&str>) -> bool {
     path.eq_ignore_ascii_case("INBOX")
         || matches!(role, Some(roles::INBOX | roles::SENT | roles::DRAFTS))
@@ -305,6 +305,22 @@ pub fn always_synced(path: &str, role: Option<&str>) -> bool {
 /// by their paths, leaves out (#253).
 pub fn syncs(folder: &Folder, unsynced: &BTreeSet<String>) -> bool {
     always_synced(&folder.path, folder.role.as_deref()) || !unsynced.contains(&folder.path)
+}
+
+/// The folders of `account_id` this device leaves out of its sync, which
+/// `unsynced` names by their paths (#253).
+pub fn left_out(
+    conn: &Connection,
+    account_id: i64,
+    unsynced: &BTreeSet<String>,
+) -> Result<Vec<Folder>> {
+    if unsynced.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(list(conn, Some(account_id))?
+        .into_iter()
+        .filter(|folder| !syncs(folder, unsynced))
+        .collect())
 }
 
 /// Whether a folder always shows: the Inbox and the folders with a role.

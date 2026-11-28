@@ -16,7 +16,7 @@ export struct FolderShownRow {
     always-shown: bool,
     // Hidden with a folder it's in.
     inside-hidden: bool,
-    // IMAP accounts: this device syncs it in the background.
+    // IMAP and JMAP accounts: this device syncs it in the background.
     synced: bool,
     // The Inbox, Sent and Drafts always sync.
     always-synced: bool,
@@ -25,8 +25,8 @@ export struct FolderShownRow {
 }
 
 // Folders (src/folder_visibility.rs): which of an account's folders show in
-// the sidebar and the Move to list, and for an IMAP account which ones this
-// device syncs. A hidden folder's mail still downloads.
+// the sidebar and the Move to list, and for an IMAP or JMAP account which
+// ones this device syncs. A hidden folder's mail still downloads.
 export global FolderVisibility {
     // The account whose folders `rows` lists, or -1.
     in property <int> account-id: -1;
@@ -45,7 +45,8 @@ export global FolderVisibility {
     callback search(string);
     // An account's folder shows, or is hidden.
     callback set-shown(int, int, bool);
-    // An IMAP account's folder syncs on this device, or waits until opened.
+    // An IMAP or JMAP account's folder syncs on this device, or waits until
+    // opened.
     callback set-synced(int, int, bool);
 }
 
@@ -55,8 +56,8 @@ export component FoldersDialog inherits Rectangle {
     callback close();
 
     private property <bool> loaded: FolderVisibility.account-id == root.account.id && !FolderVisibility.loading;
-    // Only IMAP accounts sync folder by folder.
-    private property <bool> has-sync: root.account.mail_protocol == "imap";
+    // IMAP and JMAP accounts choose which folders sync.
+    private property <bool> has-sync: root.account.mail_protocol == "imap" || root.account.mail_protocol == "jmap";
     // The switches' columns, clear of the scroll bar.
     private property <length> column-width: 52px;
     private property <length> columns-width: (root.has-sync ? 2 : 1) * root.column-width + 6px;

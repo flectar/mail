@@ -130,6 +130,8 @@ def event_defaults:
     | .label.expanded = (if .label.expanded == null then true else .label.expanded end)
     | .label.can_create_children = (.label.can_create_children // false)
     | .label.is_global = (.label.is_global // false)
+    | .label.gmail = (.label.gmail // false)
+    | .label.listing = (.label.listing // "shown")
     | .label.count = (.label.count // "")
   )
 | .mail_labels |= map(
@@ -141,6 +143,8 @@ def event_defaults:
     | .expanded = (if .expanded == null then true else .expanded end)
     | .can_create_children = (.can_create_children // false)
     | .is_global = (.is_global // false)
+    | .gmail = (.gmail // false)
+    | .listing = (.listing // "shown")
     | .count = (.count // "")
   )
 | .mail_label_results |= map(
@@ -152,6 +156,8 @@ def event_defaults:
     | .expanded = (if .expanded == null then true else .expanded end)
     | .can_create_children = (.can_create_children // false)
     | .is_global = (.is_global // false)
+    | .gmail = (.gmail // false)
+    | .listing = (.listing // "shown")
     | .count = (.count // "")
   )
 | (.thread_messages // [] | length) as $thread_count
@@ -178,6 +184,8 @@ def event_defaults:
         | .expanded = (if .expanded == null then true else .expanded end)
         | .can_create_children = (.can_create_children // false)
         | .is_global = (.is_global // false)
+        | .gmail = (.gmail // false)
+        | .listing = (.listing // "shown")
       )
     | .favicon = favicon_path(.address)
     | .favicon_small = favicon_path(.address)

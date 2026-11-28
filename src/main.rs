@@ -4114,7 +4114,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // deleting would, and a list showing one goes to the inbox (#253).
     let hide_folder_state = Rc::clone(&state);
     let hide_folder_runtime = runtime.clone();
-    let hide_folder_updates = folder_tx;
+    let hide_folder_updates = folder_tx.clone();
     app.on_hide_folder(move |folder_id| {
         let Some(core) = hide_folder_state.borrow().core.clone() else {
             return;
@@ -4148,6 +4148,49 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     reveal_parent_id: None,
                     issued_scope: current_scope,
                     removed_folders: hidden_folders,
+                })
+                .await;
+        });
+    });
+    // A Gmail label shows in Gmail's label list, or goes under More, in
+    // Gmail too (#253). It stays open if it's the list shown.
+    let label_listing_state = Rc::clone(&state);
+    let label_listing_runtime = runtime.clone();
+    let label_listing_updates = folder_tx;
+    app.on_set_label_listed(move |label_id, listed| {
+        let Some(core) = label_listing_state.borrow().core.clone() else {
+            return;
+        };
+        let scope = label_listing_state.borrow().scope;
+        let updates = label_listing_updates.clone();
+        label_listing_runtime.spawn(async move {
+            use flectar_mail_core::models::LabelListVisibility;
+            let visibility = if listed {
+                LabelListVisibility::Show
+            } else {
+                LabelListVisibility::Hide
+            };
+            let result = core
+                .set_label_list_visibility(i64::from(label_id), visibility)
+                .await;
+            let metadata = if result.is_ok() {
+                core.load_mail_metadata(scope).await.ok()
+            } else {
+                None
+            };
+            let message = match (result, listed) {
+                (Ok(()), true) => UiMessage::plain("Label shown."),
+                (Ok(()), false) => UiMessage::plain("Label hidden. It's under More."),
+                (Err(error), true) => UiMessage::detail("Could not show label: {}", error),
+                (Err(error), false) => UiMessage::detail("Could not hide label: {}", error),
+            };
+            let _ = updates
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                    issued_scope: scope,
+                    removed_folders: Vec::new(),
                 })
                 .await;
         });

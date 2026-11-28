@@ -781,6 +781,7 @@ mod tests {
             position: 0,
             owner_account_id: None,
             is_auto: false,
+            list_visibility: Default::default(),
         }];
         let prompt = automation_planner_prompt("Invoices should get the Finance label", &labels);
         assert!(prompt[0].content.contains("id: 7, name: Finance"));
@@ -848,6 +849,7 @@ mod tests {
                 position: 0,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
             crate::models::Label {
                 id: 8,
@@ -857,6 +859,7 @@ mod tests {
                 position: 1,
                 owner_account_id: None,
                 is_auto: true,
+                list_visibility: Default::default(),
             },
         ];
         let raw = r#"```json

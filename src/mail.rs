@@ -1844,7 +1844,21 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    /// Choose whether this device syncs an IMAP account's folder (#253).
+    /// Show a Gmail label in Gmail's label list, or move it under More
+    /// (#253).
+    pub async fn set_label_list_visibility(
+        &self,
+        label_id: i64,
+        visibility: flectar_mail_core::models::LabelListVisibility,
+    ) -> Result<(), String> {
+        self.core
+            .set_label_list_visibility(label_id, visibility)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Choose whether this device syncs an IMAP or JMAP account's folder
+    /// (#253).
     pub async fn set_folder_synced(&self, folder_id: i64, synced: bool) -> Result<(), String> {
         self.core
             .set_folder_synced(folder_id, synced)
@@ -5975,6 +5989,7 @@ mod tests {
                 position: 0,
                 owner_account_id: None,
                 is_auto: false,
+                list_visibility: Default::default(),
             },
             Label {
                 id: 32,
@@ -5984,6 +5999,7 @@ mod tests {
                 position: 1,
                 owner_account_id: None,
                 is_auto: true,
+                list_visibility: Default::default(),
             },
         ];
 
@@ -6024,6 +6040,7 @@ mod tests {
             position: 0,
             owner_account_id: Some(7),
             is_auto: false,
+            list_visibility: Default::default(),
         };
         let account_scope = resolve_scope(
             label(LabelKind::Account, 33),

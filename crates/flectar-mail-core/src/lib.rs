@@ -2229,8 +2229,11 @@ impl Core {
                     )));
                 }
                 let hidden_ids = repo::folders::hidden_ids(conn, Some(account_id))?;
-                // Only IMAP accounts sync folder by folder.
-                let imap = config.mail_protocol == MailProtocol::Imap;
+                // IMAP and JMAP accounts choose which folders sync.
+                let per_folder = matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                );
                 let mut folders = repo::folders::list_info(conn, Some(account_id))?
                     .into_iter()
                     .map(|folder| {
@@ -2248,7 +2251,7 @@ impl Core {
                             synced: always_synced
                                 || !config.settings.unsynced_folders.contains(&folder.path),
                             always_synced,
-                            syncable: imap && folder.selectable && role != Some(roles::ALL),
+                            syncable: per_folder && folder.selectable && role != Some(roles::ALL),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -2303,9 +2306,9 @@ impl Core {
         Ok(())
     }
 
-    /// Choose whether this device syncs a folder of an IMAP account in the
-    /// background (#253). One left out is checked when it's opened, and keeps
-    /// the mail it has. The Inbox, Sent and Drafts always sync.
+    /// Choose whether this device syncs a folder of an IMAP or JMAP account in
+    /// the background (#253). One left out is checked when it's opened, and
+    /// keeps the mail it has. The Inbox, Sent and Drafts always sync.
     pub async fn set_folder_synced(&self, folder_id: i64, synced: bool) -> Result<()> {
         let (account_id, settings) = self
             .db
@@ -2315,7 +2318,10 @@ impl Core {
                     .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
                 let mut config = repo::accounts::get_config(&tx, folder.account_id)?
                     .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
-                if config.mail_protocol != MailProtocol::Imap {
+                if !matches!(
+                    config.mail_protocol,
+                    MailProtocol::Imap | MailProtocol::Jmap
+                ) {
                     return Err(CoreError::Other(format!(
                         "{} syncs all its folders together",
                         config.email
@@ -2355,7 +2361,12 @@ impl Core {
                     return Ok(None);
                 };
                 let unsynced = repo::accounts::get_config(conn, folder.account_id)?
-                    .filter(|config| config.mail_protocol == MailProtocol::Imap)
+                    .filter(|config| {
+                        matches!(
+                            config.mail_protocol,
+                            MailProtocol::Imap | MailProtocol::Jmap
+                        )
+                    })
                     .is_some_and(|config| {
                         !repo::folders::syncs(&folder, &config.settings.unsynced_folders)
                     });
@@ -11077,6 +11088,64 @@ impl Core {
         Ok(label)
     }
 
+    /// Shows a Gmail label in the sidebar or moves it under More, as Gmail's
+    /// "Show in label list" does there too (#253). The choice shows here at
+    /// once and reaches Gmail with the account's next pass.
+    pub async fn set_label_list_visibility(
+        &self,
+        label_id: i64,
+        visibility: LabelListVisibility,
+    ) -> Result<()> {
+        let accounts = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mappings = {
+                    let mut stmt = tx.prepare(
+                        "SELECT account_id, provider_id FROM gmail_labels
+                         WHERE local_label_id = ?1 AND kind = 'user'",
+                    )?;
+                    stmt.query_map(rusqlite::params![label_id], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                if mappings.is_empty() {
+                    return Err(CoreError::Other(
+                        "only a Gmail label shows or hides in Gmail's label list".into(),
+                    ));
+                }
+                let mut accounts = Vec::with_capacity(mappings.len());
+                for (account_id, provider_id) in mappings {
+                    tx.execute(
+                        "UPDATE gmail_labels SET list_visibility = ?3
+                         WHERE account_id = ?1 AND provider_id = ?2",
+                        rusqlite::params![account_id, provider_id, visibility.as_gmail()],
+                    )?;
+                    repo::actions::enqueue(
+                        &tx,
+                        account_id,
+                        "gmail_label_list_visibility",
+                        None,
+                        None,
+                        &serde_json::json!({
+                            "providerId": provider_id,
+                            "listVisibility": visibility.as_gmail(),
+                        }),
+                        None,
+                    )?;
+                    accounts.push(account_id);
+                }
+                tx.commit()?;
+                Ok(accounts)
+            })
+            .await?;
+        for account_id in accounts {
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(())
+    }
+
     pub async fn delete_label(&self, id: i64) -> Result<()> {
         let accounts = self
             .db
@@ -17316,10 +17385,11 @@ mod hidden_folder_tests {
         assert!(core.account_folders(1).await.is_err());
     }
 
-    /// An IMAP account leaves folders out of its sync, but for the Inbox,
-    /// Sent and Drafts, and others sync all their folders together (#253).
+    /// IMAP and JMAP accounts leave folders out of their sync, but for the
+    /// Inbox, Sent and Drafts, and others sync all their folders together
+    /// (#253).
     #[tokio::test]
-    async fn an_imap_account_chooses_the_folders_it_syncs() {
+    async fn imap_and_jmap_accounts_choose_the_folders_they_sync() {
         let temp = tempfile::tempdir().unwrap();
         let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
             .await
@@ -17368,16 +17438,35 @@ mod hidden_folder_tests {
         core.set_folder_synced(lists, true).await.unwrap();
         assert!(sync().await.iter().all(|(_, synced, ..)| *synced));
 
-        core.db
-            .write(|conn| {
+        // A JMAP account's folders are its mailboxes, which have ids.
+        let protocol = |protocol: &'static str| {
+            core.db.write(move |conn| {
                 conn.execute(
-                    "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1",
-                    [],
+                    "UPDATE accounts SET mail_protocol = ?1 WHERE id = 1",
+                    [protocol],
+                )?;
+                conn.execute(
+                    "UPDATE folders SET jmap_id = CASE WHEN ?1 = 'jmap' THEN 'mailbox-' || id END
+                     WHERE account_id = 1",
+                    [protocol],
                 )?;
                 Ok(())
             })
-            .await
-            .unwrap();
+        };
+        protocol("jmap").await.unwrap();
+        core.set_folder_synced(lists, false).await.unwrap();
+        assert_eq!(
+            sync().await,
+            [
+                (1, true, true, true),
+                (lists, false, false, true),
+                (sent, true, true, true),
+            ]
+        );
+        core.check_folder(lists).await.unwrap();
+        core.set_folder_synced(lists, true).await.unwrap();
+
+        protocol("pop3").await.unwrap();
         assert!(core.set_folder_synced(lists, false).await.is_err());
         assert!(!sync().await.iter().any(|(_, _, _, syncable)| *syncable));
     }
@@ -19134,5 +19223,81 @@ mod contact_import_tests {
             .await
             .unwrap();
         assert_eq!(preview.problem, Some(ContactFileProblem::TooLarge));
+    }
+}
+
+#[cfg(test)]
+mod label_list_visibility_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_gmail_label_hides_here_at_once_and_in_gmail_with_the_next_pass() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute_batch(
+                    "UPDATE accounts SET mail_protocol = 'gmail', provider = 'gmail' WHERE id = 1;
+                     INSERT INTO labels (id, name, keyword, scope, owner_account_id, origin)
+                       VALUES (40, 'Work', 'Work', 'account', 1, 'provider'),
+                              (41, 'Mine', 'Mine', 'global', NULL, 'user');
+                     INSERT INTO gmail_labels
+                       (account_id, provider_id, name, kind, local_label_id, list_visibility)
+                       VALUES (1, 'Label_1', 'Work', 'user', 40, 'labelShow');",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        core.set_label_list_visibility(40, LabelListVisibility::Hide)
+            .await
+            .unwrap();
+        let work = core
+            .list_labels()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|label| label.id == 40)
+            .unwrap();
+        assert_eq!(work.list_visibility, LabelListVisibility::Hide);
+        let queued = core
+            .db
+            .read(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT kind, payload FROM pending_actions WHERE state = 'pending'")?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(kind, payload)| {
+                (
+                    kind,
+                    serde_json::from_str::<serde_json::Value>(&payload).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            queued,
+            [(
+                "gmail_label_list_visibility".to_owned(),
+                serde_json::json!({"providerId": "Label_1", "listVisibility": "labelHide"})
+            )]
+        );
+        // A label of Flectar Mail's own isn't in Gmail's label list.
+        assert!(
+            core.set_label_list_visibility(41, LabelListVisibility::Hide)
+                .await
+                .is_err()
+        );
     }
 }

@@ -150,7 +150,9 @@ fixture_row!(MailLabelRow {
     is_auto,
     is_global,
     role,
-    count
+    count,
+    gmail,
+    listing
 });
 fixture_row!(MailboxRow {
     account_id,
@@ -327,6 +329,17 @@ impl FixtureValue for MailboxRole {
     }
 }
 
+impl FixtureValue for LabelListing {
+    fn read(value: &Value) -> Self {
+        match value.as_str().unwrap() {
+            "shown" => Self::Shown,
+            "shown-if-unread" => Self::ShownIfUnread,
+            "hidden" => Self::Hidden,
+            listing => panic!("unknown screenshot label listing: {listing}"),
+        }
+    }
+}
+
 impl FixtureValue for SidebarRowKind {
     fn read(value: &Value) -> Self {
         match value.as_str().unwrap() {
@@ -345,6 +358,7 @@ impl FixtureValue for SidebarRowKind {
             "folder" => Self::Folder,
             "account-labels-section" => Self::AccountLabelsSection,
             "account-label" => Self::AccountLabel,
+            "account-labels-more" => Self::AccountLabelsMore,
             "new-folder" => Self::NewFolder,
             "new-label" => Self::NewLabel,
             kind => panic!("unknown screenshot sidebar kind: {kind}"),

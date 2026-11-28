@@ -294,6 +294,9 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     state
         .collapsed_sidebar_sections
         .remove(&format!("account-labels:{account_id}"));
+    state
+        .collapsed_sidebar_sections
+        .remove(&format!("account-labels-more:{account_id}"));
     state.collapsed_folder_ids.retain(|id| {
         state
             .mailboxes
