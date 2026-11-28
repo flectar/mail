@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
+"PO-Revision-Date: 2026-11-28 11:41+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://"
 "translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
@@ -1169,10 +1169,8 @@ msgid "Text style preference saved."
 msgstr "文本样式偏好设置已保存。"
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "窗口框架偏好已保存。"
+msgstr "撰写窗口偏好设置已保存。"
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1191,10 +1189,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "无法保存文本样式偏好设置：{}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "无法保存撤回发送偏好设置：{}"
+msgstr "无法保存撰写窗口偏好设置：{}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -1834,22 +1830,16 @@ msgid "Could not connect CardDAV: {}"
 msgstr "无法连接 CardDAV：{}"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Authorize calendar access in your browser."
 msgid "Authorize contacts access in your browser."
-msgstr "请在浏览器中授权日历访问。"
+msgstr "请在浏览器中授权访问联系人。"
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Calendar connected and initial sync started."
 msgid "Google Contacts connected and initial sync started."
-msgstr "日历已连接，首次同步已开始。"
+msgstr "Google 通讯录已连接，初始同步已开始。"
 
 #: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3627
-#, fuzzy
-#| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
-msgstr "无法连接日历：{}"
+msgstr "无法连接 Google 通讯录：{}"
 
 #: ui/app.slint:587
 msgid "CardDAV sync enabled."
@@ -2139,10 +2129,8 @@ msgid "Could not show the message: {}"
 msgstr "无法显示邮件：{}"
 
 #: ui/app.slint:678
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "无法发送邮件：{}"
+msgstr "无法加载邮件：{}"
 
 #: ui/app.slint:679
 msgid "Could not save the translation setting: {}"
@@ -2556,7 +2544,7 @@ msgstr "发送已取消。邮件已恢复为草稿。"
 
 #: ui/app.slint:795
 msgid "Send cancelled here, but another of your devices may still send it."
-msgstr ""
+msgstr "已在此处取消发送，但您的其他设备仍可能发送它。"
 
 #: ui/app.slint:796
 msgid "This message is no longer scheduled."
@@ -2797,41 +2785,31 @@ msgstr "无法删除文件夹：{}"
 
 #: ui/app.slint:850
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "文件夹已隐藏。可在“设置”→“账户”中重新显示。"
 
 #: ui/app.slint:851
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "无法删除文件夹：{}"
+msgstr "无法隐藏文件夹：{}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Labels"
 msgid "Label shown."
-msgstr "标签"
+msgstr "标签已显示。"
 
 #: ui/app.slint:853
 msgid "Label hidden. It's under More."
-msgstr ""
+msgstr "标签已隐藏。它位于“更多”下。"
 
 #: ui/app.slint:854
-#, fuzzy
-#| msgid "Could not save label: {}"
 msgid "Could not show label: {}"
-msgstr "无法保存标签：{}"
+msgstr "无法显示标签：{}"
 
 #: ui/app.slint:855
-#, fuzzy
-#| msgid "Could not update label: {}"
 msgid "Could not hide label: {}"
-msgstr "无法更新标签：{}"
+msgstr "无法隐藏标签：{}"
 
 #: ui/app.slint:856
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "无法选择文件夹：{}"
+msgstr "无法更改文件夹：{}"
 
 #: ui/app.slint:857
 msgid "Could not close preview: {}"
@@ -2882,10 +2860,8 @@ msgid "Could not open composer: {}"
 msgstr "无法打开邮件编辑器：{}"
 
 #: ui/app.slint:869
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "无法在独立窗口中打开这封邮件。"
+msgstr "无法打开会话窗口：{}"
 
 #: ui/app.slint:870
 msgid "Add an account to send mail."
@@ -3696,10 +3672,8 @@ msgid "Signatures"
 msgstr "签名"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Company"
 msgid "Composing"
-msgstr "公司"
+msgstr "撰写"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
@@ -3770,20 +3744,14 @@ msgid "Provided by the server"
 msgstr "由服务器提供"
 
 #: ui/components/account-mail-preferences.slint:330
-#, fuzzy
-#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
-msgstr "发件人身份、签名、OpenPGP 与自动回复"
+msgstr "发件人身份、签名、撰写、OpenPGP 与自动回复"
 
 #: ui/components/account-mail-preferences.slint:331
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, message "
-#| "protection and automatic replies."
 msgid ""
 "Choose an account to manage its sender identity, signature, how its messages "
 "are written, message protection and automatic replies."
-msgstr "请选择一个账户，以管理其发件人身份、签名、邮件保护和自动回复。"
+msgstr "请选择一个账户，以管理其发件人身份、签名、邮件撰写方式、邮件保护和自动回复。"
 
 #: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
@@ -3994,13 +3962,13 @@ msgstr "对纯文本邮件的回复和转发默认以纯文本开始。"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid "Start replies below the quote"
-msgstr ""
+msgstr "在引用下方开始回复"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid ""
 "The message you answer goes into your reply as text, to answer between its "
 "lines, and you write below it."
-msgstr ""
+msgstr "您所回复的邮件会以文本形式置于回复中，便于逐行答复，您在它下方书写。"
 
 #: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
@@ -4240,7 +4208,7 @@ msgstr "将于 {} 再次检查"
 
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
-msgstr ""
+msgstr "请在此设备上重新登录，以便继续接收邮件。"
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5131,10 +5099,8 @@ msgid "Open in a new window"
 msgstr "在新窗口中打开"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "新建签名"
+msgstr "无签名"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:401
 msgid "From"
@@ -5142,23 +5108,19 @@ msgstr "发件人"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP：已加密并已数字签名"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "无（不加密）"
+msgstr "OpenPGP：已加密"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP：已数字签名，未加密"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "关闭其他标签页"
+msgstr "选择其他地址…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:407
 msgid "To"
@@ -6377,8 +6339,6 @@ msgid "Rename folder"
 msgstr "重命名文件夹"
 
 #: ui/components/sidebar-controls.slint:247
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
 msgstr "隐藏文件夹"
 
@@ -6403,16 +6363,12 @@ msgid "Rename label in {}"
 msgstr "重命名 {} 中的标签"
 
 #: ui/components/sidebar-controls.slint:268
-#, fuzzy
-#| msgid "New label"
 msgid "Show label"
-msgstr "新建标签"
+msgstr "显示标签"
 
 #: ui/components/sidebar-controls.slint:272
-#, fuzzy
-#| msgid "Add label"
 msgid "Hide label"
-msgstr "添加标签"
+msgstr "隐藏标签"
 
 #: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
@@ -6539,23 +6495,19 @@ msgstr "{} 标签，{} 账户"
 
 #: ui/components/sidebar.slint:867
 msgid "Less"
-msgstr ""
+msgstr "收起"
 
 #: ui/components/sidebar.slint:867
 msgid "More"
-msgstr ""
+msgstr "更多"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Search labels"
 msgid "Show fewer labels"
-msgstr "搜索标签"
+msgstr "显示更少标签"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show more labels"
-msgstr "显示文件夹"
+msgstr "显示更多标签"
 
 #: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
@@ -6917,22 +6869,15 @@ msgid "Sync"
 msgstr "同步"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"让您的账户及登录凭据、偏好设置、模板、延后和回复提醒在所有设备上保持一致，并"
-"允许任意设备发送您的定时邮件。所有内容均经端到端加密，连 Flectar Mail 也无法"
-"读取。您的邮件、联系人和日历仍与邮件服务商保持同步。"
+"让您的账户、偏好设置、模板、延后和回复提醒在所有设备上保持一致，并允许任意设"
+"备发送您的定时邮件。所有内容均经端到端加密，连 Flectar Mail 也无法读取。您的"
+"邮件、联系人和日历仍与邮件服务商保持同步。"
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7005,17 +6950,13 @@ msgid "{}."
 msgstr "{}。"
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"您会得到一个恢复代码，请妥善保管。您的密码和登录凭据也会同步，因此其他设备可"
-"立即就绪。"
+"您会得到一个恢复代码，请妥善保管。密码也会同步，Google 和 Microsoft 的登录凭"
+"据及应用密钥则会发送到您同类型的设备。"
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7221,10 +7162,8 @@ msgid "Passwords and sign-ins"
 msgstr "密码和登录凭据"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr "您的代码使所有设备上的同步免费使用。"
+msgstr "为您的所有设备提供端到端加密。"
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7232,27 +7171,25 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"连接此设备之前就已存在的账户，其密码和登录凭据会保留在此处，直到您分享它们。"
+"只有当上面列出的每台设备都属于您时，才应分享。"
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
-msgstr "为所有设备提供端到端加密。持有您恢复代码的任何人都可以登录您的账户。"
+msgstr ""
+"密码会发送到您的所有设备。Google 和 Microsoft 的登录凭据及应用密钥会发送到您"
+"同类型的设备。持有您恢复代码的任何人都可以登录您的账户。"
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "同步密码和登录凭据"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "共享锁定"
+msgstr "分享"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7278,13 +7215,11 @@ msgstr "删除…"
 msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
-msgstr ""
+msgstr "请在手机设置中为 Flectar Mail 开启相机访问权限，以便扫描二维码。"
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
-msgstr "代码已过期。请重新开始以获取新代码。"
+msgstr "二维码扫描器未能启动。请重试，或改用代码。"
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8442,16 +8377,12 @@ msgid "Google client ID"
 msgstr "Google 客户端 ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "Google 客户端 ID"
+msgstr "Google Android 客户端 ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "Google 客户端 ID"
+msgstr "Google iOS 客户端 ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8462,10 +8393,8 @@ msgid "Microsoft client ID"
 msgstr "Microsoft 客户端 ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "Microsoft 客户端 ID"
+msgstr "Microsoft Entra 客户端 ID"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8489,12 +8418,14 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"请在 Google Cloud 中为该应用包 {} 及其签名证书创建 Android 客户端，并启用 "
+"Gmail API。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
-msgstr ""
+msgstr "请在 Google Cloud 中为该应用包标识符 {} 创建 iOS 客户端，并启用 Gmail API。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8509,12 +8440,14 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"请在 Microsoft Entra 中为该应用包 {} 添加 Android 平台及其签名哈希。无需客户"
+"端密钥。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
-msgstr ""
+msgstr "请在 Microsoft Entra 中为该应用包标识符 {} 添加 iOS 平台。无需客户端密钥。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8537,13 +8470,9 @@ msgid ""
 msgstr "客户端 ID 留空将使用默认密钥（如有）。密钥与“设置”共用。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
-msgstr "在代码有效期内，所有设备上的 Flectar Mail Sync 均可免费使用。"
+msgstr "借助 Flectar Mail Sync，您同类型的其他设备也会获得这些密钥。"
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -8766,12 +8695,9 @@ msgid "After 5 seconds"
 msgstr "5 秒后"
 
 #: ui/dialogs/settings-dialog.slint:855
-#, fuzzy
-#| msgctxt "image size"
-#| msgid "Original size"
 msgctxt "message view"
 msgid "Original"
-msgstr "原始大小"
+msgstr "原始"
 
 #: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
 msgid "Reader mode"
@@ -9451,16 +9377,16 @@ msgstr ""
 "将回复与其所答复的邮件归为一组。关闭后，每封邮件会单独列出、打开和操作。"
 
 #: ui/dialogs/settings-dialog.slint:1832
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "新邮件"
+msgstr "保持邮件展开"
 
 #: ui/dialogs/settings-dialog.slint:1833
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"在同一会话中，您打开的邮件在打开另一封时会保持展开。关闭此选项可一封一封地阅"
+"读。"
 
 #: ui/dialogs/settings-dialog.slint:1846
 msgid "Mark messages as read"
@@ -9475,26 +9401,24 @@ msgstr ""
 "则由您手动标记。"
 
 #: ui/dialogs/settings-dialog.slint:1860
-#, fuzzy
-#| msgid "Show message source"
 msgid "Show messages as"
-msgstr "显示邮件源码"
+msgstr "邮件显示方式"
 
 #: ui/dialogs/settings-dialog.slint:1861
 msgid ""
 "How messages show when you open them. Each one can switch to plain text or "
 "back in its menu."
-msgstr ""
+msgstr "打开邮件时的显示方式。每封邮件都可以在其菜单中切换为纯文本或还原。"
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Plain text in a fixed-width font"
-msgstr ""
+msgstr "等宽字体的纯文本"
 
 #: ui/dialogs/settings-dialog.slint:1875
 msgid ""
 "Plain-text messages keep the columns their senders lined up. Each device "
 "keeps its own choice."
-msgstr ""
+msgstr "纯文本邮件会保留发件人排版好的列对齐。每台设备各自保留自己的选择。"
 
 #: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
@@ -9525,22 +9449,14 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "新邮件、回复和转发以该字号开始。"
 
 #: ui/dialogs/settings-dialog.slint:1938
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "在新窗口中打开"
+msgstr "在新窗口中撰写"
 
 #: ui/dialogs/settings-dialog.slint:1939
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
-msgstr ""
-"新邮件、回复和转发以该字体开始。“默认”不指定字体，因此每位读者看到的都是自己"
-"的字体。"
+msgstr "新邮件、回复、转发和草稿会在各自的窗口中打开，让您的邮件始终保持可见。"
 
 #: ui/dialogs/settings-dialog.slint:1979
 msgid "Sending"
@@ -10227,31 +10143,27 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "侧边栏中显示并同步哪些文件夹"
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "侧边栏中显示哪些文件夹"
 
 #: ui/dialogs/settings-dialog.slint:3575
 msgid "Sync contacts with your Google account."
-msgstr ""
+msgstr "将联系人与您的 Google 账户同步。"
 
 #: ui/dialogs/settings-dialog.slint:3576 ui/dialogs/settings-dialog.slint:4804
 msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "与符合标准的 CardDAV 服务器同步联系人。"
 
 #: ui/dialogs/settings-dialog.slint:3580
-#, fuzzy
-#| msgid "Contacts"
 msgid "Google Contacts"
-msgstr "联系人"
+msgstr "Google 通讯录"
 
 #: ui/dialogs/settings-dialog.slint:3604 ui/dialogs/settings-dialog.slint:3642
-#, fuzzy
-#| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
-msgstr "连接 Google 日历"
+msgstr "连接 Google 通讯录"
 
 #: ui/dialogs/settings-dialog.slint:3611 ui/dialogs/settings-dialog.slint:3648
 msgid "Disconnect"
@@ -10267,10 +10179,8 @@ msgid "Fix CardDAV"
 msgstr "修复 CardDAV"
 
 #: ui/dialogs/settings-dialog.slint:3628
-#, fuzzy
-#| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
-msgstr "日历同步错误：{}"
+msgstr "联系人同步错误：{}"
 
 #: ui/dialogs/settings-dialog.slint:3679
 msgid "Uses the {} color in the mail list"
@@ -10289,17 +10199,13 @@ msgid "OAuth app credentials"
 msgstr "OAuth 应用凭据"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "新联系人保存在此设备上。"
+msgstr "您的应用密钥已在此设备上设置。"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
-msgstr "高级：使用您自己的 Gmail 或 Microsoft 桌面应用注册。"
+msgstr "高级：在此设备上使用您自己的 Gmail 或 Microsoft 应用注册。"
 
 #: ui/dialogs/settings-dialog.slint:3728
 msgid "Custom desktop app credentials are configured."
@@ -10539,10 +10445,8 @@ msgid "Open message"
 msgstr "打开邮件"
 
 #: ui/dialogs/settings-dialog.slint:4046
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "在新窗口中打开"
+msgstr "在新窗口中打开邮件"
 
 #: ui/dialogs/settings-dialog.slint:4047
 msgid "Select message"
@@ -10985,10 +10889,8 @@ msgid "Choose a profile for {}"
 msgstr "为 {} 选择分组"
 
 #: ui/dialogs/settings-dialog.slint:5309
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "操作 {} 的文件夹"
+msgstr "{} 的文件夹"
 
 #: ui/dialogs/settings-dialog.slint:5330
 msgid "Special folders of {}"
@@ -11161,10 +11063,8 @@ msgid "Keep syncing"
 msgstr "继续同步"
 
 #: ui/dialogs/settings-dialog.slint:5563
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "移除图片"
+msgstr "移除设备？"
 
 #: ui/dialogs/settings-dialog.slint:5567
 msgid ""
@@ -11172,16 +11072,18 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"它可能仍处于 {} 的登录状态。如果它已丢失或不属于您，请更改这些密码，并在各账"
+"户的安全设置中移除 Flectar Mail 的访问权限。"
 
 #: ui/dialogs/settings-dialog.slint:5584
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
-msgstr ""
+msgstr "Outlook 需要您的应用密钥才能在此设备上登录。请保存密钥后登录。"
 
 #: ui/dialogs/settings-dialog.slint:5585
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
-msgstr ""
+msgstr "Gmail 需要您的应用密钥才能在此设备上登录。请保存密钥后登录。"
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11352,18 +11254,21 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"选择哪些文件夹显示在侧边栏和“移动到”列表中，以及此设备同步哪些文件夹。隐藏文"
+"件夹中的邮件仍会下载，其中的子文件夹也会一并隐藏。不同步的文件夹会在您打开时"
+"进行检查。"
 
 #: ui/folder-visibility.slint:145
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"选择哪些文件夹显示在侧边栏和“移动到”列表中。隐藏文件夹中的邮件仍会下载，其中"
+"的子文件夹也会一并隐藏。"
 
 #: ui/folder-visibility.slint:254
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "正在显示 {} 个地址（共 {} 个）。继续输入可缩小范围。"
+msgstr "正在显示 {} 个文件夹（共 {} 个）。继续输入可缩小范围。"
 
 #: ui/link-services.slint:101
 msgid "Large files"
@@ -11670,16 +11575,13 @@ msgid "Every connection goes straight to its server."
 msgstr "所有连接都直接连接到其服务器。"
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"所有连接都经过此代理。如果代理不可用，Flectar Mail 不会在没有它的情况下连接。"
+"Flectar Mail 的所有连接都会经过此代理。如果无法连到代理，Flectar Mail 不会绕"
+"过它直接连接。您的系统仍可能直接向颁发者校验证书。"
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -11739,30 +11641,28 @@ msgid "Change proxy"
 msgstr "更改代理"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "更多联系人操作"
+msgstr "按流量计费的连接"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "下载"
+msgstr "暂停下载"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"在按流量计费的连接上（如移动数据或热点），账户仍会检查新邮件，邮件和附件则在"
+"您打开时才下载。"
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "此连接按流量计费，因此下载会等待。"
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "此连接按流量计费。"
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -12848,8 +12748,6 @@ msgid "Deselect {}"
 msgstr "取消选择 {}"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
 msgstr "在新窗口中打开"
 
@@ -12919,10 +12817,8 @@ msgid "Copy name and email address"
 msgstr "复制姓名和电子邮件地址"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "移动邮件"
+msgstr "关闭邮件"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."
@@ -12961,10 +12857,8 @@ msgstr "显示邮件源码"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
-#, fuzzy
-#| msgid "Show the quoted message"
 msgid "Show formatted message"
-msgstr "显示引用的邮件"
+msgstr "显示格式化邮件"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590

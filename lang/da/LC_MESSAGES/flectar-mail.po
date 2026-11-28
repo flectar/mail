@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
+"PO-Revision-Date: 2026-11-28 11:41+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Danish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/da/>\n"
@@ -1202,10 +1202,8 @@ msgid "Text style preference saved."
 msgstr "Præference for tekststil gemt."
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "Præference for vinduesramme gemt."
+msgstr "Indstillingen for skrivevindue er gemt."
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1224,10 +1222,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "Kunne ikke gemme præference for tekststil: {}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "Kunne ikke gemme præference for fortryd afsendelse: {}"
+msgstr "Kunne ikke gemme indstillingen for skrivevindue: {}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -1875,22 +1871,16 @@ msgid "Could not connect CardDAV: {}"
 msgstr "Kunne ikke forbinde CardDAV: {}"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Authorize calendar access in your browser."
 msgid "Authorize contacts access in your browser."
-msgstr "Godkend kalenderadgang i din browser."
+msgstr "Godkend kontaktadgang i din browser."
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Calendar connected and initial sync started."
 msgid "Google Contacts connected and initial sync started."
-msgstr "Kalenderen er forbundet, og indledende synkronisering er startet."
+msgstr "Google Kontakter er forbundet, og den første synkronisering er startet."
 
 #: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3627
-#, fuzzy
-#| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
-msgstr "Kunne ikke forbinde kalender: {}"
+msgstr "Kunne ikke forbinde Google Kontakter: {}"
 
 #: ui/app.slint:587
 msgid "CardDAV sync enabled."
@@ -2182,10 +2172,8 @@ msgid "Could not show the message: {}"
 msgstr "Kunne ikke vise beskeden: {}"
 
 #: ui/app.slint:678
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "Kunne ikke sende beskeden: {}"
+msgstr "Kunne ikke indlæse e-mailen: {}"
 
 #: ui/app.slint:679
 msgid "Could not save the translation setting: {}"
@@ -2616,6 +2604,8 @@ msgstr "Afsendelse annulleret. Beskeden er en kladde igen."
 #: ui/app.slint:795
 msgid "Send cancelled here, but another of your devices may still send it."
 msgstr ""
+"Afsendelsen er annulleret her, men en anden af dine enheder kan stadig sende "
+"den."
 
 #: ui/app.slint:796
 msgid "This message is no longer scheduled."
@@ -2878,41 +2868,31 @@ msgstr "Kunne ikke slette mappe: {}"
 
 #: ui/app.slint:850
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "Mappen er skjult. Vis den igen i Indstillinger → Konti."
 
 #: ui/app.slint:851
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "Kunne ikke slette mappe: {}"
+msgstr "Kunne ikke skjule mappen: {}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Labels"
 msgid "Label shown."
-msgstr "Labels"
+msgstr "Etiket vist."
 
 #: ui/app.slint:853
 msgid "Label hidden. It's under More."
-msgstr ""
+msgstr "Etiket skjult. Den findes under Mere."
 
 #: ui/app.slint:854
-#, fuzzy
-#| msgid "Could not save label: {}"
 msgid "Could not show label: {}"
-msgstr "Kunne ikke gemme label: {}"
+msgstr "Kunne ikke vise etiketten: {}"
 
 #: ui/app.slint:855
-#, fuzzy
-#| msgid "Could not update label: {}"
 msgid "Could not hide label: {}"
-msgstr "Kunne ikke opdatere label: {}"
+msgstr "Kunne ikke skjule etiketten: {}"
 
 #: ui/app.slint:856
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "Kunne ikke vælge mappen: {}"
+msgstr "Kunne ikke ændre mappen: {}"
 
 #: ui/app.slint:857
 msgid "Could not close preview: {}"
@@ -2963,10 +2943,8 @@ msgid "Could not open composer: {}"
 msgstr "Kunne ikke åbne skrivevinduet: {}"
 
 #: ui/app.slint:869
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "Kunne ikke åbne beskeden i sit eget vindue."
+msgstr "Kunne ikke åbne samtalens vindue: {}"
 
 #: ui/app.slint:870
 msgid "Add an account to send mail."
@@ -3804,10 +3782,8 @@ msgid "Signatures"
 msgstr "Signaturer"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Company"
 msgid "Composing"
-msgstr "Virksomhed"
+msgstr "Skrivning"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
@@ -3878,22 +3854,16 @@ msgid "Provided by the server"
 msgstr "Leveret af serveren"
 
 #: ui/components/account-mail-preferences.slint:330
-#, fuzzy
-#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
-msgstr "Afsenderidentiteter, signaturer, OpenPGP & automatiske svar"
+msgstr "Afsenderidentiteter, signaturer, skrivning, OpenPGP og automatiske svar"
 
 #: ui/components/account-mail-preferences.slint:331
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, message "
-#| "protection and automatic replies."
 msgid ""
 "Choose an account to manage its sender identity, signature, how its messages "
 "are written, message protection and automatic replies."
 msgstr ""
-"Vælg en konto for at administrere dens afsenderidentitet, signatur, "
-"beskedbeskyttelse og automatiske svar."
+"Vælg en konto for at administrere dens afsenderidentitet, signatur, hvordan "
+"dens e-mails skrives, e-mailbeskyttelse og automatiske svar."
 
 #: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
@@ -4112,13 +4082,15 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:527
 msgid "Start replies below the quote"
-msgstr ""
+msgstr "Start svar under det citerede"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid ""
 "The message you answer goes into your reply as text, to answer between its "
 "lines, and you write below it."
 msgstr ""
+"Den e-mail, du svarer på, indsættes som tekst i dit svar, så du kan svare "
+"mellem linjerne, og du skriver nedenunder."
 
 #: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
@@ -4371,7 +4343,7 @@ msgstr "Tjekker igen {}"
 
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
-msgstr ""
+msgstr "Log ind igen på denne enhed for at blive ved med at modtage e-mail."
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5281,10 +5253,8 @@ msgid "Open in a new window"
 msgstr "Åbn i et nyt vindue"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "Ny signatur"
+msgstr "Ingen signatur"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:401
 msgid "From"
@@ -5292,23 +5262,19 @@ msgstr "Fra"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP: krypteret og digitalt signeret"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "Ingen (ukrypteret)"
+msgstr "OpenPGP: krypteret"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP: digitalt signeret, ikke krypteret"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "Luk andre faner"
+msgstr "Vælg en anden adresse…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:407
 msgid "To"
@@ -6554,10 +6520,8 @@ msgid "Rename folder"
 msgstr "Omdøb mappe"
 
 #: ui/components/sidebar-controls.slint:247
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
-msgstr "Skjul mapper"
+msgstr "Skjul mappe"
 
 #: ui/components/sidebar-controls.slint:251
 msgid "Delete folder"
@@ -6580,16 +6544,12 @@ msgid "Rename label in {}"
 msgstr "Omdøb label i {}"
 
 #: ui/components/sidebar-controls.slint:268
-#, fuzzy
-#| msgid "New label"
 msgid "Show label"
-msgstr "Nyt label"
+msgstr "Vis etiket"
 
 #: ui/components/sidebar-controls.slint:272
-#, fuzzy
-#| msgid "Add label"
 msgid "Hide label"
-msgstr "Tilføj label"
+msgstr "Skjul etiket"
 
 #: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
@@ -6716,23 +6676,19 @@ msgstr "{} label, {} konto"
 
 #: ui/components/sidebar.slint:867
 msgid "Less"
-msgstr ""
+msgstr "Vis mindre"
 
 #: ui/components/sidebar.slint:867
 msgid "More"
-msgstr ""
+msgstr "Vis mere"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Search labels"
 msgid "Show fewer labels"
-msgstr "Søg i labels"
+msgstr "Vis færre etiketter"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show more labels"
-msgstr "Vis mapper"
+msgstr "Vis flere etiketter"
 
 #: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
@@ -7097,24 +7053,17 @@ msgid "Sync"
 msgstr "Synkroniser"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"Hold dine konti og deres logind, præferencer, skabeloner, udskydelser og "
-"svarpåmindelser ens på alle dine enheder, og lad enhver af dem sende dine "
-"planlagte e-mails. Alt er ende-til-ende-krypteret, så ikke engang Flectar "
-"Mail kan læse det. Din e-mail, dine kontakter og dine kalendere fortsætter "
-"med at synkronisere med din mailudbyder."
+"Hold dine konti, indstillinger, skabeloner, udskydelser og svarpåmindelser "
+"ens på alle dine enheder, og lad enhver af dem sende dine planlagte e-mails. "
+"Alt er ende-til-ende-krypteret, så ikke engang Flectar Mail kan læse det. "
+"Dine e-mails, kontakter og kalendere synkroniseres fortsat med din e-"
+"mailudbyder."
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7190,17 +7139,14 @@ msgid "{}."
 msgstr "{}."
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"Du får en gendannelseskode at opbevare et sikkert sted. Dine adgangskoder og "
-"logind synkroniseres også, så dine andre enheder er klar med det samme."
+"Du får en gendannelseskode, som du skal opbevare sikkert. Adgangskoder "
+"synkroniseres også, og Google- og Microsoft-logins og appnøgler sendes til "
+"dine enheder af samme slags."
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7417,10 +7363,8 @@ msgid "Passwords and sign-ins"
 msgstr "Adgangskoder og logind"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr "Din kode gør synkronisering gratis på alle dine enheder."
+msgstr "Ende-til-ende-krypteret til alle dine enheder."
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7428,29 +7372,27 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"Konti, der var på denne enhed, før du tilsluttede den, beholder deres "
+"adgangskoder og logins her, indtil du deler dem. Del dem kun, hvis alle "
+"enhederne ovenfor er dine."
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
 msgstr ""
-"Ende-til-ende-krypteret, til alle dine enheder. Alle med din "
-"gendannelseskode kan logge ind på dine konti."
+"Adgangskoder sendes til alle dine enheder. Google- og Microsoft-logins og "
+"appnøgler sendes til dine enheder af samme slags. Alle, der har din "
+"gendannelseskode, kan logge ind på dine konti."
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "Synkronisér adgangskoder og logind"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "Delt lås"
+msgstr "Del"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7479,12 +7421,12 @@ msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
 msgstr ""
+"Slå kameraadgang til for Flectar Mail i telefonens indstillinger for at "
+"scanne en QR-kode."
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
-msgstr "Koden udløb. Start igen for at få en ny."
+msgstr "QR-kodescanneren startede ikke. Prøv igen, eller brug en kode i stedet."
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8728,16 +8670,12 @@ msgid "Google client ID"
 msgstr "Google-klient-id"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "Google-klient-id"
+msgstr "Google Android-klient-id"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "Google-klient-id"
+msgstr "Google iOS-klient-id"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8748,10 +8686,8 @@ msgid "Microsoft client ID"
 msgstr "Microsoft-klient-id"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "Microsoft-klient-id"
+msgstr "Microsoft Entra-klient-id"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8775,12 +8711,15 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"Opret en Android-klient i Google Cloud til pakken {} med denne apps "
+"signeringscertifikat, og aktivér Gmail API."
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
 msgstr ""
+"Opret en iOS-klient i Google Cloud til bundle-id'et {}, og aktivér Gmail API."
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8795,12 +8734,16 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"Tilføj en Android-platform i Microsoft Entra til pakken {} med denne apps "
+"signaturhash. Der er ikke brug for nogen klienthemmelighed."
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
 msgstr ""
+"Tilføj en iOS-platform i Microsoft Entra til bundle-id'et {}. Der er ikke "
+"brug for nogen klienthemmelighed."
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8827,14 +8770,11 @@ msgstr ""
 "tilgængelige. Nøgler deles med Indstillinger."
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
 msgstr ""
-"Flectar Mail Sync er gratis på alle dine enheder i den tid, koden dækker."
+"Med Flectar Mail Sync får dine andre enheder af samme slags også disse "
+"nøgler."
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -9059,12 +8999,9 @@ msgid "After 5 seconds"
 msgstr "Efter 5 sekunder"
 
 #: ui/dialogs/settings-dialog.slint:855
-#, fuzzy
-#| msgctxt "image size"
-#| msgid "Original size"
 msgctxt "message view"
 msgid "Original"
-msgstr "Original størrelse"
+msgstr "Original"
 
 #: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
 msgid "Reader mode"
@@ -9776,16 +9713,16 @@ msgstr ""
 "handle på hver besked for sig."
 
 #: ui/dialogs/settings-dialog.slint:1832
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "Nye beskeder"
+msgstr "Hold e-mails åbne"
 
 #: ui/dialogs/settings-dialog.slint:1833
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"E-mails, du åbner i en samtale, forbliver åbne, når du åbner en anden. Slå "
+"dette fra for at læse én ad gangen."
 
 #: ui/dialogs/settings-dialog.slint:1846
 msgid "Mark messages as read"
@@ -9801,26 +9738,28 @@ msgstr ""
 "selv markerer."
 
 #: ui/dialogs/settings-dialog.slint:1860
-#, fuzzy
-#| msgid "Show message source"
 msgid "Show messages as"
-msgstr "Vis beskedens kilde"
+msgstr "Vis e-mails som"
 
 #: ui/dialogs/settings-dialog.slint:1861
 msgid ""
 "How messages show when you open them. Each one can switch to plain text or "
 "back in its menu."
 msgstr ""
+"Hvordan e-mails vises, når du åbner dem. Hver enkelt kan skifte til ren "
+"tekst eller tilbage i sin menu."
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Plain text in a fixed-width font"
-msgstr ""
+msgstr "Ren tekst i en fastbredde-skrifttype"
 
 #: ui/dialogs/settings-dialog.slint:1875
 msgid ""
 "Plain-text messages keep the columns their senders lined up. Each device "
 "keeps its own choice."
 msgstr ""
+"E-mails i ren tekst beholder de kolonner, deres afsendere har stillet op. "
+"Hver enhed beholder sit eget valg."
 
 #: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
@@ -9851,22 +9790,16 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "Nye beskeder, svar og videresendelser starter med denne størrelse."
 
 #: ui/dialogs/settings-dialog.slint:1938
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "Åbn i et nyt vindue"
+msgstr "Skriv i et nyt vindue"
 
 #: ui/dialogs/settings-dialog.slint:1939
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
 msgstr ""
-"Nye beskeder, svar og videresendelser starter med denne skrifttype. Standard "
-"angiver ingen, så hver læser ser sin egen."
+"Nye e-mails, svar, videresendelser og kladder åbnes i deres eget vindue, så "
+"din e-mail forbliver synlig."
 
 #: ui/dialogs/settings-dialog.slint:1979
 msgid "Sending"
@@ -10598,31 +10531,27 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "Hvilke mapper vises i sidebjælken, og som synkroniseres"
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "Hvilke mapper vises i sidebjælken"
 
 #: ui/dialogs/settings-dialog.slint:3575
 msgid "Sync contacts with your Google account."
-msgstr ""
+msgstr "Synkroniser kontakter med din Google-konto."
 
 #: ui/dialogs/settings-dialog.slint:3576 ui/dialogs/settings-dialog.slint:4804
 msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "Synkronisér kontakter med en standardkompatibel CardDAV-server."
 
 #: ui/dialogs/settings-dialog.slint:3580
-#, fuzzy
-#| msgid "Contacts"
 msgid "Google Contacts"
-msgstr "Kontakter"
+msgstr "Google Kontakter"
 
 #: ui/dialogs/settings-dialog.slint:3604 ui/dialogs/settings-dialog.slint:3642
-#, fuzzy
-#| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
-msgstr "Forbind Google Kalender"
+msgstr "Forbind Google Kontakter"
 
 #: ui/dialogs/settings-dialog.slint:3611 ui/dialogs/settings-dialog.slint:3648
 msgid "Disconnect"
@@ -10638,10 +10567,8 @@ msgid "Fix CardDAV"
 msgstr "Ret CardDAV"
 
 #: ui/dialogs/settings-dialog.slint:3628
-#, fuzzy
-#| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
-msgstr "Fejl i kalendersynkronisering: {}"
+msgstr "Fejl ved synkronisering af kontakter: {}"
 
 #: ui/dialogs/settings-dialog.slint:3679
 msgid "Uses the {} color in the mail list"
@@ -10660,18 +10587,15 @@ msgid "OAuth app credentials"
 msgstr "OAuth-appoplysninger"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "Nye kontakter gemmes på denne enhed."
+msgstr "Dine egne appnøgler er konfigureret på denne enhed."
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
 msgstr ""
-"Avanceret: brug din egen Gmail- eller Microsoft-skrivebordsapp-registrering."
+"Avanceret: brug din egen Gmail- eller Microsoft-appregistrering på denne "
+"enhed."
 
 #: ui/dialogs/settings-dialog.slint:3728
 msgid "Custom desktop app credentials are configured."
@@ -10933,10 +10857,8 @@ msgid "Open message"
 msgstr "Åbn besked"
 
 #: ui/dialogs/settings-dialog.slint:4046
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "Åbn i et nyt vindue"
+msgstr "Åbn e-mail i et nyt vindue"
 
 #: ui/dialogs/settings-dialog.slint:4047
 msgid "Select message"
@@ -11390,10 +11312,8 @@ msgid "Choose a profile for {}"
 msgstr "Vælg en profil til {}"
 
 #: ui/dialogs/settings-dialog.slint:5309
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "Mappe for handling {}"
+msgstr "Mapper i {}"
 
 #: ui/dialogs/settings-dialog.slint:5330
 msgid "Special folders of {}"
@@ -11581,10 +11501,8 @@ msgid "Keep syncing"
 msgstr "Fortsæt synkronisering"
 
 #: ui/dialogs/settings-dialog.slint:5563
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "Fjern billede"
+msgstr "Fjern enhed?"
 
 #: ui/dialogs/settings-dialog.slint:5567
 msgid ""
@@ -11592,16 +11510,23 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"Den kan stadig være logget ind på {}. Hvis den er væk eller ikke er din, "
+"skal du ændre disse adgangskoder og fjerne Flectar Mails adgang i hver "
+"kontos sikkerhedsindstillinger."
 
 #: ui/dialogs/settings-dialog.slint:5584
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
+"Outlook har brug for din appnøgle for at logge ind på denne enhed. Gem den "
+"for at logge ind."
 
 #: ui/dialogs/settings-dialog.slint:5585
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
+"Gmail har brug for dine appnøgler for at logge ind på denne enhed. Gem dem "
+"for at logge ind."
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11777,18 +11702,22 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"Vælg hvilke mapper der vises i sidebjælken og på listen Flyt til, og hvilke "
+"denne enhed synkroniserer. E-mails i en skjult mappe downloades stadig, og "
+"mapperne i den skjules også. En mappe, der ikke synkroniseres, tjekkes, når "
+"du åbner den."
 
 #: ui/folder-visibility.slint:145
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"Vælg hvilke mapper der vises i sidebjælken og på listen Flyt til. E-mails i "
+"en skjult mappe downloades stadig, og mapperne i den skjules også."
 
 #: ui/folder-visibility.slint:254
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "Viser {} af {} adresser. Skriv mere for at indsnævre dem."
+msgstr "Viser {} af {} mapper. Skriv mere for at indsnævre dem."
 
 #: ui/link-services.slint:101
 msgid "Large files"
@@ -12107,17 +12036,14 @@ msgid "Every connection goes straight to its server."
 msgstr "Hver forbindelse går direkte til sin server."
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"Hver forbindelse går via denne proxy. Hvis den ikke kan nås, forbinder "
-"Flectar Mail ikke uden den."
+"Hver forbindelse, Flectar Mail opretter, går gennem denne proxy. Hvis den "
+"ikke kan nås, forbinder Flectar Mail ikke uden den. Dit system kan stadig "
+"kontrollere certifikater direkte hos deres udstedere."
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -12180,30 +12106,29 @@ msgid "Change proxy"
 msgstr "Skift proxy"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "Flere kontakthandlinger"
+msgstr "Forbrugsbaserede forbindelser"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "Download"
+msgstr "Sæt downloads på pause"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"På en forbrugsbaseret forbindelse, f.eks. mobildata eller et hotspot, "
+"tjekker konti stadig for ny e-mail, og e-mails og vedhæftede filer "
+"downloades, når du åbner dem."
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "Denne forbindelse er forbrugsbaseret, så downloads venter."
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "Denne forbindelse er forbrugsbaseret."
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -13316,10 +13241,8 @@ msgid "Deselect {}"
 msgstr "Fjern markering af {}"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
-msgstr "Åbn i et nyt vindue"
+msgstr "Åbn i nyt vindue"
 
 #: ui/views/mail-list-pane.slint:1778 ui/views/mail-reading-pane.slint:514
 #: ui/views/mail-reading-pane.slint:573 ui/views/mail-reading-pane.slint:619
@@ -13387,10 +13310,8 @@ msgid "Copy name and email address"
 msgstr "Kopier navn og e-mailadresse"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "Flytte beskeder"
+msgstr "Luk e-mail"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."
@@ -13429,10 +13350,8 @@ msgstr "Vis beskedens kilde"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
-#, fuzzy
-#| msgid "Show the quoted message"
 msgid "Show formatted message"
-msgstr "Vis den citerede besked"
+msgstr "Vis formateret e-mail"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590

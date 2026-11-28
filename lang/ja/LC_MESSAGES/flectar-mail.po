@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-27 15:20+0000\n"
-"Last-Translator: miyaji255 <84168445+miyaji255@users.noreply.github.com>\n"
+"PO-Revision-Date: 2026-11-28 11:41+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
 "Language: ja\n"
@@ -2854,26 +2854,20 @@ msgid "Could not hide folder: {}"
 msgstr "フォルダーを非表示にできませんでした：{}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Labels"
 msgid "Label shown."
-msgstr "ラベル"
+msgstr "ラベルを表示しました。"
 
 #: ui/app.slint:853
 msgid "Label hidden. It's under More."
-msgstr ""
+msgstr "ラベルを非表示にしました。「その他」にあります。"
 
 #: ui/app.slint:854
-#, fuzzy
-#| msgid "Could not save label: {}"
 msgid "Could not show label: {}"
-msgstr "ラベルを保存できませんでした：{}"
+msgstr "ラベルを表示できませんでした: {}"
 
 #: ui/app.slint:855
-#, fuzzy
-#| msgid "Could not update label: {}"
 msgid "Could not hide label: {}"
-msgstr "ラベルを更新できませんでした：{}"
+msgstr "ラベルを非表示にできませんでした: {}"
 
 #: ui/app.slint:856
 msgid "Could not change the folder: {}"
@@ -3753,10 +3747,8 @@ msgid "Signatures"
 msgstr "署名"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Company"
 msgid "Composing"
-msgstr "会社"
+msgstr "作成"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
@@ -3827,21 +3819,16 @@ msgid "Provided by the server"
 msgstr "サーバーから提供"
 
 #: ui/components/account-mail-preferences.slint:330
-#, fuzzy
-#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
-msgstr "差出人情報・署名・OpenPGP・自動返信"
+msgstr "差出人 ID、署名、作成、OpenPGP、自動返信"
 
 #: ui/components/account-mail-preferences.slint:331
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, message "
-#| "protection and automatic replies."
 msgid ""
 "Choose an account to manage its sender identity, signature, how its messages "
 "are written, message protection and automatic replies."
 msgstr ""
-"差出人情報・署名・メール保護・自動返信を管理するアカウントを選択します。"
+"アカウントを選択して、差出人 ID、署名、メッセージの作成方法、メッセージ保護、"
+"自動返信を管理します。"
 
 #: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
@@ -4062,13 +4049,15 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:527
 msgid "Start replies below the quote"
-msgstr ""
+msgstr "引用の下に返信を書く"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid ""
 "The message you answer goes into your reply as text, to answer between its "
 "lines, and you write below it."
 msgstr ""
+"返信するメッセージがテキストとして返信に挿入され、行間に答えることができ、そ"
+"の下に書きます。"
 
 #: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
@@ -6516,16 +6505,12 @@ msgid "Rename label in {}"
 msgstr "{} のラベル名を変更"
 
 #: ui/components/sidebar-controls.slint:268
-#, fuzzy
-#| msgid "New label"
 msgid "Show label"
-msgstr "新しいラベル"
+msgstr "ラベルを表示"
 
 #: ui/components/sidebar-controls.slint:272
-#, fuzzy
-#| msgid "Add label"
 msgid "Hide label"
-msgstr "ラベルを付ける"
+msgstr "ラベルを非表示"
 
 #: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
@@ -6652,23 +6637,19 @@ msgstr "ラベル {}・アカウント {}"
 
 #: ui/components/sidebar.slint:867
 msgid "Less"
-msgstr ""
+msgstr "少なく表示"
 
 #: ui/components/sidebar.slint:867
 msgid "More"
-msgstr ""
+msgstr "さらに表示"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Search labels"
 msgid "Show fewer labels"
-msgstr "ラベルを検索"
+msgstr "表示するラベルを減らす"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show more labels"
-msgstr "フォルダーを表示"
+msgstr "表示するラベルを増やす"
 
 #: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
@@ -8969,12 +8950,9 @@ msgid "After 5 seconds"
 msgstr "5秒後"
 
 #: ui/dialogs/settings-dialog.slint:855
-#, fuzzy
-#| msgctxt "image size"
-#| msgid "Original size"
 msgctxt "message view"
 msgid "Original"
-msgstr "元のサイズ"
+msgstr "元の表示"
 
 #: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
 msgid "Reader mode"
@@ -9716,26 +9694,28 @@ msgstr ""
 "のままです。"
 
 #: ui/dialogs/settings-dialog.slint:1860
-#, fuzzy
-#| msgid "Show message source"
 msgid "Show messages as"
-msgstr "メールのソースを表示"
+msgstr "メッセージの表示形式"
 
 #: ui/dialogs/settings-dialog.slint:1861
 msgid ""
 "How messages show when you open them. Each one can switch to plain text or "
 "back in its menu."
 msgstr ""
+"メッセージを開いたときの表示方法です。各メッセージはそのメニューで"
+"プレーンテキストに切り替えたり戻したりできます。"
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Plain text in a fixed-width font"
-msgstr ""
+msgstr "等幅フォントのプレーンテキスト"
 
 #: ui/dialogs/settings-dialog.slint:1875
 msgid ""
 "Plain-text messages keep the columns their senders lined up. Each device "
 "keeps its own choice."
 msgstr ""
+"プレーンテキストのメッセージは、送信者が揃えた列をそのまま保持します。この選"
+"択はデバイスごとに保存されます。"
 
 #: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
@@ -13318,10 +13298,8 @@ msgstr "メールのソースを表示"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
-#, fuzzy
-#| msgid "Show the quoted message"
 msgid "Show formatted message"
-msgstr "引用メールを表示"
+msgstr "書式付きメッセージを表示"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590

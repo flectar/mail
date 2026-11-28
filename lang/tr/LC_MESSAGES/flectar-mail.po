@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-24 15:11+0000\n"
+"PO-Revision-Date: 2026-11-28 11:41+0000\n"
 "Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Turkish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/tr/>\n"
@@ -1202,10 +1202,8 @@ msgid "Text style preference saved."
 msgstr "Metin stili tercihi kaydedildi."
 
 #: ui/app.slint:412
-#, fuzzy
-#| msgid "Window frame preference saved."
 msgid "Writing window preference saved."
-msgstr "Pencere çerçevesi tercihi kaydedildi."
+msgstr "Yazma penceresi tercihi kaydedildi."
 
 #: ui/app.slint:413
 msgid "Could not save notifications: {}"
@@ -1224,10 +1222,8 @@ msgid "Could not save the text style preference: {}"
 msgstr "Metin stili tercihi kaydedilemedi: {}"
 
 #: ui/app.slint:417
-#, fuzzy
-#| msgid "Could not save the undo send preference: {}"
 msgid "Could not save the writing window preference: {}"
-msgstr "Göndermeyi geri alma tercihi kaydedilemedi: {}"
+msgstr "Yazma penceresi tercihi kaydedilemedi: {}"
 
 #: ui/app.slint:418
 msgid "Could not save the signature: {}"
@@ -1882,22 +1878,16 @@ msgid "Could not connect CardDAV: {}"
 msgstr "CardDAV bağlanamadı: {}"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Authorize calendar access in your browser."
 msgid "Authorize contacts access in your browser."
-msgstr "Takvim erişimini tarayıcınızda yetkilendirin."
+msgstr "Tarayıcınızda kişi erişimine izin verin."
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Calendar connected and initial sync started."
 msgid "Google Contacts connected and initial sync started."
-msgstr "Takvim bağlandı ve ilk eşitleme başladı."
+msgstr "Google Kişiler bağlandı ve ilk senkronizasyon başladı."
 
 #: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3627
-#, fuzzy
-#| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
-msgstr "Takvim bağlanamadı: {}"
+msgstr "Google Kişiler bağlanamadı: {}"
 
 #: ui/app.slint:587
 msgid "CardDAV sync enabled."
@@ -2187,10 +2177,8 @@ msgid "Could not show the message: {}"
 msgstr "İleti gösterilemedi: {}"
 
 #: ui/app.slint:678
-#, fuzzy
-#| msgid "Could not send the message: {}"
 msgid "Could not load the message: {}"
-msgstr "İleti gönderilemedi: {}"
+msgstr "İleti yüklenemedi: {}"
 
 #: ui/app.slint:679
 msgid "Could not save the translation setting: {}"
@@ -2615,6 +2603,8 @@ msgstr "Gönderim iptal edildi. İleti yeniden taslak."
 #: ui/app.slint:795
 msgid "Send cancelled here, but another of your devices may still send it."
 msgstr ""
+"Gönderim burada iptal edildi, ancak diğer cihazlarınızdan biri hâlâ "
+"gönderebilir."
 
 #: ui/app.slint:796
 msgid "This message is no longer scheduled."
@@ -2876,41 +2866,31 @@ msgstr "Klasör silinemedi: {}"
 
 #: ui/app.slint:850
 msgid "Folder hidden. Show it again in Settings → Accounts."
-msgstr ""
+msgstr "Klasör gizlendi. Ayarlar → Hesaplar bölümünde yeniden gösterin."
 
 #: ui/app.slint:851
-#, fuzzy
-#| msgid "Could not delete folder: {}"
 msgid "Could not hide folder: {}"
-msgstr "Klasör silinemedi: {}"
+msgstr "Klasör gizlenemedi: {}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Labels"
 msgid "Label shown."
-msgstr "Etiketler"
+msgstr "Etiket gösterildi."
 
 #: ui/app.slint:853
 msgid "Label hidden. It's under More."
-msgstr ""
+msgstr "Etiket gizlendi. Diğer altında."
 
 #: ui/app.slint:854
-#, fuzzy
-#| msgid "Could not save label: {}"
 msgid "Could not show label: {}"
-msgstr "Etiket kaydedilemedi: {}"
+msgstr "Etiket gösterilemedi: {}"
 
 #: ui/app.slint:855
-#, fuzzy
-#| msgid "Could not update label: {}"
 msgid "Could not hide label: {}"
-msgstr "Etiket güncellenemedi: {}"
+msgstr "Etiket gizlenemedi: {}"
 
 #: ui/app.slint:856
-#, fuzzy
-#| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
-msgstr "Klasör seçilemedi: {}"
+msgstr "Klasör değiştirilemedi: {}"
 
 #: ui/app.slint:857
 msgid "Could not close preview: {}"
@@ -2961,10 +2941,8 @@ msgid "Could not open composer: {}"
 msgstr "Oluşturucu açılamadı: {}"
 
 #: ui/app.slint:869
-#, fuzzy
-#| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
-msgstr "İleti kendi penceresinde açılamadı."
+msgstr "Konuşma penceresi açılamadı: {}"
 
 #: ui/app.slint:870
 msgid "Add an account to send mail."
@@ -3798,10 +3776,8 @@ msgid "Signatures"
 msgstr "İmzalar"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Company"
 msgid "Composing"
-msgstr "Şirket"
+msgstr "Yazma"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
@@ -3872,22 +3848,16 @@ msgid "Provided by the server"
 msgstr "Sunucu tarafından sağlanıyor"
 
 #: ui/components/account-mail-preferences.slint:330
-#, fuzzy
-#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
-msgstr "Gönderen kimlikleri, imzalar, OpenPGP ve otomatik yanıtlar"
+msgstr "Gönderen kimlikleri, imzalar, yazma, OpenPGP ve otomatik yanıtlar"
 
 #: ui/components/account-mail-preferences.slint:331
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, message "
-#| "protection and automatic replies."
 msgid ""
 "Choose an account to manage its sender identity, signature, how its messages "
 "are written, message protection and automatic replies."
 msgstr ""
-"Gönderen kimliğini, imzasını, ileti korumasını ve otomatik yanıtlarını "
-"yönetmek için bir hesap seç."
+"Gönderen kimliğini, imzayı, iletilerin nasıl yazıldığını, ileti korumasını "
+"ve otomatik yanıtları yönetmek için bir hesap seçin."
 
 #: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
@@ -4106,13 +4076,15 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:527
 msgid "Start replies below the quote"
-msgstr ""
+msgstr "Yanıtları alıntının altında başlat"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid ""
 "The message you answer goes into your reply as text, to answer between its "
 "lines, and you write below it."
 msgstr ""
+"Yanıtladığınız ileti, satır aralarında yanıt verebilmeniz için yanıtınıza "
+"metin olarak eklenir ve altına yazarsınız."
 
 #: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
@@ -4367,7 +4339,7 @@ msgstr "{} yeniden denetlenecek"
 
 #: ui/components/account-status.slint:111
 msgid "Sign in again on this device to keep getting mail."
-msgstr ""
+msgstr "Posta almaya devam etmek için bu cihazda yeniden oturum açın."
 
 #: ui/components/account-status.slint:121
 msgctxt "two parts of a status line"
@@ -5277,10 +5249,8 @@ msgid "Open in a new window"
 msgstr "Yeni pencerede aç"
 
 #: ui/components/composer-fields.slint:130
-#, fuzzy
-#| msgid "New signature"
 msgid "No signature"
-msgstr "Yeni imza"
+msgstr "İmza yok"
 
 #: ui/components/composer-fields.slint:173 ui/views/mail-reading-pane.slint:401
 msgid "From"
@@ -5288,23 +5258,19 @@ msgstr "Kimden"
 
 #: ui/components/composer-fields.slint:337
 msgid "OpenPGP: encrypted and digitally signed"
-msgstr ""
+msgstr "OpenPGP: şifrelenmiş ve dijital olarak imzalanmış"
 
 #: ui/components/composer-fields.slint:338
-#, fuzzy
-#| msgid "None (unencrypted)"
 msgid "OpenPGP: encrypted"
-msgstr "Yok (şifrelenmemiş)"
+msgstr "OpenPGP: şifrelenmiş"
 
 #: ui/components/composer-fields.slint:339
 msgid "OpenPGP: digitally signed, not encrypted"
-msgstr ""
+msgstr "OpenPGP: dijital olarak imzalanmış, şifrelenmemiş"
 
 #: ui/components/composer-fields.slint:482
-#, fuzzy
-#| msgid "Close other tabs"
 msgid "Choose another address…"
-msgstr "Diğer sekmeleri kapat"
+msgstr "Başka bir adres seç…"
 
 #: ui/components/composer-fields.slint:714 ui/views/mail-reading-pane.slint:407
 msgid "To"
@@ -6546,10 +6512,8 @@ msgid "Rename folder"
 msgstr "Klasörü yeniden adlandır"
 
 #: ui/components/sidebar-controls.slint:247
-#, fuzzy
-#| msgid "Hide folders"
 msgid "Hide folder"
-msgstr "Klasörleri gizle"
+msgstr "Klasörü gizle"
 
 #: ui/components/sidebar-controls.slint:251
 msgid "Delete folder"
@@ -6572,16 +6536,12 @@ msgid "Rename label in {}"
 msgstr "{} içindeki etiketi yeniden adlandır"
 
 #: ui/components/sidebar-controls.slint:268
-#, fuzzy
-#| msgid "New label"
 msgid "Show label"
-msgstr "Yeni etiket"
+msgstr "Etiketi göster"
 
 #: ui/components/sidebar-controls.slint:272
-#, fuzzy
-#| msgid "Add label"
 msgid "Hide label"
-msgstr "Etiket ekle"
+msgstr "Etiketi gizle"
 
 #: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
@@ -6708,23 +6668,19 @@ msgstr "{} etiket, {} hesap"
 
 #: ui/components/sidebar.slint:867
 msgid "Less"
-msgstr ""
+msgstr "Daha az"
 
 #: ui/components/sidebar.slint:867
 msgid "More"
-msgstr ""
+msgstr "Daha fazla"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Search labels"
 msgid "Show fewer labels"
-msgstr "Etiketlerde ara"
+msgstr "Daha az etiket göster"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show more labels"
-msgstr "Klasörleri göster"
+msgstr "Daha fazla etiket göster"
 
 #: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
@@ -7090,24 +7046,18 @@ msgid "Sync"
 msgstr "Eşitle"
 
 #: ui/device-sync.slint:647
-#, fuzzy
-#| msgid ""
-#| "Keep your accounts and their sign-ins, preferences, templates, snoozes "
-#| "and reply reminders the same on all your devices, and let any of them "
-#| "send your scheduled emails. Everything is end-to-end encrypted, so not "
-#| "even Flectar Mail can read it. Your mail, contacts and calendars keep "
-#| "syncing with your mail provider."
 msgid ""
 "Keep your accounts, preferences, templates, snoozes and reply reminders the "
 "same on all your devices, and let any of them send your scheduled emails. "
 "Everything is end-to-end encrypted, so not even Flectar Mail can read it. "
 "Your mail, contacts and calendars keep syncing with your mail provider."
 msgstr ""
-"Hesaplarını, oturumlarını, tercihlerini, şablonlarını, ertelemelerini ve "
-"yanıt hatırlatmalarını tüm cihazlarında aynı tut ve herhangi bir cihazın "
-"planlanmış e-postalarını gönderebilmesine izin ver. Her şey uçtan uca "
-"şifrelidir; Flectar Mail bile okuyamaz. E-postaların, kişilerin ve "
-"takvimlerin e-posta sağlayıcınla eşitlenmeye devam eder."
+"Hesaplarınızı, tercihlerinizi, şablonlarınızı, ertelemelerinizi ve yanıt "
+"hatırlatıcılarınızı tüm cihazlarınızda aynı tutun ve planlanmış e-"
+"postalarınızı herhangi birinin göndermesine izin verin. Her şey uçtan uca "
+"şifrelidir, bu nedenle Flectar Mail bile okuyamaz. E-postalarınız, "
+"kişileriniz ve takvimleriniz e-posta sağlayıcınızla senkronize olmaya devam "
+"eder."
 
 #: ui/device-sync.slint:655
 msgid ""
@@ -7181,17 +7131,14 @@ msgid "{}."
 msgstr "{}."
 
 #: ui/device-sync.slint:682
-#, fuzzy
-#| msgid ""
-#| "You get a recovery code to keep somewhere safe. Your passwords and sign-"
-#| "ins sync too, so your other devices are ready at once."
 msgid ""
 "You get a recovery code to keep somewhere safe. Passwords sync too, and "
 "Google and Microsoft sign-ins and app keys go to your devices of the same "
 "kind."
 msgstr ""
-"Güvenli bir yerde saklaman için bir kurtarma kodu alırsın. Parolaların ve "
-"oturumların da eşitlenir; böylece diğer cihazların hemen hazır olur."
+"Güvenli bir yerde saklamanız için bir kurtarma kodu alırsınız. Parolalar da "
+"senkronize edilir; Google ve Microsoft oturum açma bilgileri ile uygulama "
+"anahtarları aynı türdeki cihazlarınıza gider."
 
 #: ui/device-sync.slint:691
 msgid "Turn on sync"
@@ -7408,10 +7355,8 @@ msgid "Passwords and sign-ins"
 msgstr "Parolalar ve oturumlar"
 
 #: ui/device-sync.slint:916
-#, fuzzy
-#| msgid "Your code makes sync free on all your devices."
 msgid "End-to-end encrypted, for all your devices."
-msgstr "Kodun, eşitlemeyi tüm cihazlarında ücretsiz yapar."
+msgstr "Tüm cihazlarınız için uçtan uca şifrelenmiş."
 
 #: ui/device-sync.slint:918
 msgid ""
@@ -7419,29 +7364,27 @@ msgid ""
 "passwords and sign-ins here until you share them. Share them only if every "
 "device above is yours."
 msgstr ""
+"Bu cihazı bağlamadan önce cihazda olan hesaplar, siz paylaşana kadar "
+"parolalarını ve oturum açma bilgilerini burada tutar. Yalnızca yukarıdaki "
+"tüm cihazlar sizinse paylaşın."
 
 #: ui/device-sync.slint:919
-#, fuzzy
-#| msgid ""
-#| "End-to-end encrypted, for all your devices. Anyone with your recovery "
-#| "code can sign in to your accounts."
 msgid ""
 "Passwords go to all your devices. Google and Microsoft sign-ins and app keys "
 "go to your devices of the same kind. Anyone with your recovery code can sign "
 "in to your accounts."
 msgstr ""
-"Tüm cihazların için uçtan uca şifreli. Kurtarma koduna sahip herkes "
-"hesaplarına oturum açabilir."
+"Parolalar tüm cihazlarınıza gider. Google ve Microsoft oturum açma bilgileri "
+"ve uygulama anahtarları aynı türdeki cihazlarınıza gider. Kurtarma kodunuz "
+"olan herkes hesaplarınızda oturum açabilir."
 
 #: ui/device-sync.slint:932 ui/device-sync.slint:947
 msgid "Sync passwords and sign-ins"
 msgstr "Parolaları ve oturumları eşitle"
 
 #: ui/device-sync.slint:938
-#, fuzzy
-#| msgid "Shared lock"
 msgid "Share"
-msgstr "Paylaşılan kilit"
+msgstr "Paylaş"
 
 #: ui/device-sync.slint:955
 msgid "Turn off sync"
@@ -7468,12 +7411,14 @@ msgid ""
 "Turn on camera access for Flectar Mail in your phone's settings to scan a QR "
 "code."
 msgstr ""
+"QR kodu taramak için telefonunuzun ayarlarında Flectar Mail için kamera "
+"erişimini açın."
 
 #: ui/device-sync.slint:1126
-#, fuzzy
-#| msgid "The code expired. Start again to get a new one."
 msgid "The QR code scanner didn't start. Try again, or use a code instead."
-msgstr "Kodun süresi doldu. Yeni bir tane almak için baştan başla."
+msgstr ""
+"QR kod tarayıcı başlatılamadı. Tekrar deneyin veya bunun yerine bir kod "
+"kullanın."
 
 #: ui/device-sync.slint:1144
 msgid "Code redeemed"
@@ -8719,16 +8664,12 @@ msgid "Google client ID"
 msgstr "Google istemci kimliği"
 
 #: ui/dialogs/oauth-setup-dialog.slint:97
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google Android client ID"
-msgstr "Google istemci kimliği"
+msgstr "Google Android istemci kimliği"
 
 #: ui/dialogs/oauth-setup-dialog.slint:98
-#, fuzzy
-#| msgid "Google client ID"
 msgid "Google iOS client ID"
-msgstr "Google istemci kimliği"
+msgstr "Google iOS istemci kimliği"
 
 #: ui/dialogs/oauth-setup-dialog.slint:99
 msgid "Google desktop client ID"
@@ -8739,10 +8680,8 @@ msgid "Microsoft client ID"
 msgstr "Microsoft istemci kimliği"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
-#, fuzzy
-#| msgid "Microsoft client ID"
 msgid "Microsoft Entra client ID"
-msgstr "Microsoft istemci kimliği"
+msgstr "Microsoft Entra istemci kimliği"
 
 #: ui/dialogs/oauth-setup-dialog.slint:107
 msgid "Microsoft Entra desktop client ID"
@@ -8766,12 +8705,16 @@ msgid ""
 "Create an Android client in Google Cloud for the package {} with this app’s "
 "signing certificate, and enable the Gmail API."
 msgstr ""
+"Google Cloud'da bu uygulamanın imzalama sertifikasıyla {} paketi için bir "
+"Android istemcisi oluşturun ve Gmail API'yi etkinleştirin."
 
 #: ui/dialogs/oauth-setup-dialog.slint:124
 msgid ""
 "Create an iOS client in Google Cloud for the bundle ID {}, and enable the "
 "Gmail API."
 msgstr ""
+"Google Cloud'da {} paket kimliği için bir iOS istemcisi oluşturun ve Gmail "
+"API'yi etkinleştirin."
 
 #: ui/dialogs/oauth-setup-dialog.slint:125
 msgid ""
@@ -8787,12 +8730,16 @@ msgid ""
 "In Microsoft Entra, add an Android platform for the package {} with this "
 "app’s signature hash. No client secret is needed."
 msgstr ""
+"Microsoft Entra'da, bu uygulamanın imza karmasıyla {} paketi için bir "
+"Android platformu ekleyin. İstemci gizli anahtarı gerekmez."
 
 #: ui/dialogs/oauth-setup-dialog.slint:127
 msgid ""
 "In Microsoft Entra, add an iOS platform for the bundle ID {}. No client "
 "secret is needed."
 msgstr ""
+"Microsoft Entra'da {} paket kimliği için bir iOS platformu ekleyin. İstemci "
+"gizli anahtarı gerekmez."
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
 msgid ""
@@ -8819,14 +8766,10 @@ msgstr ""
 "bırakın. Anahtarlar Ayarlar ile paylaşılır."
 
 #: ui/dialogs/oauth-setup-dialog.slint:141
-#, fuzzy
-#| msgid ""
-#| "Flectar Mail Sync is free on all your devices for the time the code "
-#| "covers."
 msgid ""
 "With Flectar Mail Sync, your other devices of this kind get these keys too."
 msgstr ""
-"Flectar Mail Sync, kodun kapsadığı süre boyunca tüm cihazlarında ücretsiz."
+"Flectar Mail Sync ile aynı türdeki diğer cihazlarınız da bu anahtarları alır."
 
 #: ui/dialogs/oauth-setup-dialog.slint:155
 msgid "Save settings"
@@ -9051,12 +8994,9 @@ msgid "After 5 seconds"
 msgstr "5 saniye sonra"
 
 #: ui/dialogs/settings-dialog.slint:855
-#, fuzzy
-#| msgctxt "image size"
-#| msgid "Original size"
 msgctxt "message view"
 msgid "Original"
-msgstr "Orijinal boyut"
+msgstr "Orijinal"
 
 #: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
 msgid "Reader mode"
@@ -9770,16 +9710,16 @@ msgstr ""
 "listelemek, açmak ve üzerinde işlem yapmak için bunu kapat."
 
 #: ui/dialogs/settings-dialog.slint:1832
-#, fuzzy
-#| msgid "New messages"
 msgid "Keep messages open"
-msgstr "Yeni iletiler"
+msgstr "İletileri açık tut"
 
 #: ui/dialogs/settings-dialog.slint:1833
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
+"Bir görüşmede açtığınız iletiler, başka bir ileti açtığınızda açık kalır. "
+"Tek tek okumak için bunu kapatın."
 
 #: ui/dialogs/settings-dialog.slint:1846
 msgid "Mark messages as read"
@@ -9795,26 +9735,28 @@ msgstr ""
 "işaretlemek için onları sana bırakır."
 
 #: ui/dialogs/settings-dialog.slint:1860
-#, fuzzy
-#| msgid "Show message source"
 msgid "Show messages as"
-msgstr "İleti kaynağını göster"
+msgstr "İletileri şu şekilde göster"
 
 #: ui/dialogs/settings-dialog.slint:1861
 msgid ""
 "How messages show when you open them. Each one can switch to plain text or "
 "back in its menu."
 msgstr ""
+"İletilerin açıldığında nasıl görüneceği. Her biri kendi menüsünden düz metne "
+"geçip geri dönebilir."
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Plain text in a fixed-width font"
-msgstr ""
+msgstr "Sabit genişlikli yazı tipinde düz metin"
 
 #: ui/dialogs/settings-dialog.slint:1875
 msgid ""
 "Plain-text messages keep the columns their senders lined up. Each device "
 "keeps its own choice."
 msgstr ""
+"Düz metin iletileri, gönderenlerinin hizaladığı sütunları korur. Her cihaz "
+"kendi seçimini saklar."
 
 #: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
@@ -9845,22 +9787,16 @@ msgid "New messages, replies and forwards start at this size."
 msgstr "Yeni iletiler, yanıtlar ve iletilen iletiler bu boyutta başlar."
 
 #: ui/dialogs/settings-dialog.slint:1938
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Write in a new window"
-msgstr "Yeni pencerede aç"
+msgstr "Yeni pencerede yaz"
 
 #: ui/dialogs/settings-dialog.slint:1939
-#, fuzzy
-#| msgid ""
-#| "New messages, replies and forwards start in this font. Default names "
-#| "none, so each reader sees their own."
 msgid ""
 "New messages, replies, forwards and drafts open in a window of their own, so "
 "your mail stays in view."
 msgstr ""
-"Yeni iletiler, yanıtlar ve iletilen iletiler bu yazı tipiyle başlar. "
-"Varsayılan bir ad belirtmez; böylece her okuyucu kendi yazı tipini görür."
+"Yeni iletiler, yanıtlar, yönlendirmeler ve taslaklar kendi penceresinde "
+"açılır, böylece e-postanız görünür kalır."
 
 #: ui/dialogs/settings-dialog.slint:1979
 msgid "Sending"
@@ -10604,31 +10540,27 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar and sync"
-msgstr ""
+msgstr "Kenar çubuğunda hangi klasörler görünür ve senkronize edilir"
 
 #: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar"
-msgstr ""
+msgstr "Kenar çubuğunda hangi klasörler görünür"
 
 #: ui/dialogs/settings-dialog.slint:3575
 msgid "Sync contacts with your Google account."
-msgstr ""
+msgstr "Kişileri Google hesabınızla senkronize edin."
 
 #: ui/dialogs/settings-dialog.slint:3576 ui/dialogs/settings-dialog.slint:4804
 msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "Kişileri standartlara uygun bir CardDAV sunucusuyla eşitleyin."
 
 #: ui/dialogs/settings-dialog.slint:3580
-#, fuzzy
-#| msgid "Contacts"
 msgid "Google Contacts"
-msgstr "Kişiler"
+msgstr "Google Kişiler"
 
 #: ui/dialogs/settings-dialog.slint:3604 ui/dialogs/settings-dialog.slint:3642
-#, fuzzy
-#| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
-msgstr "Google Takvim'i bağla"
+msgstr "Google Kişileri bağla"
 
 #: ui/dialogs/settings-dialog.slint:3611 ui/dialogs/settings-dialog.slint:3648
 msgid "Disconnect"
@@ -10644,10 +10576,8 @@ msgid "Fix CardDAV"
 msgstr "CardDAV'ı onar"
 
 #: ui/dialogs/settings-dialog.slint:3628
-#, fuzzy
-#| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
-msgstr "Takvim eşitleme hatası: {}"
+msgstr "Kişi senkronizasyon hatası: {}"
 
 #: ui/dialogs/settings-dialog.slint:3679
 msgid "Uses the {} color in the mail list"
@@ -10666,18 +10596,14 @@ msgid "OAuth app credentials"
 msgstr "OAuth uygulama kimlik bilgileri"
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
-msgstr "Yeni kişiler bu cihaza kaydedilir."
+msgstr "Kendi uygulama anahtarlarınız bu cihazda ayarlandı."
 
 #: ui/dialogs/settings-dialog.slint:3728
-#, fuzzy
-#| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
 "Advanced: use your own Gmail or Microsoft app registration on this device."
 msgstr ""
-"Gelişmiş: kendi Gmail veya Microsoft masaüstü uygulaması kaydınızı kullanın."
+"Gelişmiş: bu cihazda kendi Gmail veya Microsoft uygulama kaydınızı kullanın."
 
 #: ui/dialogs/settings-dialog.slint:3728
 msgid "Custom desktop app credentials are configured."
@@ -10941,10 +10867,8 @@ msgid "Open message"
 msgstr "İletiyi aç"
 
 #: ui/dialogs/settings-dialog.slint:4046
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open message in a new window"
-msgstr "Yeni pencerede aç"
+msgstr "İletiyi yeni pencerede aç"
 
 #: ui/dialogs/settings-dialog.slint:4047
 msgid "Select message"
@@ -11400,10 +11324,8 @@ msgid "Choose a profile for {}"
 msgstr "{} için bir profil seçin"
 
 #: ui/dialogs/settings-dialog.slint:5309
-#, fuzzy
-#| msgid "Folder of action {}"
 msgid "Folders of {}"
-msgstr "{} eyleminin klasörü"
+msgstr "{} klasörleri"
 
 #: ui/dialogs/settings-dialog.slint:5330
 msgid "Special folders of {}"
@@ -11590,10 +11512,8 @@ msgid "Keep syncing"
 msgstr "Eşitlemeye devam et"
 
 #: ui/dialogs/settings-dialog.slint:5563
-#, fuzzy
-#| msgid "Remove image"
 msgid "Remove device?"
-msgstr "Görseli kaldır"
+msgstr "Cihaz kaldırılsın mı?"
 
 #: ui/dialogs/settings-dialog.slint:5567
 msgid ""
@@ -11601,16 +11521,23 @@ msgid ""
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
+"Hâlâ {} oturumu açık olabilir. Kayıpsa veya size ait değilse, bu parolaları "
+"değiştirin ve her hesabın güvenlik ayarlarından Flectar Mail erişimini "
+"kaldırın."
 
 #: ui/dialogs/settings-dialog.slint:5584
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
+"Outlook'un bu cihazda oturum açması için uygulama anahtarınız gerekir. "
+"Oturum açmak için kaydedin."
 
 #: ui/dialogs/settings-dialog.slint:5585
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
+"Gmail'in bu cihazda oturum açması için uygulama anahtarlarınız gerekir. "
+"Oturum açmak için kaydedin."
 
 #: ui/dialogs/unsubscribe-dialog.slint:17
 msgid "Could not unsubscribe"
@@ -11786,18 +11713,22 @@ msgid ""
 "folders in it are hidden too. A folder that doesn't sync is checked when you "
 "open it."
 msgstr ""
+"Kenar çubuğunda ve Taşı listesinde hangi klasörlerin görüneceğini ve bu "
+"cihazın hangilerini senkronize edeceğini seçin. Gizli bir klasörün postası "
+"yine indirilir ve içindeki klasörler de gizlenir. Senkronize edilmeyen bir "
+"klasör, açtığınızda denetlenir."
 
 #: ui/folder-visibility.slint:145
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
+"Kenar çubuğunda ve Taşı listesinde hangi klasörlerin görüneceğini seçin. "
+"Gizli bir klasörün postası yine indirilir ve içindeki klasörler de gizlenir."
 
 #: ui/folder-visibility.slint:254
-#, fuzzy
-#| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
-msgstr "{} adresin {} tanesi gösteriliyor. Daraltmak için daha fazla yazın."
+msgstr "{} klasörün {} tanesi gösteriliyor. Daraltmak için daha fazla yazın."
 
 #: ui/link-services.slint:101
 msgid "Large files"
@@ -12114,16 +12045,14 @@ msgid "Every connection goes straight to its server."
 msgstr "Her bağlantı doğrudan sunucusuna gider."
 
 #: ui/network.slint:282
-#, fuzzy
-#| msgid ""
-#| "Every connection goes through this proxy. If it can't be reached, Flectar "
-#| "Mail doesn't connect without it."
 msgid ""
 "Every connection Flectar Mail makes goes through this proxy. If it can't be "
 "reached, Flectar Mail doesn't connect without it. Your system may still "
 "check certificates with their issuers directly."
 msgstr ""
-"Her bağlantı bu proxy'den geçer. Ulaşılamazsa Flectar Mail onsuz bağlanmaz."
+"Flectar Mail'in tüm bağlantıları bu proxy üzerinden geçer. Proxy'ye "
+"ulaşılamazsa, Flectar Mail onsuz bağlanmaz. Sisteminiz sertifikaları yine de "
+"doğrudan veren kuruluşlarla doğrulayabilir."
 
 #: ui/network.slint:283
 msgid "System settings"
@@ -12186,30 +12115,28 @@ msgid "Change proxy"
 msgstr "Proxy'yi değiştir"
 
 #: ui/network.slint:472
-#, fuzzy
-#| msgid "More contact actions"
 msgid "Metered connections"
-msgstr "Diğer kişi işlemleri"
+msgstr "Kotalı bağlantılar"
 
 #: ui/network.slint:476
-#, fuzzy
-#| msgid "Download"
 msgid "Pause downloads"
-msgstr "İndir"
+msgstr "İndirmeleri duraklat"
 
 #: ui/network.slint:477
 msgid ""
 "On a metered connection, such as mobile data or a hotspot, accounts still "
 "check for new mail, and messages and attachments download when you open them."
 msgstr ""
+"Mobil veri veya hotspot gibi kotalı bir bağlantıda hesaplar yeni e-posta "
+"denetlemeye devam eder; iletiler ve ekler açtığınızda indirilir."
 
 #: ui/network.slint:488
 msgid "This connection is metered, so downloads wait."
-msgstr ""
+msgstr "Bu bağlantı kotalı, bu yüzden indirmeler bekliyor."
 
 #: ui/network.slint:489
 msgid "This connection is metered."
-msgstr ""
+msgstr "Bu bağlantı kotalı."
 
 #: ui/read-receipts.slint:47
 msgid "{} asked to be notified when you read this message."
@@ -13316,8 +13243,6 @@ msgid "Deselect {}"
 msgstr "Seçimini kaldır: {}"
 
 #: ui/views/mail-list-pane.slint:1747
-#, fuzzy
-#| msgid "Open in a new window"
 msgid "Open in new window"
 msgstr "Yeni pencerede aç"
 
@@ -13387,10 +13312,8 @@ msgid "Copy name and email address"
 msgstr "Adı ve e-posta adresini kopyala"
 
 #: ui/views/mail-reading-pane.slint:375
-#, fuzzy
-#| msgid "Move messages"
 msgid "Close message"
-msgstr "İletileri taşı"
+msgstr "İletiyi kapat"
 
 #: ui/views/mail-reading-pane.slint:484
 msgid "May have gone out. Check Sent first."
@@ -13429,10 +13352,8 @@ msgstr "İleti kaynağını göster"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
-#, fuzzy
-#| msgid "Show the quoted message"
 msgid "Show formatted message"
-msgstr "Alıntılanan iletiyi göster"
+msgstr "Biçimlendirilmiş iletiyi göster"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590

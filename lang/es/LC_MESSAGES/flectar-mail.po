@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-27 12:18+0000\n"
-"Last-Translator: Admin <admin@flectar.com>\n"
+"PO-Revision-Date: 2026-11-28 11:41+0000\n"
+"Last-Translator: MoeShinX <lajimao520@gmail.com>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
 "Language: es\n"
@@ -1905,22 +1905,16 @@ msgid "Could not connect CardDAV: {}"
 msgstr "No se pudo conectar CardDAV: {}"
 
 #: ui/app.slint:584
-#, fuzzy
-#| msgid "Authorize calendar access in your browser."
 msgid "Authorize contacts access in your browser."
-msgstr "Autoriza el acceso al calendario en el navegador."
+msgstr "Autoriza el acceso a los contactos en tu navegador."
 
 #: ui/app.slint:585
-#, fuzzy
-#| msgid "Calendar connected and initial sync started."
 msgid "Google Contacts connected and initial sync started."
-msgstr "Calendario conectado y sincronización inicial iniciada."
+msgstr "Google Contactos conectado y sincronización inicial iniciada."
 
 #: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3627
-#, fuzzy
-#| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
-msgstr "No se pudo conectar el calendario: {}"
+msgstr "No se pudo conectar Google Contactos: {}"
 
 #: ui/app.slint:587
 msgid "CardDAV sync enabled."
@@ -2923,26 +2917,20 @@ msgid "Could not hide folder: {}"
 msgstr "No se pudo ocultar la carpeta: {}"
 
 #: ui/app.slint:852
-#, fuzzy
-#| msgid "Labels"
 msgid "Label shown."
-msgstr "Etiquetas"
+msgstr "Etiqueta mostrada."
 
 #: ui/app.slint:853
 msgid "Label hidden. It's under More."
-msgstr ""
+msgstr "Etiqueta oculta. Está en Más."
 
 #: ui/app.slint:854
-#, fuzzy
-#| msgid "Could not save label: {}"
 msgid "Could not show label: {}"
-msgstr "No se pudo guardar la etiqueta: {}"
+msgstr "No se pudo mostrar la etiqueta: {}"
 
 #: ui/app.slint:855
-#, fuzzy
-#| msgid "Could not update label: {}"
 msgid "Could not hide label: {}"
-msgstr "No se pudo actualizar la etiqueta: {}"
+msgstr "No se pudo ocultar la etiqueta: {}"
 
 #: ui/app.slint:856
 msgid "Could not change the folder: {}"
@@ -3851,10 +3839,8 @@ msgid "Signatures"
 msgstr "Firmas"
 
 #: ui/components/account-mail-preferences.slint:290
-#, fuzzy
-#| msgid "Company"
 msgid "Composing"
-msgstr "Empresa"
+msgstr "Redacción"
 
 #: ui/components/account-mail-preferences.slint:291
 msgid "OpenPGP"
@@ -3927,22 +3913,19 @@ msgid "Provided by the server"
 msgstr "Proporcionada por el servidor"
 
 #: ui/components/account-mail-preferences.slint:330
-#, fuzzy
-#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
 msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
-msgstr "Identidades de remitente, firmas, OpenPGP y respuestas automáticas"
+msgstr ""
+"Identidades del remitente, firmas, redacción, OpenPGP y respuestas "
+"automáticas"
 
 #: ui/components/account-mail-preferences.slint:331
-#, fuzzy
-#| msgid ""
-#| "Choose an account to manage its sender identity, signature, message "
-#| "protection and automatic replies."
 msgid ""
 "Choose an account to manage its sender identity, signature, how its messages "
 "are written, message protection and automatic replies."
 msgstr ""
-"Elige una cuenta para gestionar su identidad de remitente, firma, protección "
-"de mensajes y respuestas automáticas."
+"Elige una cuenta para gestionar su identidad de remitente, firma, cómo se "
+"escriben sus mensajes, la protección de mensajes y las respuestas "
+"automáticas."
 
 #: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
@@ -4164,13 +4147,15 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:527
 msgid "Start replies below the quote"
-msgstr ""
+msgstr "Empezar las respuestas debajo de la cita"
 
 #: ui/components/account-mail-preferences.slint:527
 msgid ""
 "The message you answer goes into your reply as text, to answer between its "
 "lines, and you write below it."
 msgstr ""
+"El mensaje al que respondes se incluye como texto en tu respuesta, para "
+"responder entre líneas, y escribes debajo."
 
 #: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
@@ -6635,16 +6620,12 @@ msgid "Rename label in {}"
 msgstr "Renombrar etiqueta en {}"
 
 #: ui/components/sidebar-controls.slint:268
-#, fuzzy
-#| msgid "New label"
 msgid "Show label"
-msgstr "Nueva etiqueta"
+msgstr "Mostrar etiqueta"
 
 #: ui/components/sidebar-controls.slint:272
-#, fuzzy
-#| msgid "Add label"
 msgid "Hide label"
-msgstr "Añadir etiqueta"
+msgstr "Ocultar etiqueta"
 
 #: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
@@ -6771,23 +6752,19 @@ msgstr "Etiqueta {}, cuenta {}"
 
 #: ui/components/sidebar.slint:867
 msgid "Less"
-msgstr ""
+msgstr "Menos"
 
 #: ui/components/sidebar.slint:867
 msgid "More"
-msgstr ""
+msgstr "Más"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Search labels"
 msgid "Show fewer labels"
-msgstr "Buscar etiquetas"
+msgstr "Mostrar menos etiquetas"
 
 #: ui/components/sidebar.slint:868
-#, fuzzy
-#| msgid "Show folders"
 msgid "Show more labels"
-msgstr "Mostrar carpetas"
+msgstr "Mostrar más etiquetas"
 
 #: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
@@ -9123,12 +9100,9 @@ msgid "After 5 seconds"
 msgstr "Tras 5 segundos"
 
 #: ui/dialogs/settings-dialog.slint:855
-#, fuzzy
-#| msgctxt "image size"
-#| msgid "Original size"
 msgctxt "message view"
 msgid "Original"
-msgstr "Tamaño original"
+msgstr "Original"
 
 #: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
 msgid "Reader mode"
@@ -9883,26 +9857,28 @@ msgstr ""
 "los marques tú."
 
 #: ui/dialogs/settings-dialog.slint:1860
-#, fuzzy
-#| msgid "Show message source"
 msgid "Show messages as"
-msgstr "Mostrar el origen del mensaje"
+msgstr "Mostrar los mensajes como"
 
 #: ui/dialogs/settings-dialog.slint:1861
 msgid ""
 "How messages show when you open them. Each one can switch to plain text or "
 "back in its menu."
 msgstr ""
+"Cómo se muestran los mensajes al abrirlos. Cada uno puede cambiar a texto "
+"sin formato o volver en su menú."
 
 #: ui/dialogs/settings-dialog.slint:1874
 msgid "Plain text in a fixed-width font"
-msgstr ""
+msgstr "Texto sin formato en una fuente monoespaciada"
 
 #: ui/dialogs/settings-dialog.slint:1875
 msgid ""
 "Plain-text messages keep the columns their senders lined up. Each device "
 "keeps its own choice."
 msgstr ""
+"Los mensajes de texto sin formato conservan las columnas que alinearon sus "
+"remitentes. Cada dispositivo mantiene su propia elección."
 
 #: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
@@ -10703,7 +10679,7 @@ msgstr "Qué carpetas se muestran en la barra lateral"
 
 #: ui/dialogs/settings-dialog.slint:3575
 msgid "Sync contacts with your Google account."
-msgstr ""
+msgstr "Sincroniza los contactos con tu cuenta de Google."
 
 #: ui/dialogs/settings-dialog.slint:3576 ui/dialogs/settings-dialog.slint:4804
 msgid "Sync contacts with a standards-compliant CardDAV server."
@@ -10712,16 +10688,12 @@ msgstr ""
 "estándares."
 
 #: ui/dialogs/settings-dialog.slint:3580
-#, fuzzy
-#| msgid "Contacts"
 msgid "Google Contacts"
-msgstr "Contactos"
+msgstr "Google Contactos"
 
 #: ui/dialogs/settings-dialog.slint:3604 ui/dialogs/settings-dialog.slint:3642
-#, fuzzy
-#| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
-msgstr "Conectar Google Calendar"
+msgstr "Conectar Google Contactos"
 
 #: ui/dialogs/settings-dialog.slint:3611 ui/dialogs/settings-dialog.slint:3648
 msgid "Disconnect"
@@ -10737,10 +10709,8 @@ msgid "Fix CardDAV"
 msgstr "Corregir CardDAV"
 
 #: ui/dialogs/settings-dialog.slint:3628
-#, fuzzy
-#| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
-msgstr "Error de sincronización del calendario: {}"
+msgstr "Error de sincronización de contactos: {}"
 
 #: ui/dialogs/settings-dialog.slint:3679
 msgid "Uses the {} color in the mail list"
@@ -13535,10 +13505,8 @@ msgstr "Mostrar el origen del mensaje"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
-#, fuzzy
-#| msgid "Show the quoted message"
 msgid "Show formatted message"
-msgstr "Mostrar el mensaje citado"
+msgstr "Mostrar mensaje con formato"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
