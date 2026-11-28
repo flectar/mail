@@ -189,7 +189,9 @@ export component PopupMenu {
     private property <string> page-title;
     private property <int> page-opener: -1;
     private property <length> scroll-y: 0px;
-    private property <length> visible-height: 0px;
+    // The highlight moved by key, which scrolls it into view. The pointer
+    // never scrolls the menu.
+    private property <bool> keyboard-moved: false;
     private property <length> anchor-start: 0px;
     private property <length> anchor-end: 0px;
     // Where the menu's top goes when it opens below, and its bottom when it
@@ -232,6 +234,7 @@ export component PopupMenu {
         root.prefer-above = prefer-above;
         root.page = "";
         root.scroll-y = 0px;
+        root.keyboard-moved = keyboard;
         root.highlighted = keyboard ? root.first() : -1;
         popup.show();
     }
@@ -387,11 +390,14 @@ export component PopupMenu {
     }
 
     // Keeps the highlighted row in view as the arrow keys move it.
-    function reveal(top: length, height: length) {
+    function reveal(top: length, height: length, visible: length) {
+        if !root.keyboard-moved || visible <= 0px {
+            return;
+        }
         if top - 4px + root.scroll-y < 0px {
             root.scroll-y = 4px - top;
-        } else if top + height + 4px + root.scroll-y > root.visible-height {
-            root.scroll-y = root.visible-height - top - height - 4px;
+        } else if top + height + 4px + root.scroll-y > visible {
+            root.scroll-y = visible - top - height - 4px;
         }
     }
 
@@ -415,6 +421,7 @@ export component PopupMenu {
 
             keys := FocusScope {
                 capture-key-pressed(event) => {
+                    root.keyboard-moved = true;
                     if event.text == Key.DownArrow {
                         root.move-highlight(true);
                         return accept;
@@ -450,7 +457,7 @@ export component PopupMenu {
                     reject
                 }
 
-                ScrollView {
+                scroll := ScrollView {
                     x: 1px;
                     y: 1px;
                     width: parent.width - 2px;
@@ -460,7 +467,6 @@ export component PopupMenu {
                     content-y <=> root.scroll-y;
                     content-height: rows.preferred-height;
                     horizontal-scrollbar-policy: always-off;
-                    changed visible-height => { root.visible-height = self.visible-height; }
 
                     rows := VerticalLayout {
                         width: parent.width;
@@ -481,8 +487,9 @@ export component PopupMenu {
                             inset: root.inset;
                             highlighted: root.highlighted == i;
                             line-above: root.line-above(i);
-                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height); } }
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
                             hovered(on) => {
+                                root.keyboard-moved = false;
                                 if on { root.highlighted = i; } else if root.highlighted == i { root.highlighted = -1; }
                             }
                             chosen => { root.choose(i, false); }
@@ -494,8 +501,9 @@ export component PopupMenu {
                             inset: root.inset;
                             highlighted: root.highlighted == root.entries-end + i;
                             line-above: root.line-above(root.entries-end + i);
-                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height); } }
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
                             hovered(on) => {
+                                root.keyboard-moved = false;
                                 if on {
                                     root.highlighted = root.entries-end + i;
                                 } else if root.highlighted == root.entries-end + i {
@@ -511,8 +519,9 @@ export component PopupMenu {
                             inset: root.inset;
                             highlighted: root.highlighted == root.titles-start + i;
                             line-above: root.line-above(root.titles-start + i);
-                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height); } }
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
                             hovered(on) => {
+                                root.keyboard-moved = false;
                                 if on {
                                     root.highlighted = root.titles-start + i;
                                 } else if root.highlighted == root.titles-start + i {
@@ -528,8 +537,9 @@ export component PopupMenu {
                             inset: root.inset;
                             highlighted: root.highlighted == root.model-end + i;
                             line-above: root.line-above(root.model-end + i);
-                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height); } }
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
                             hovered(on) => {
+                                root.keyboard-moved = false;
                                 if on {
                                     root.highlighted = root.model-end + i;
                                 } else if root.highlighted == root.model-end + i {
