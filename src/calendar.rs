@@ -906,6 +906,13 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         .iter()
         .map(|account| (account.id, account))
         .collect();
+    // An account heads its calendars as it heads its folders and contacts in
+    // the other sidebars: the same initials and picture.
+    let connected_accounts = app.get_connected_accounts();
+    let account_rows: HashMap<i64, crate::AccountRow> = connected_accounts
+        .iter()
+        .map(|account| (i64::from(account.id), account))
+        .collect();
     let mut previous_source_account_id = None;
     let source_rows = state
         .sources
@@ -914,6 +921,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
             let group_start = previous_source_account_id != Some(source.account_id);
             previous_source_account_id = Some(source.account_id);
             let account = accounts.get(&source.account_id);
+            let account_row = account_rows.get(&source.account_id);
             CalendarSourceRow {
                 id: i32::try_from(source.id).unwrap_or(i32::MAX),
                 account_id: i32::try_from(source.account_id).unwrap_or(i32::MAX),
@@ -927,6 +935,13 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
                     .map(|account| account.email.as_str())
                     .unwrap_or_default()
                     .into(),
+                initials: account_row
+                    .map(|row| row.initials.clone())
+                    .unwrap_or_default(),
+                avatar: account_row
+                    .map(|row| row.avatar_small.clone())
+                    .unwrap_or_default(),
+                has_avatar: account_row.is_some_and(|row| row.has_avatar),
                 provider: source.provider.into(),
                 color: source.color.clone().into(),
                 color_index: calendar_color_index(&source.color, source.id),

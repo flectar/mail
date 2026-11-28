@@ -543,6 +543,7 @@ fn reset_profile(ui: &FilesUi) {
     ui.set_query("".into());
     ui.set_endpoint("".into());
     ui.set_quota("".into());
+    ui.set_quota_fraction(-1.0);
     ui.set_status("".into());
 }
 fn size(bytes: u64) -> String {
@@ -573,6 +574,8 @@ struct Snapshot {
     path: String,
     query: String,
     quota: String,
+    quota_used: Option<u64>,
+    quota_total: Option<u64>,
 }
 
 /// The local day of a file's date. Snapshots are built off the UI thread,
@@ -726,6 +729,8 @@ impl Snapshot {
             },
             query: dir.query.clone(),
             quota: dir.quota.clone(),
+            quota_used: dir.quota_used,
+            quota_total: dir.quota_total,
         }
     }
     fn apply(mut self, ui: &FilesUi) {
@@ -769,6 +774,16 @@ impl Snapshot {
         ui.set_path(self.path.into());
         ui.set_query(self.query.into());
         ui.set_quota(self.quota.into());
+        // The storage bar: how full it is, and both sizes in the language's
+        // own way of writing numbers.
+        match (self.quota_used, self.quota_total) {
+            (Some(used), Some(total)) if total > 0 => {
+                ui.set_quota_fraction((used as f64 / total as f64).min(1.0) as f32);
+                ui.set_quota_used(crate::number_format::bytes(used).into());
+                ui.set_quota_total(crate::number_format::bytes(total).into());
+            }
+            _ => ui.set_quota_fraction(-1.0),
+        }
     }
 }
 

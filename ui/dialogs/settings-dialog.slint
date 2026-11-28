@@ -34,6 +34,8 @@ import { AccountDiscovery, AccountDiscoveryNotice, DavLookup, DavLookupNotice } 
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, SettingsTextRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
+import { SidebarGroupLabel, SidebarSearch } from "../components/sidebar-controls.slint";
+import { SidebarStyle } from "../components/sidebar-row.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { ReaderWindows } from "../reader-ui.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
@@ -105,39 +107,6 @@ component SettingsPageTitle inherits Text {
     font-weight: 600;
     letter-spacing: -0.6px;
     vertical-alignment: center;
-}
-
-component SettingsSearch inherits Rectangle {
-    in-out property <string> query;
-    in property <color> muted-color;
-    in property <color> hover-background;
-    callback edited(string);
-
-    height: 32px;
-    LineEdit {
-        width: parent.width;
-        height: parent.height;
-        text <=> root.query;
-        placeholder-text: @tr("Search settings");
-        input-label: @tr("Search settings");
-        show-leading-icon: true;
-        leading-icon: @image-url("../icons/lucide/outline/search.svg");
-        leading-icon-color: root.muted-color;
-        trailing-content-width: root.query == "" ? 0px : 32px;
-        edited(value) => { root.edited(value); }
-    }
-    IconButton {
-        visible: root.query != "";
-        x: parent.width - 32px;
-        width: 32px;
-        height: 32px;
-        icon: @image-url("../icons/lucide/outline/x.svg");
-        icon-size: 14px;
-        icon-color: root.muted-color;
-        hover-background: root.hover-background;
-        tooltip-text: @tr("Clear settings search");
-        clicked => { root.query = ""; root.edited(""); }
-    }
 }
 
 component WorkspaceLayoutChoice inherits FocusVisibleScope {
@@ -1477,13 +1446,17 @@ export component SettingsDialog inherits Rectangle {
                     height: parent.height;
                     surface-color: root.sidebar-bg;
                     divider-color: root.border-subtle;
+                    // As every sidebar: the search on top, then the pages.
                     VerticalBox {
-                        padding-top: LayoutMetrics.compact-inset;
+                        padding-top: LayoutMetrics.sidebar-action-top;
                         padding-right: LayoutMetrics.sidebar-inset;
                         padding-left: LayoutMetrics.sidebar-inset;
-                        spacing: 5px;
-                        Text { height: max(22px, self.preferred-height); text: @tr("SETTINGS"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                        SettingsSearch { query <=> root.settings-search-query; muted-color: root.muted-text; hover-background: root.accent-soft; edited(value) => { root.update-settings-search(value); } }
+                        spacing: 8px;
+                        SidebarSearch { query <=> root.settings-search-query; placeholder: @tr("Search settings"); clear-tooltip: @tr("Clear settings search"); muted-color: root.muted-text; edited(value) => { root.update-settings-search(value); } }
+                        VerticalBox {
+                        padding: 0px;
+                        spacing: SidebarStyle.row-gap;
+                        SidebarGroupLabel { first: true; label: @tr("SETTINGS"); label-color: root.muted-text; }
 
                         if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                         if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
@@ -1500,6 +1473,7 @@ export component SettingsDialog inherits Rectangle {
                         if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; } }
                         if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; } }
                         if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; } }
+                        }
                         Rectangle { vertical-stretch: 1; }
                     }
                 }
@@ -4619,24 +4593,24 @@ export component SettingsDialog inherits Rectangle {
                     padding-right: 12px;
                     padding-bottom: 18px;
                     padding-left: 12px;
-                    spacing: 7px;
-                    Text { height: 34px; text: @tr("SETTINGS"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                    SettingsSearch { query <=> root.settings-search-query; muted-color: root.muted-text; hover-background: root.accent-soft; edited(value) => { root.update-settings-search(value); } }
+                    spacing: SidebarStyle.row-gap;
+                    SidebarSearch { query <=> root.settings-search-query; placeholder: @tr("Search settings"); clear-tooltip: @tr("Clear settings search"); muted-color: root.muted-text; edited(value) => { root.update-settings-search(value); } }
+                    SidebarGroupLabel { label: @tr("SETTINGS"); label-color: root.muted-text; }
                     if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
-                    if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Sync") : SettingsNavItem { text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Rules") : SettingsNavItem { text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Translation") : SettingsNavItem { text: @tr("Translation"); icon: @image-url("../icons/lucide/filled/languages.svg"); icon-color: root.settings-icon-color("Translation"); selected: root.settings_tab == "Translation"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Translation"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("AI") : SettingsNavItem { text: @tr("AI"); icon: @image-url("../icons/lucide/filled/sparkles.svg"); icon-color: root.settings-icon-color("AI"); selected: root.settings_tab == "AI"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "AI"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Network") : SettingsNavItem { text: @tr("Network"); icon: @image-url("../icons/lucide/filled/globe.svg"); icon-color: root.settings-icon-color("Network"); selected: root.settings_tab == "Network"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Network"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Agents") : SettingsNavItem { text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("Services") : SettingsNavItem { text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; root.compact-nav-open = false; } }
-                    if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("General") : SettingsNavItem { touch: true; text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Accounts") : SettingsNavItem { touch: true; text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Sync") : SettingsNavItem { touch: true; text: @tr("Sync"); icon: @image-url("../icons/lucide/filled/cloud-sync.svg"); icon-color: root.settings-icon-color("Sync"); selected: root.settings_tab == "Sync"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Sync"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Contacts") : SettingsNavItem { touch: true; text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Rules") : SettingsNavItem { touch: true; text: @tr("Rules"); icon: @image-url("../icons/lucide/filled/filter.svg"); icon-color: root.settings-icon-color("Rules"); selected: root.settings_tab == "Rules"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Rules"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Translation") : SettingsNavItem { touch: true; text: @tr("Translation"); icon: @image-url("../icons/lucide/filled/languages.svg"); icon-color: root.settings-icon-color("Translation"); selected: root.settings_tab == "Translation"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Translation"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("AI") : SettingsNavItem { touch: true; text: @tr("AI"); icon: @image-url("../icons/lucide/filled/sparkles.svg"); icon-color: root.settings-icon-color("AI"); selected: root.settings_tab == "AI"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "AI"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Notifications") : SettingsNavItem { touch: true; text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Shortcuts") : SettingsNavItem { touch: true; text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Data") : SettingsNavItem { touch: true; text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Network") : SettingsNavItem { touch: true; text: @tr("Network"); icon: @image-url("../icons/lucide/filled/globe.svg"); icon-color: root.settings-icon-color("Network"); selected: root.settings_tab == "Network"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Network"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Agents") : SettingsNavItem { touch: true; text: @tr("AI agents"); icon: @image-url("../icons/lucide/filled/bot.svg"); icon-color: root.settings-icon-color("Agents"); selected: root.settings_tab == "Agents"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Agents"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Services") : SettingsNavItem { touch: true; text: @tr("Services"); icon: @image-url("../icons/lucide/filled/cloud.svg"); icon-color: root.settings-icon-color("Services"); selected: root.settings_tab == "Services"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Services"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("About") : SettingsNavItem { touch: true; text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
                     Rectangle { vertical-stretch: 1; }
                 }
             }

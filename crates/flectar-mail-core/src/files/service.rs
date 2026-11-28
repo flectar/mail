@@ -48,7 +48,11 @@ pub struct FilesService {
     pub before: Option<i64>,
     pub query_state: Option<String>,
     pub can_create: bool,
+    /// A note about the storage, such as working offline.
     pub quota: String,
+    /// The storage's bytes in use and its size, when the server tells them.
+    pub quota_used: Option<u64>,
+    pub quota_total: Option<u64>,
     pub notification_ids: Vec<String>,
     pub notification_state: Option<String>,
 }
@@ -518,6 +522,8 @@ impl FilesService {
                     self.query.is_empty() && self.history.last().is_some_and(|n| n.my_rights.add());
                 self.quota =
                     "Offline · cached metadata; permissions are rechecked before changes.".into();
+                self.quota_used = None;
+                self.quota_total = None;
                 return Ok(());
             }
         }
@@ -648,27 +654,18 @@ impl FilesService {
                         .map_err(|e| e.to_string())?;
                     }
                     if !more {
-                        self.quota = client
-                            .quota()
-                            .await
-                            .ok()
-                            .and_then(|v| v["list"].as_array().cloned())
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .map(|q| {
-                                        format!(
-                                            "{}: {} / {} {}",
-                                            q["name"].as_str().unwrap_or("Storage"),
-                                            q["used"],
-                                            q["hardLimit"],
-                                            q["unit"].as_str().unwrap_or("")
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
+                        // A JMAP quota (RFC 9425) of bytes, as "octets".
+                        let quota = client.quota().await.ok().and_then(|v| {
+                            v["list"].as_array()?.iter().find_map(|q| {
+                                if q["resourceType"].as_str().is_some_and(|t| t != "octets") {
+                                    return None;
+                                }
+                                Some((q["used"].as_u64()?, q["hardLimit"].as_u64()?))
                             })
-                            .unwrap_or_default();
+                        });
+                        self.quota = String::new();
+                        self.quota_used = quota.map(|(used, _)| used);
+                        self.quota_total = quota.map(|(_, total)| total);
                     }
                 }
                 FileClient::Dav(client) => {
@@ -691,12 +688,15 @@ impl FilesService {
                     )
                     .await
                     .map_err(|e| e.to_string())?;
-                    self.quota = match (listing.quota_used, listing.quota_available) {
-                        (Some(used), Some(available)) => {
-                            format!("{} used · {} available", size(used), size(available))
-                        }
-                        _ => String::new(),
-                    };
+                    // WebDAV (RFC 4331) tells what's used and what's left.
+                    self.quota = String::new();
+                    (self.quota_used, self.quota_total) =
+                        match (listing.quota_used, listing.quota_available) {
+                            (Some(used), Some(available)) => {
+                                (Some(used), Some(used.saturating_add(available)))
+                            }
+                            _ => (None, None),
+                        };
                     self.browse.apply_local(&mut listing.nodes);
                     let tokens = self.query.to_lowercase();
                     // DAV has no standard full-text search implemented by

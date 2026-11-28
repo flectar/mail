@@ -1,28 +1,59 @@
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
 
-// Navigation labels share the body type scale so OS text preferences apply.
+// One set of measures for every sidebar: Mail, Calendar, Files, Contacts and
+// Settings (docs/design-system.md). Labels share the body type scale so OS
+// text preferences apply.
 export global SidebarStyle {
     out property <relative-font-size> label-size: TypeScale.body;
     out property <length> icon-size: LayoutMetrics.icon-size;
+    // The gutter before the icon holds a folder's disclosure arrow.
     out property <length> icon-left: 22px;
     out property <length> label-offset: 30px;
     out property <length> branch-indent: 16px;
     out property <int> normal-weight: 500;
     out property <int> selected-weight: 600;
+    out property <length> row-height: LayoutMetrics.small-control-height;
+    // The space between rows, and above a group's label.
+    out property <length> row-gap: 2px;
+    out property <length> group-gap: 12px;
+    out property <length> group-label-height: 28px;
+    // Under the label's line, before its first row.
+    out property <length> group-label-below: 4px;
+    // Settings' "Monochrome sidebar icons", for every sidebar (app.slint).
+    in-out property <bool> monochrome-icons: false;
+
+    // An icon's color: its own, or in monochrome the accent while its row is
+    // selected and muted otherwise.
+    public pure function icon-color(own: color, selected: bool) -> color {
+        return root.monochrome-icons ? (selected ? AppTheme.accent : AppTheme.muted) : own;
+    }
 }
 
-// Shared row surface for mail, contact scopes and calendar sources.
+// Shared row surface for every sidebar row: mail folders, contact scopes,
+// file sources, calendars and Settings pages. Hover is neutral and the
+// selected row takes the soft accent.
 export component SidebarRowSurface inherits Rectangle {
     in property <color> idle-background: transparent;
-    in property <color> hover-background;
+    in property <color> hover-background: AppTheme.muted-control-bg;
     in property <color> active-background: hover-background;
     in property <bool> hovered: false;
     in property <bool> active: false;
+    in property <length> face-border-width: 0px;
+    in property <color> face-border-color: transparent;
 
-    height: 32px;
-    border-radius: 6px;
-    background: root.active ? root.active-background
-        : root.hovered ? root.hover-background : root.idle-background;
-    animate background { duration: 120ms; }
+    height: SidebarStyle.row-height;
+
+    // The face draws the row and the root stays plain. An animated root
+    // makes Slint copy the whole row into each of its uses.
+    face := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: LayoutMetrics.corner-radius;
+        background: root.active ? root.active-background
+            : root.hovered ? root.hover-background : root.idle-background;
+        border-width: root.face-border-width;
+        border-color: root.face-border-color;
+        animate background { duration: 120ms; }
+    }
 }

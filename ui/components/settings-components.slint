@@ -4,12 +4,12 @@ import { Select } from "select.slint";
 import { LineEdit, Switch } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
-import { SidebarStyle } from "sidebar-row.slint";
+import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
 import { KbdShortcut, KeyboardKeys } from "kbd.slint";
 
-// Settings navigation is intentionally separate from MailSidebar: the latter
-// owns mailbox models, compose actions, and tree expansion state.
-export component SettingsNavItem inherits Rectangle {
+// A Settings page in the Settings sidebar: a sidebar row with SidebarItem's
+// measures, colors and states, without a mail folder's menu and drop target.
+export component SettingsNavItem inherits SidebarRowSurface {
     in property <string> text;
     in property <image> icon;
     in property <bool> selected: false;
@@ -18,14 +18,17 @@ export component SettingsNavItem inherits Rectangle {
     in property <color> body-text;
     in property <color> muted-text;
     in property <color> icon-color: root.selected ? root.accent : root.muted-text;
+    // A phone's drawer gets rows a finger can hit.
+    in property <bool> touch: false;
     callback clicked;
 
-    height: 36px;
-    border-radius: LayoutMetrics.corner-radius;
-    background: root.selected ? root.accent-soft : nav-hit.has-hover ? root.accent-soft : transparent;
+    height: root.touch ? LayoutMetrics.touch-target : SidebarStyle.row-height;
+    active-background: root.accent-soft;
+    hovered: nav-hit.has-hover;
+    active: root.selected;
 
     Image {
-        x: 10px;
+        x: SidebarStyle.icon-left;
         y: (parent.height - self.height) / 2;
         width: SidebarStyle.icon-size;
         height: SidebarStyle.icon-size;
@@ -35,8 +38,8 @@ export component SettingsNavItem inherits Rectangle {
         accessible-role: none;
     }
     Text {
-        x: 37px;
-        width: parent.width - 47px;
+        x: SidebarStyle.icon-left + SidebarStyle.label-offset;
+        width: max(0px, parent.width - self.x - 6px);
         height: parent.height;
         text: root.text;
         color: root.body-text;

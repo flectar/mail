@@ -184,6 +184,37 @@ pub(crate) fn count(value: u64) -> String {
     text
 }
 
+/// A size in bytes the way the UI language writes it: "2.4 GB" in English,
+/// "2,4 GB" in German, "2,4 Go" in French. Units step by 1024, and a size
+/// keeps one decimal below 100 of its unit unless it's whole.
+pub(crate) fn bytes(value: u64) -> String {
+    let language = LANGUAGE.with(Cell::get);
+    // CLDR's short digital units.
+    let units: [&str; 5] = match language {
+        "fr" => ["o", "ko", "Mo", "Go", "To"],
+        "ru" => ["Б", "кБ", "МБ", "ГБ", "ТБ"],
+        _ => ["B", "kB", "MB", "GB", "TB"],
+    };
+    let mut amount = value as f64;
+    let mut unit = 0;
+    while amount >= 1024.0 && unit < units.len() - 1 {
+        amount /= 1024.0;
+        unit += 1;
+    }
+    let tenths = (amount * 10.0).round() as u64;
+    let number = if unit == 0 || amount >= 100.0 || tenths.is_multiple_of(10) {
+        count(amount.round() as u64)
+    } else {
+        format!(
+            "{}{}{}",
+            count(tenths / 10),
+            money_format(language).decimal,
+            tenths % 10
+        )
+    };
+    format!("{number}\u{a0}{}", units[unit])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +269,21 @@ mod tests {
         // A language without a translation of its own writes as English.
         set_language("xx");
         assert_eq!(money(450, "eur"), "€4.50");
+    }
+
+    #[test]
+    fn sizes_are_written_the_way_the_language_writes_them() {
+        set_language("en");
+        assert_eq!(bytes(512), "512\u{a0}B");
+        assert_eq!(bytes(2_576_980_378), "2.4\u{a0}GB");
+        assert_eq!(bytes(10 * 1024 * 1024 * 1024), "10\u{a0}GB");
+        assert_eq!(bytes(150 * 1024 * 1024), "150\u{a0}MB");
+        set_language("de");
+        assert_eq!(bytes(2_576_980_378), "2,4\u{a0}GB");
+        set_language("fr");
+        assert_eq!(bytes(2_576_980_378), "2,4\u{a0}Go");
+        set_language("ru");
+        assert_eq!(bytes(1536), "1,5\u{a0}кБ");
+        set_language("en");
     }
 }

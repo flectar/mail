@@ -5,13 +5,13 @@ import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { FloatingActionButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
-import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { SidebarGroupLabel, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { SidebarStyle } from "../components/sidebar-row.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MailIconPalette, SettingsIconPalette } from "../design-system.slint";
 import { ContactImport } from "../contact-import.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 
@@ -28,6 +28,7 @@ component FieldLabel inherits Text {
 // Contacts deliberately follows the mail workspace's three-column rhythm:
 // scope navigation, searchable rows, and a focused detail/editor surface.
 export component ContactsView inherits Rectangle {
+    callback add-account;
     in property <bool> active: true;
     in property <bool> compact: false;
     in property <length> available-width: 0px;
@@ -191,47 +192,46 @@ export component ContactsView inherits Rectangle {
                     // Account and hint rows grow with the platform font.
                     account-name-line := Text { visible: false; text: "Ag"; font-size: SidebarStyle.label-size; font-weight: SidebarStyle.selected-weight; }
                     account-detail-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
-                    hint-measure := Text {
-                        visible: false;
-                        width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                        text: @tr("Suggested people stay local and separate until you save them as contacts.");
-                        font-size: TypeScale.caption;
-                        wrap: word-wrap;
-                    }
 
                     contact-nav-scroll := ListView {
                         // Keep a direct ListView repeater; Slint does not
                         // virtualize through a wrapper or inherited ListView.
+                        // It reaches into the sidebar's margin, where the scroll bar goes.
+                        x: 0px;
+                        width: parent.width + LayoutMetrics.sidebar-inset;
                         content-width: self.visible-width;
                         horizontal-scrollbar-policy: always-off;
 
                         content-y <=> root.sidebar-scroll-y;
                         for entry in root.sidebar-rows: Rectangle {
                             width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                            height: entry.kind == ContactSidebarRowKind.unified-heading ? 34px
-                                : entry.kind == ContactSidebarRowKind.accounts-heading ? 26px
-                                : entry.kind == ContactSidebarRowKind.account ? (entry.account.email == "" ? 35px
-                                    : 10px + max(20px, account-name-line.preferred-height) + max(15px, account-detail-line.preferred-height))
-                                : entry.kind == ContactSidebarRowKind.unified-section ? 40px
-                                : entry.kind == ContactSidebarRowKind.hint ? max(54px, hint-measure.preferred-height) + 8px : 39px;
+                            // The same rows, labels and gaps as Mail's sidebar.
+                            height: entry.kind == ContactSidebarRowKind.unified-heading ? SidebarStyle.group-label-height
+                                : entry.kind == ContactSidebarRowKind.accounts-heading ? SidebarStyle.group-gap + SidebarStyle.group-label-height
+                                : entry.kind == ContactSidebarRowKind.account && entry.account.email != ""
+                                    ? 7px + max(20px, account-name-line.preferred-height) + max(15px, account-detail-line.preferred-height) + SidebarStyle.row-gap
+                                : SidebarStyle.row-height + SidebarStyle.row-gap;
 
-                            if entry.kind == ContactSidebarRowKind.unified-heading || entry.kind == ContactSidebarRowKind.accounts-heading: WorkspaceMiniHeading {
-                                x: 0px;
-                                y: entry.kind == ContactSidebarRowKind.unified-heading ? 8px : 0px;
-                                width: parent.width;
-                                label: entry.kind == ContactSidebarRowKind.unified-heading ? @tr("UNIFIED") : @tr("ACCOUNTS");
-                                label-color: root.muted-text;
-                            }
-                            if entry.kind == ContactSidebarRowKind.unified-section || entry.kind == ContactSidebarRowKind.account: SidebarSectionHeader {
+                            if entry.kind == ContactSidebarRowKind.unified-heading || entry.kind == ContactSidebarRowKind.accounts-heading: SidebarGroupLabel {
                                 x: 0px;
                                 y: 0px;
                                 width: parent.width;
-                                label: entry.kind == ContactSidebarRowKind.account ? entry.account.name : @tr("Unified contacts");
+                                first: entry.kind == ContactSidebarRowKind.unified-heading;
+                                label: entry.kind == ContactSidebarRowKind.unified-heading ? @tr("ALL ACCOUNTS") : @tr("ACCOUNTS");
+                                has-action: entry.kind == ContactSidebarRowKind.accounts-heading;
+                                action-tooltip: @tr("Add account");
+                                action => { root.add-account(); }
+                            }
+                            if entry.kind == ContactSidebarRowKind.account: SidebarSectionHeader {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                label: entry.account.name;
                                 detail: entry.account.email;
                                 avatar: entry.account.initials;
                                 avatar-image: entry.account.avatar;
                                 has-avatar-image: entry.account.has-avatar;
-                                has-avatar: entry.kind == ContactSidebarRowKind.account;
+                                has-avatar: true;
                                 icon: @image-url("../icons/lucide/filled/people.svg");
                                 sidebar-background: root.sidebar-bg;
                                 body-color: root.body-text;
@@ -265,17 +265,12 @@ export component ContactsView inherits Rectangle {
                                 accent-color: root.accent;
                                 body-color: root.body-text;
                                 muted-color: root.muted-text;
+                                icon-color: SidebarStyle.icon-color(
+                                    entry.kind == ContactSidebarRowKind.favorites ? MailIconPalette.starred
+                                        : entry.kind == ContactSidebarRowKind.suggestions ? MailIconPalette.other
+                                        : SettingsIconPalette.accounts,
+                                    self.selected);
                                 clicked(scope) => { root.open-filter(scope); }
-                            }
-                            if entry.kind == ContactSidebarRowKind.hint: Text {
-                                x: 0px;
-                                y: 0px;
-                                width: parent.width;
-                                height: max(54px, self.preferred-height);
-                                text: @tr("Suggested people stay local and separate until you save them as contacts.");
-                                color: root.muted-text;
-                                font-size: TypeScale.caption;
-                                wrap: word-wrap;
                             }
                         }
                     }
@@ -364,6 +359,20 @@ export component ContactsView inherits Rectangle {
                                 }
                             }
                         }
+                    }
+                }
+
+                // What the Suggested list holds, over it.
+                if root.filter == "suggestions" : HorizontalLayout {
+                    padding-left: LayoutMetrics.list-row-inset + 14px;
+                    padding-right: LayoutMetrics.list-row-inset + 14px;
+                    padding-top: 2px;
+                    padding-bottom: 8px;
+                    Text {
+                        text: @tr("Suggested people stay local and separate until you save them as contacts.");
+                        color: root.secondary-text;
+                        font-size: TypeScale.caption;
+                        wrap: word-wrap;
                     }
                 }
 
