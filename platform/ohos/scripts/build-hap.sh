@@ -16,6 +16,16 @@
 #   SKIP_SIGN=1     Stop at the unsigned hap (build-only CI and pull-request
 #                   checks, which must never touch signing material).
 #
+# Scanner modes:
+#   SCAN_KIT=auto   HarmonyOS when HARMONY_CLT_ROOT has the hms SDK; otherwise
+#                   OpenHarmony. No scanner there, but codes and displayed QR
+#                   codes still pair devices.
+#   SCAN_KIT=harmony
+#                   HarmonyOS SDK + Scan Kit. Requires HARMONY_CLT_ROOT (the
+#                   DevEco/CLI tools tree with sdk/default/hms).
+#   SCAN_KIT=openharmony
+#                   OpenHarmony SDK; Scan Kit is not part of it.
+#
 # Both debug and release profiles are checked before the build: the profile
 # must name $BUNDLE, have the mode's type (debug/release), and not be expired.
 set -e
@@ -64,6 +74,45 @@ fi
 log "bundle: $BUNDLE"
 UNSIGNED="$BUILD_DIR/$LIB-unsigned.hap"
 SIGNED="$BUILD_DIR/$LIB-signed.hap"
+
+# SCAN_KIT selects both the ArkTS scanner module and the SDK/toolchain.
+SCAN_KIT="${SCAN_KIT:-auto}"
+case "$SCAN_KIT" in
+    auto)
+        if [ -n "${HARMONY_CLT_ROOT:-}" ] \
+            && [ -f "$HARMONY_SDK_ROOT/default/hms/ets/kits/@kit.ScanKit.d.ts" ]; then
+            SCAN_KIT=harmony
+        else
+            SCAN_KIT=openharmony
+        fi
+        ;;
+    harmony|on|scan-kit) SCAN_KIT=harmony ;;
+    openharmony|off|no-scan-kit) SCAN_KIT=openharmony ;;
+    *) die "SCAN_KIT must be auto, harmony or openharmony (got: $SCAN_KIT)" ;;
+esac
+if [ "$SCAN_KIT" = harmony ]; then
+    PRODUCT=default
+    FEATURE_ARGS=""
+    [ -n "${HARMONY_CLT_ROOT:-}" ] || die "HarmonyOS build needs HARMONY_CLT_ROOT"
+    [ -f "$HARMONY_SDK_ROOT/default/hms/ets/kits/@kit.ScanKit.d.ts" ] \
+        || die "HarmonyOS SDK with Scan Kit not found under $HARMONY_SDK_ROOT"
+    [ -x "$HARMONY_HVIGOR" ] || die "hvigor not found: $HARMONY_HVIGOR"
+    [ -x "$HARMONY_NODE_HOME/node" ] || die "node not found: $HARMONY_NODE_HOME/node"
+    SDK="$HARMONY_SDK_ROOT/default/openharmony"
+    HAP_SIGN_TOOL="${HARMONY_HAP_SIGN_TOOL:-$HAP_SIGN_TOOL}"
+else
+    PRODUCT=default
+    FEATURE_ARGS="--no-default-features"
+    SDK="$OHOS_SDK_ROOT"
+fi
+log "scan kit: $SCAN_KIT (product $PRODUCT)"
+# Keep the primary HarmonyOS hap at the established name (run-device.sh uses
+# it); the OpenHarmony fallback gets its own name so neither build overwrites
+# the other's artifact.
+if [ "$SCAN_KIT" = openharmony ]; then
+    UNSIGNED="$BUILD_DIR/$LIB-openharmony-unsigned.hap"
+    SIGNED="$BUILD_DIR/$LIB-openharmony-signed.hap"
+fi
 
 NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || NODE_BIN="$HOME/.harmonybrew/bin/node"
@@ -137,7 +186,12 @@ validate_profile() {
     esac
 }
 
-[ -f "$HVIGOR_JS" ] || die "hvigor not found: $HVIGOR_JS"
+if [ "$SCAN_KIT" = harmony ]; then
+    [ -x "$HARMONY_HVIGOR" ] || die "hvigor not found: $HARMONY_HVIGOR"
+    [ -x "$HARMONY_NODE_HOME/node" ] || die "node not found: $HARMONY_NODE_HOME/node"
+else
+    [ -f "$HVIGOR_JS" ] || die "hvigor not found: $HVIGOR_JS"
+fi
 [ -d "$JAVA_HOME" ] || die "JAVA_HOME not found: $JAVA_HOME"
 
 # Check signing material before the long Rust build, not after it.
@@ -171,20 +225,29 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # 0. hvigor prerequisites ----------------------------------------------------
-# hvigor resolves SDK components through a version-nested root referenced from
-# local.properties (`sdk.dir=<root>/<platform-version>/<component>`). Both are
-# generated here because they are machine-specific.
-SDK_ROOT="$BUILD_DIR/sdk"
-PLATFORM_VERSION="26.0.0"
-if [ ! -e "$SDK_ROOT/$PLATFORM_VERSION/ets" ]; then
-    rm -rf "$SDK_ROOT"
-    mkdir -p "$SDK_ROOT/$PLATFORM_VERSION"
-    for component in ets js native previewer toolchains; do
-        [ -e "$SDK/$component" ] && ln -s "$SDK/$component" "$SDK_ROOT/$PLATFORM_VERSION/$component"
-    done
+# The HarmonyOS SDK has its own layout (sdk/default/{openharmony,hms}) and the
+# DevEco/CLI hvigor resolves it directly. The OpenHarmony SDK is flat, so its
+# components are linked into the version-nested root hvigor expects.
+if [ "$SCAN_KIT" = harmony ]; then
+    [ -f "$HARMONY_SDK_ROOT/default/sdk-pkg.json" ] \
+        || die "HarmonyOS SDK not found under $HARMONY_SDK_ROOT/default"
+    printf 'sdk.dir=%s\nnodejs.dir=%s\n' "$HARMONY_SDK_ROOT" "$HARMONY_CLT_ROOT/node" \
+        > "$SHELL_DIR/local.properties"
+else
+    # hvigor resolves SDK components through a version-nested root referenced
+    # from local.properties (`sdk.dir=<root>/<platform-version>/<component>`).
+    SDK_ROOT="$BUILD_DIR/sdk"
+    PLATFORM_VERSION="26.0.0"
+    if [ ! -e "$SDK_ROOT/$PLATFORM_VERSION/ets" ]; then
+        rm -rf "$SDK_ROOT"
+        mkdir -p "$SDK_ROOT/$PLATFORM_VERSION"
+        for component in ets js native previewer toolchains; do
+            [ -e "$SDK/$component" ] && ln -s "$SDK/$component" "$SDK_ROOT/$PLATFORM_VERSION/$component"
+        done
+    fi
+    printf 'sdk.dir=%s\nnodejs.dir=%s\n' "$SDK_ROOT" "$(dirname "$(dirname "$NODE_BIN")")" \
+        > "$SHELL_DIR/local.properties"
 fi
-printf 'sdk.dir=%s\nnodejs.dir=%s\n' "$SDK_ROOT" "$(dirname "$(dirname "$NODE_BIN")")" \
-    > "$SHELL_DIR/local.properties"
 
 # 1. Rust cdylib -------------------------------------------------------------
 # PROFILE=debug builds faster for first bring-up; release is the default.
@@ -196,8 +259,8 @@ else
     CARGO_PROFILE_ARG="--release"
     SO_DIR="release"
 fi
-log "cargo build $PROFILE -p $CRATE"
-( cd "$PLATFORM_DIR" && CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-3}" cargo build $CARGO_PROFILE_ARG -p "$CRATE" )
+log "cargo build $PROFILE -p $CRATE $FEATURE_ARGS"
+( cd "$PLATFORM_DIR" && CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-3}" cargo build $CARGO_PROFILE_ARG -p "$CRATE" $FEATURE_ARGS )
 SO="$REPO_DIR/target/$SO_DIR/lib$LIB.so"
 [ -f "$SO" ] || die "cdylib not found: $SO"
 
@@ -209,11 +272,16 @@ SO="$REPO_DIR/target/$SO_DIR/lib$LIB.so"
 # from the shared hvigor install (this project is not nested under its
 # node_modules directory).
 # The XComponent page pins the `libraryname`; pick the template for this APP.
+# ScanQr is the only platform-specific scanner module: HarmonyOS uses Scan Kit,
+# OpenHarmony reports it unavailable.
 cp "$SHELL_DIR/page-templates/Index.$APP.ets" "$SHELL_DIR/entry/src/main/ets/pages/Index.ets"
+cp "$SHELL_DIR/page-templates/ScanQr.$SCAN_KIT.ets" "$SHELL_DIR/entry/src/main/ets/pages/ScanQr.ets"
 # Drop the previous ArkTS build outputs: hvigor's compiled modules.abc must be
 # produced by this run, or a failed compile would silently package the previous
 # APP's abc (its XComponent libraryname would load the wrong native module).
-rm -rf "$SHELL_DIR/entry/build"
+# The project .hvigor metadata is also flavour-specific: a HarmonyOS hvigor
+# run otherwise leaves a 7.26 plugin in it that rejects runtimeOS OpenHarmony.
+rm -rf "$SHELL_DIR/entry/build" "$SHELL_DIR/.hvigor"
 # Align AppScope/app.json5 with the selected bundle for this build: hvigor
 # generates the ArkTS BuildProfile from it, so a BUNDLE override must reach
 # this file as well as the final module.json.
@@ -221,26 +289,63 @@ APP_JSON5="$SHELL_DIR/AppScope/app.json5"
 APP_JSON5_BAK="$BUILD_DIR/app.json5.bak"
 cp "$APP_JSON5" "$APP_JSON5_BAK"
 restore_app_json5() { mv "$APP_JSON5_BAK" "$APP_JSON5" 2>/dev/null || true; }
-trap restore_app_json5 EXIT INT TERM
+# The HarmonyOS and OpenHarmony hvigor schemas each accept only their own
+# runtimeOS, so the two products live in separate profile files. The primary
+# build-profile.json5 is HarmonyOS; swap in the OpenHarmony one for that
+# flavour and restore both files on exit.
+PROFILE_JSON5="$SHELL_DIR/build-profile.json5"
+PROFILE_JSON5_BAK="$BUILD_DIR/build-profile.json5.bak"
+cp "$PROFILE_JSON5" "$PROFILE_JSON5_BAK"
+if [ "$SCAN_KIT" = openharmony ]; then
+    cp "$SHELL_DIR/build-profile.openharmony.json5" "$PROFILE_JSON5"
+fi
+restore_profiles() {
+    mv "$PROFILE_JSON5_BAK" "$PROFILE_JSON5" 2>/dev/null || true
+    restore_app_json5
+}
+trap restore_profiles EXIT INT TERM
 sed -i "s/bundleName: '[^']*'/bundleName: '$BUNDLE'/" "$APP_JSON5"
 sed -i "s/versionCode: [0-9]*/versionCode: $VERSION_CODE/" "$APP_JSON5"
 sed -i "s/versionName: '[^']*'/versionName: '$VERSION_NAME'/" "$APP_JSON5"
 log "hvigor assembleHap (compile step; PackageHap failure is tolerated)"
-( cd "$SHELL_DIR" && \
-  env -i PATH="$(dirname "$NODE_BIN"):$JAVA_HOME/bin:/usr/bin:/bin" HOME="$HOME" \
-      NODE_PATH="$HOME/arkts-build/node_modules" \
-      JAVA_HOME="$JAVA_HOME" \
-      OHOS_BASE_SDK_HOME="$SDK" DEVECO_SDK_HOME="$SDK" \
-      externalApiPaths="$SDK/ets/api:$SDK/ets/kits:$SDK/ets/arkts" \
-      "$NODE_BIN" "$HVIGOR_JS" \
-        assembleHap -m module -p module=entry@default -p product=default -p buildMode="$PROFILE" \
-        > "$HVIGOR_LOG" 2>&1 ) || true
+if [ "$SCAN_KIT" = harmony ]; then
+    ( cd "$SHELL_DIR" && \
+      env -i PATH="$HARMONY_NODE_HOME:$JAVA_HOME/bin:/usr/bin:/bin" HOME="$HOME" \
+          NODE_HOME="$HARMONY_NODE_HOME" \
+          JAVA_HOME="$JAVA_HOME" \
+          OHOS_BASE_SDK_HOME="$HARMONY_SDK_ROOT" DEVECO_SDK_HOME="$HARMONY_SDK_ROOT" \
+          externalApiPaths="$HARMONY_SDK_ROOT/default/hms/ets" \
+          "$HARMONY_HVIGOR" \
+            assembleHap -m module -p module=entry@default -p product="$PRODUCT" -p buildMode="$PROFILE" \
+            > "$HVIGOR_LOG" 2>&1 ) || true
+else
+    ( cd "$SHELL_DIR" && \
+      env -i PATH="$(dirname "$NODE_BIN"):$JAVA_HOME/bin:/usr/bin:/bin" HOME="$HOME" \
+          NODE_PATH="$HOME/arkts-build/node_modules" \
+          HVIGOR_USER_HOME="$BUILD_DIR/hvigor-openharmony" \
+          JAVA_HOME="$JAVA_HOME" \
+          OHOS_BASE_SDK_HOME="$SDK" DEVECO_SDK_HOME="$SDK" \
+          externalApiPaths="$SDK/ets/api:$SDK/ets/kits:$SDK/ets/arkts" \
+          "$NODE_BIN" "$HVIGOR_JS" \
+            assembleHap -m module -p module=entry@default -p product="$PRODUCT" -p buildMode="$PROFILE" \
+            > "$HVIGOR_LOG" 2>&1 ) || true
+fi
 
 ABC="$(find "$SHELL_DIR/entry/build" -name modules.abc -path '*loader_out*' 2>/dev/null | head -1)"
 [ -n "$ABC" ] || die "modules.abc not produced (see $HVIGOR_LOG)"
 if grep -q 'Failed :entry:default@CompileArkTS' "$HVIGOR_LOG"; then
     tail -20 "$HVIGOR_LOG" | sed 's/^/    /'
     die "ArkTS compilation failed (see $HVIGOR_LOG)"
+fi
+# The module table is the runtime contract: HarmonyOS must carry the HMS Scan
+# Kit records, OpenHarmony must not depend on them at startup.
+if [ "$SCAN_KIT" = harmony ]; then
+    strings "$ABC" | grep -q '@hms:core.scan' \
+        || die "HarmonyOS build does not contain Scan Kit in modules.abc"
+else
+    if strings "$ABC" | grep -q '@hms:core.scan'; then
+        die "OpenHarmony build contains HMS Scan Kit in modules.abc"
+    fi
 fi
 log "modules.abc: $ABC"
 
@@ -278,19 +383,21 @@ fi
 # because they need the compiler's resolved resource ids (id table output).
 
 
-# hvigor's own CompileResource feeds restool a config carrying the
-# `compression` option; that path emits a legacy "Restool" resources.index
-# which this device's resource manager cannot load — every $string/$media
-# reference (ability label, app icon, colors) silently resolves to nothing and
-# the launcher shows the bundle name with a blank icon. Re-compiling from the
-# same config without `compression` produces the "RestoolV2" index that
-# DevEco-built haps carry and the device loads.
-RES_CFG="$(find "$SHELL_DIR/entry/build" -name resConfig.json -path '*intermediates/res/*' 2>/dev/null | head -1)"
-[ -n "$RES_CFG" ] || die "hvigor resConfig.json not found under the build output"
-RES_OUT="$BUILD_DIR/res-out"
-rm -rf "$RES_OUT"
-mkdir -p "$RES_OUT"
-python3 - "$RES_CFG" "$RES_OUT" <<'PY'
+# HarmonyOS hvigor already emits the V2 resources.index DevEco haps carry, so
+# use it as is. OpenHarmony hvigor's CompileResource feeds restool a config
+# carrying `compression`, which emits a legacy index this device cannot load;
+# rebuild it from the same config without `compression`.
+if [ "$SCAN_KIT" = harmony ]; then
+    RES_OUT="$SHELL_DIR/entry/build/default/intermediates/res/default"
+    [ -f "$RES_OUT/resources.index" ] \
+        || die "hvigor resources.index not found: $RES_OUT/resources.index"
+else
+    RES_CFG="$(find "$SHELL_DIR/entry/build" -name resConfig.json -path '*intermediates/res/*' 2>/dev/null | head -1)"
+    [ -n "$RES_CFG" ] || die "hvigor resConfig.json not found under the build output"
+    RES_OUT="$BUILD_DIR/res-out"
+    rm -rf "$RES_OUT"
+    mkdir -p "$RES_OUT"
+    python3 - "$RES_CFG" "$RES_OUT" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
 out = sys.argv[2]
@@ -315,14 +422,15 @@ config["configPath"] = f"{out}/module.json"
 with open(f"{out}/resConfig.json", "w") as f:
     json.dump(config, f)
 PY
-log "compiling resources (restool, V2 index)"
-"$SDK/toolchains/restool" -l "$RES_OUT/resConfig.json" > "$BUILD_DIR/restool.log" 2>&1 || {
-    tail -5 "$BUILD_DIR/restool.log" | sed 's/^/    /'
-    die "restool failed (see $BUILD_DIR/restool.log)"
-}
-[ -f "$RES_OUT/resources.index" ] || die "restool produced no resources.index"
+    log "compiling resources (restool, V2 index)"
+    "$SDK/toolchains/restool" -l "$RES_OUT/resConfig.json" > "$BUILD_DIR/restool.log" 2>&1 || {
+        tail -5 "$BUILD_DIR/restool.log" | sed 's/^/    /'
+        die "restool failed (see $BUILD_DIR/restool.log)"
+    }
+    [ -f "$RES_OUT/resources.index" ] || die "restool produced no resources.index"
+fi
 head -c 10 "$RES_OUT/resources.index" | grep -q "RestoolV2" \
-    || die "restool produced a legacy resources.index (the device cannot load it)"
+    || die "resources.index is not RestoolV2 (the device cannot load it)"
 cp "$RES_OUT/resources.index" "$STAGE/resources.index"
 rm -rf "$STAGE/resources"
 cp -r "$RES_OUT/resources" "$STAGE/resources"

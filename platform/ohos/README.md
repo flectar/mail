@@ -36,9 +36,9 @@ must use the aliases.
 | `backend/` | `slint-ohos-backend`: Slint `Platform`/`WindowAdapter` for a single XComponent window. femtovg/wgpu renderer (EGL/GLES) with the software renderer as fallback, input translation, IME hooks, clipboard, system fonts. |
 | `mail/` | `flectar-mail-ohos` cdylib: NAPI module that builds the `PlatformContext` (app-private paths, `DocumentProvider` over the ArkTS pickers, Asset Store credential store, loopback OAuth broker), starts the application, and exposes the ArkTS bridge (file pickers, clipboard, IME text, external links). |
 | `demo/` | `slint-ohos-demo`: minimal cdylib used as a smoke target for backend changes. |
-| `shell/` | DevEco shell project (ArkTS). `page-templates/Index.mail.ets` is the real app page and `page-templates/Index.demo.ets` the demo page; `build-hap.sh` copies the selected template to `shell/entry/src/main/ets/pages/Index.ets`. |
+| `shell/` | DevEco shell project (ArkTS). `page-templates/Index.mail.ets` is the real app page and `page-templates/Index.demo.ets` the demo page; `page-templates/ScanQr.harmony.ets` and `ScanQr.openharmony.ets` are the scanner implementations. `build-hap.sh` copies the selected templates to `shell/entry/src/main/ets/pages/`. |
 | `scripts/env.sh` | Environment: SDK paths, `hdc`, `hap-sign-tool`, `LD_LIBRARY_PATH` for lld. Source it before any `cargo` command in this workspace. |
-| `scripts/build-hap.sh` | End-to-end build: Rust cdylib → ArkTS `modules.abc` → hap staging → re-packed resources → signing. `APP=mail` or `APP=demo`. |
+| `scripts/build-hap.sh` | End-to-end build: Rust cdylib → ArkTS `modules.abc` → hap staging → resources → signing. `APP=mail` or `APP=demo`; `SCAN_KIT=harmony`, `openharmony` or `auto`. |
 | `scripts/run-device.sh` | Installs the built hap, starts it and streams filtered logs (demo by default). |
 | `scripts/fetch-pdfium.sh` | Fetches the prebuilt `libpdfium.so` used by the PDF preview. |
 | `prebuilt/arm64/` | Prebuilt native libraries that ride inside the hap (signature covers `libs/**`). |
@@ -55,8 +55,30 @@ system fonts explicitly from `/system/fonts`.
 
 Paths come from `scripts/env.sh` unless a step says otherwise.
 
-- HarmonyOS SDK root (`OHOS_SDK_ROOT`, default `~/.harmonybrew/opt/ohos-sdk`)
-  plus its native subdirectory (`OHOS_SDK_NATIVE`).
+The port builds in two flavours:
+
+- **HarmonyOS** (primary): the DevEco Studio / Command Line Tools SDK with
+  `sdk/default/{openharmony,hms}`. Set `HARMONY_CLT_ROOT` to the tools tree;
+  `scripts/env.sh` auto-detects the installed HNP copy on this device. The
+  `hms` tree carries Scan Kit, so this flavour scans QR codes on phones and
+  tablets. Its minimum is HarmonyOS `6.1.0(23)`.
+- **OpenHarmony**: the flat SDK at `OHOS_SDK_ROOT` (default
+  `~/.harmonybrew/opt/ohos-sdk`) plus `OHOS_SDK_NATIVE`. Scan Kit is not part
+  of that SDK, so this flavour has no scanner; Sync still pairs through codes
+  and displayed QR codes. The profile keeps `compatibleSdkVersion: '18'` for
+  its build, but the port's packaging keeps the HarmonyOS manifest
+  coordinates the device loads, so the packaged hap still carries the
+  HarmonyOS minimum. There is no OpenHarmony phone target yet.
+
+`SCAN_KIT=auto` (the default) uses HarmonyOS when `HARMONY_CLT_ROOT` has the
+hms Scan Kit, otherwise OpenHarmony. Set `SCAN_KIT=harmony` or
+`SCAN_KIT=openharmony` to choose explicitly. Each hvigor schema accepts only
+its own `runtimeOS`, so the flavours live in `build-profile.json5`
+(HarmonyOS) and `build-profile.openharmony.json5`; the build swaps in the
+OpenHarmony profile for that flavour and restores it on exit. The build
+asserts the `modules.abc` module table contains `@hms:core.scan` only for
+HarmonyOS.
+
 - `hdc` and explicit debug signing material: the AGC debug profile,
   certificate and keystore through `DEBUG_PROFILE`, `DEBUG_CERT` and
   `DEBUG_P12` (plus `DEBUG_KEY_ALIAS`, and `DEBUG_KEY_PWD`/
@@ -65,20 +87,41 @@ Paths come from `scripts/env.sh` unless a step says otherwise.
 
   Neither password is stored in this repository. Debug signing is local-only:
   CI builds with `SKIP_SIGN=1` and never receives this material.
-- `node` with hvigor installed (`$HOME/arkts-build/node_modules/@ohos/hvigor`),
-  and OpenJDK 17 (`$HOME/.harmonybrew/opt/openjdk@17`).
+- HarmonyOS uses the CLT's own `node` and `hvigor` (`HARMONY_NODE_HOME`,
+  `HARMONY_HVIGOR`); OpenHarmony uses `$HOME/arkts-build/node_modules/@ohos/hvigor`.
+  Both use OpenJDK 17 (`$HOME/.harmonybrew/opt/openjdk@17`).
 - The Rust `aarch64-unknown-linux-ohos` target (built natively on the device).
+
+The x64 `command-line-tools` archive cannot run its native tools on an arm64
+device; use the DevEco Studio / HNP CLT installed for the device (the HNP
+`node`, `es2abc`, `restool` and `hap-sign-tool` are arm64).
 
 ## Build and install
 
 ```sh
 . platform/ohos/scripts/env.sh
-APP=mail PROFILE=release CARGO_BUILD_JOBS=4 sh platform/ohos/scripts/build-hap.sh
+
+# HarmonyOS: Scan Kit on phones and tablets.
+SCAN_KIT=harmony APP=mail PROFILE=release CARGO_BUILD_JOBS=4 \
+    sh platform/ohos/scripts/build-hap.sh
+
+# OpenHarmony: no scanner; pair with codes or displayed QR codes.
+SCAN_KIT=openharmony APP=mail PROFILE=release SKIP_SIGN=1 \
+    sh platform/ohos/scripts/build-hap.sh
 
 hdc file send platform/ohos/build/flectar_mail_ohos-signed.hap /data/local/tmp/flectar.hap
 hdc shell "bm install -r -d -p /data/local/tmp/flectar.hap"
 hdc shell "aa start -a EntryAbility -b com.flectar.mail"
 ```
+
+The HarmonyOS hap keeps the established `flectar_mail_ohos-signed.hap`
+name; the OpenHarmony fallback is `flectar_mail_ohos-openharmony-signed.hap`
+so the two builds cannot overwrite each other.
+
+`SCAN_KIT=auto` omits the choice: it uses HarmonyOS when the CLT has the hms
+Scan Kit, otherwise OpenHarmony. In each flavour the build verifies the ArkTS
+module table: HarmonyOS must contain `@hms:core.scan`, OpenHarmony must not,
+so an OpenHarmony hap cannot fail at startup on a missing HMS module.
 
 The bundle name defaults to `com.flectar.mail`. The hap version follows the
 workspace `Cargo.toml`: `versionName` is the crate version and `versionCode`

@@ -2,11 +2,14 @@
   app: {
     products: [
       {
+        // HarmonyOS is the primary target: Scan Kit needs the HarmonyOS SDK
+        // and the HMS kits under sdk/default/hms. OpenHarmony uses
+        // build-profile.openharmony.json5, which build-hap.sh swaps in.
         name: 'default',
         compileSdkVersion: '26.0.0',
-        compatibleSdkVersion: '18',
-        targetSdkVersion: '26.0.0',
-        runtimeOS: 'OpenHarmony',
+        compatibleSdkVersion: '6.1.0(23)',
+        targetSdkVersion: '6.1.0(23)',
+        runtimeOS: 'HarmonyOS',
         buildOption: {
           strictMode: {
             caseSensitiveCheck: true,
@@ -18,6 +21,10 @@
     buildModeSet: [{ name: 'debug' }, { name: 'release' }],
   },
   modules: [
-    { name: 'entry', srcPath: './entry', targets: [{ name: 'default', applyToProducts: ['default'] }] },
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [{ name: 'default', applyToProducts: ['default'] }],
+    },
   ],
 }

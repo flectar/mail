@@ -5,11 +5,11 @@ import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { i18n } from '@kit.LocalizationKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
+import { scanQr as scanWithKit } from './ScanQr';
 
 const LOG_TAG = 'FlectarOhos';
 const PRIVACY_STORE = 'flectar_ohos';
@@ -29,8 +29,6 @@ const SURFACE_ID = 'flectar_mail_surface';
 // below the reserve. The same limits apply on Android and iOS.
 const SINGLE_DOCUMENT_LIMIT = 512 * 1024 * 1024;
 const FREE_SPACE_RESERVE = 64 * 1024 * 1024;
-// Scan Kit rejects with this when the person closes the scanner.
-const SCAN_CANCELED = 1000500002;
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
 // request/response: the page reports the outcome through `submitBridgeResult`.
@@ -783,29 +781,13 @@ struct Index {
     }
   }
 
-  // Scan a QR code to pair devices in Flectar Mail Sync, on Scan Kit's own
-  // screen, which needs no camera permission. Closing it reports no code.
+  // Scan a QR code to pair devices in Flectar Mail Sync. ScanQr uses Scan
+  // Kit on HarmonyOS and reports the scanner unavailable on OpenHarmony.
   private async scanQr(requestId: number): Promise<void> {
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const result = await scanBarcode.startScanForResult(context, {
-        scanTypes: [scanCore.ScanType.QR_CODE],
-        enableMultiMode: false,
-        enableAlbum: true,
-      });
-      this.nativeModule?.pickerClosed?.(requestId);
-      this.reportBridgeResult(requestId, result.originalValue, '', '');
-    } catch (error) {
-      this.nativeModule?.pickerClosed?.(requestId);
-      const failure = error as BusinessError;
-      if (failure.code === SCAN_CANCELED) {
-        this.reportBridgeResult(requestId, '', '', '');
-        return;
-      }
-      hilog.error(0x0000, LOG_TAG, 'QR code scanner failed: %{public}d %{public}s',
-        failure.code, failure.message);
-      this.reportBridgeResult(requestId, '', '', failure.message ?? 'QR code scanner failed');
-    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const outcome = await scanWithKit(context);
+    this.nativeModule?.pickerClosed?.(requestId);
+    this.reportBridgeResult(requestId, outcome.code, '', outcome.error);
   }
 
   // Select several documents and stage each copy. The native side receives a

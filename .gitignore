@@ -6,6 +6,8 @@
 /.artifacts/
 /tmp/
 /.devcontainer/
+# hvigor outputs when a build runs from the repository root
+/.hvigor/
 *.AppImage
 /platform/android/gradle/.gradle/
 /platform/android/gradle/app/build/

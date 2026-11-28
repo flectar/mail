@@ -278,7 +278,7 @@ struct PageQrScanner;
 
 impl flectar_mail::QrScannerHost for PageQrScanner {
     fn available(&self) -> bool {
-        device::scans_qr()
+        cfg!(feature = "scan-kit") && device::scans_qr()
     }
 
     /// Scan Kit's scanner has words of its own.
