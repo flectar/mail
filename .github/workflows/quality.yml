@@ -173,6 +173,8 @@ jobs:
           python3 scripts/test-android-jni.py
           python3 scripts/test-android-oauth.py
           python3 scripts/test-android-signing.py
+          python3 scripts/test-store-listing.py
+          python3 scripts/check-store-listing.py
       - name: Validate Android workspace lockfile
         run: cargo metadata --manifest-path platform/android/Cargo.toml --locked --format-version 1 > /dev/null
       # The Flatpak builds offline from these sources, so a git dependency
