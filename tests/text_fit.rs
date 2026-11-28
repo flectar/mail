@@ -663,7 +663,6 @@ fn apply_fixture(app: &AppWindow) {
             ContactSidebarRowKind::AccountsHeading,
             ContactSidebarRowKind::Account,
             ContactSidebarRowKind::Contacts,
-            ContactSidebarRowKind::Hint,
         ]
         .into_iter()
         .enumerate()

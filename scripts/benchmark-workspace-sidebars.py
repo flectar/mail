@@ -40,7 +40,6 @@ def fixture(workspace, count):
                        email=f"account{i}@example.com", initials="AC", count="12")
         rows.extend([row("account", f"account:{i}", account),
                      row("contacts", f"contacts:account:{i}", account)])
-    rows.append(row("hint", "hint"))
     return rows
 
 

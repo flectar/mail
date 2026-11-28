@@ -192,13 +192,6 @@ export component ContactsView inherits Rectangle {
                     // Account and hint rows grow with the platform font.
                     account-name-line := Text { visible: false; text: "Ag"; font-size: SidebarStyle.label-size; font-weight: SidebarStyle.selected-weight; }
                     account-detail-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
-                    hint-measure := Text {
-                        visible: false;
-                        width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                        text: @tr("Suggested people stay local and separate until you save them as contacts.");
-                        font-size: TypeScale.caption;
-                        wrap: word-wrap;
-                    }
 
                     contact-nav-scroll := ListView {
                         // Keep a direct ListView repeater; Slint does not
@@ -217,7 +210,6 @@ export component ContactsView inherits Rectangle {
                                 : entry.kind == ContactSidebarRowKind.accounts-heading ? SidebarStyle.group-gap + SidebarStyle.group-label-height
                                 : entry.kind == ContactSidebarRowKind.account && entry.account.email != ""
                                     ? 7px + max(20px, account-name-line.preferred-height) + max(15px, account-detail-line.preferred-height) + SidebarStyle.row-gap
-                                : entry.kind == ContactSidebarRowKind.hint ? max(54px, hint-measure.preferred-height) + 8px
                                 : SidebarStyle.row-height + SidebarStyle.row-gap;
 
                             if entry.kind == ContactSidebarRowKind.unified-heading || entry.kind == ContactSidebarRowKind.accounts-heading: SidebarGroupLabel {
@@ -279,16 +271,6 @@ export component ContactsView inherits Rectangle {
                                         : SettingsIconPalette.accounts,
                                     self.selected);
                                 clicked(scope) => { root.open-filter(scope); }
-                            }
-                            if entry.kind == ContactSidebarRowKind.hint: Text {
-                                x: 0px;
-                                y: 0px;
-                                width: parent.width;
-                                height: max(54px, self.preferred-height);
-                                text: @tr("Suggested people stay local and separate until you save them as contacts.");
-                                color: root.muted-text;
-                                font-size: TypeScale.caption;
-                                wrap: word-wrap;
                             }
                         }
                     }
@@ -377,6 +359,20 @@ export component ContactsView inherits Rectangle {
                                 }
                             }
                         }
+                    }
+                }
+
+                // What the Suggested list holds, over it.
+                if root.filter == "suggestions" : HorizontalLayout {
+                    padding-left: LayoutMetrics.list-row-inset + 14px;
+                    padding-right: LayoutMetrics.list-row-inset + 14px;
+                    padding-top: 2px;
+                    padding-bottom: 8px;
+                    Text {
+                        text: @tr("Suggested people stay local and separate until you save them as contacts.");
+                        color: root.secondary-text;
+                        font-size: TypeScale.caption;
+                        wrap: word-wrap;
                     }
                 }
 

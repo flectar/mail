@@ -616,7 +616,6 @@ fn make_contact_sidebar_rows(
             });
         }
     }
-    rows.push(row(Kind::Hint, "hint"));
     rows
 }
 

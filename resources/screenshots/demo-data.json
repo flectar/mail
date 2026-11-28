@@ -503,20 +503,6 @@
         "selected": false
       },
       "open": true
-    },
-    {
-      "kind": "hint",
-      "key": "hint",
-      "account": {
-        "id": 0,
-        "name": "",
-        "email": "",
-        "initials": "",
-        "has_avatar": false,
-        "count": "",
-        "selected": false
-      },
-      "open": true
     }
   ],
   "contacts": [
