@@ -36,6 +36,9 @@ see the dark theme.
 | Shadow under an outlined control | 1 px down, 2 px blur, 6% black, light theme only | `AppTheme.control-shadow` |
 | Shadow under a raised control, such as the chosen tab | 1 px down, 3 px blur, 12% black, light theme only | `AppTheme.raised-shadow` |
 | Shadow under a primary or destructive button | its own color at 28%, light theme only | `AppTheme.primary-shadow`, `destructive-shadow` |
+| A menu, and a select's list | the surface, a step lighter in dark mode, with a shadow of 16 px blur, 6 px down, in both themes | `AppTheme.popover-bg`, `popover-shadow` |
+| A menu's highlighted row | `fill-hover` over the menu's own color | `AppTheme.popover-hover` |
+| Destructive text, such as a menu's Move to trash | `destructive`, lighter in dark mode for 4.5:1 | `AppTheme.destructive-text` |
 | Keyboard focus ring | the edge turns `accent`, with a 3 px halo of it outside | `FocusRing`, `LayoutMetrics.focus-ring-width`, `AppTheme.focus-ring`, `focus-halo` |
 | Labels of buttons and tabs | 14 px at the default text size, medium weight | `TypeScale.body`, weight 500 |
 | Values in fields and selects | 14 px, regular weight | `TypeScale.body` |
@@ -98,6 +101,32 @@ edge at rest, which becomes an outlined field while it has the focus, as the
 search fields of macOS, Android and GNOME do. The list's search is 36 px in its
 toolbar, with the filter button inside it; a sidebar's is 32 px.
 
+**Menu** (`PopupMenu` in `popup-menu.slint`) is the app's one menu, for a
+button's menu and a right-click menu alike. The app draws it, so it looks the
+same on every platform. It follows shadcn's DropdownMenu: 4 px inside a 1 px
+edge with the control corners, 32 px rows (44 px on a phone) with small
+corners, 14 px titles, checks and icons in a 16 px column before the titles,
+a line between groups, and destructive entries in red.
+
+- Its entries are data, `PopupMenuEntry`. An entry that only applies
+  sometimes is `hidden`, so one list covers every case. A line separates two
+  shown entries whose `group` differs. `model` and `model-titles` add entries
+  from a model after the fixed ones, and `trailing` comes after them.
+- A submenu is a page. An entry with a `submenu` opens the entries whose
+  `parent` names it, in place of the menu and under a Back row, as phone menus
+  show them.
+- Put the menu outside a layout. A button opens it with `open-below`, a button
+  at the bottom of the window, such as a phone's floating button, with
+  `open-above`, and a right click with `open-at`. It opens above its button
+  when there's no room below, from the height each window keeps in
+  `PopupMenuSpace`.
+- The keys follow the
+  [WAI-ARIA menu pattern](https://www.w3.org/WAI/ARIA/apg/patterns/menubar/).
+  The arrows move and wrap around, Home and End go to the ends, Return and
+  Space choose, Right opens a page and Left goes back, and Escape and Tab
+  close it. Opened from the keyboard, it highlights its first entry. A
+  disabled entry can be highlighted but not chosen.
+
 **Switch** turns a setting on or off at once. **Checkbox** (`CheckBox`, with its
 label) is for a form saved with a button, `SelectionCheckBox` chooses items in a
 list, and **radio buttons** choose one of a few options shown together.
@@ -159,6 +188,9 @@ measures in `SidebarStyle`. Every sidebar has the same background.
   for a control people see. They draw themselves in Slint's style, not the
   app's. Layouts such as `VerticalBox`, and `ScrollView` and `ListView`, are
   fine.
+- Don't use Slint's `ContextMenuArea` or `Menu`. Windows and macOS draw
+  them natively, so they don't look like the app, and they don't scroll. The
+  system tray's menu is the one the system draws.
 - Don't give a view its own colors, corners or control heights. Add a value to
   `ui/design-system.slint` when a control needs one.
 - Don't put a shadow, an opacity, `visible` or an animated color on the root

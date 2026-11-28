@@ -1,6 +1,7 @@
 import { Palette } from "std-widgets.slint";
 import { AppIcon } from "app-icon.slint";
 import { AppTheme } from "design-system.slint";
+import { PopupMenuSpace } from "components/popup-menu.slint";
 import { EmailReader, MailAttachments } from "models.slint";
 import { AccountMailPreferences, OpenPgpReader } from "components/account-mail-preferences.slint";
 import { BoundReadingPane, ReaderUi } from "reader-ui.slint";
@@ -57,7 +58,9 @@ export component ReaderWindow inherits Window {
     init => {
         root.apply-theme();
         pane.focus-content();
+        PopupMenuSpace.window-height = self.height;
     }
+    changed height => { PopupMenuSpace.window-height = self.height; }
     changed theme => { root.apply-theme(); }
 
     function apply-theme() {

@@ -463,11 +463,6 @@ export struct ComposeEditorTile {
 }
 
 // A language spelling can be checked in, as the editor menu lists it.
-export struct SpellingLanguage {
-    name: string,
-    checked: bool,
-}
-
 export struct EmailTemplateRow {
     id: int,
     name: string,
@@ -761,6 +756,8 @@ export struct MailAttachment {
 export global MailAttachments {
     callback deliver();
     in-out property <[MailAttachment]> rows;
+    // The rows' names, for the reader's attachments menu.
+    in-out property <[string]> names;
     in-out property <bool> open: false;
     in-out property <bool> busy: false;
     in-out property <string> name;

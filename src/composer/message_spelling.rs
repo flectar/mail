@@ -369,11 +369,13 @@ impl ComposeSession {
 
     fn list_spelling_languages(&self, ui: &ComposerUi<'_>, spelling: &Spelling) {
         let languages = spelling.languages();
-        let rows: Vec<SpellingLanguage> = languages
+        let rows: Vec<PopupMenuEntry> = languages
             .iter()
-            .map(|(language, checked)| SpellingLanguage {
-                name: language.name.as_str().into(),
+            .map(|(language, checked)| PopupMenuEntry {
+                title: language.name.as_str().into(),
+                checkable: true,
                 checked: *checked,
+                ..Default::default()
             })
             .collect();
         *self.spelling.menu_languages.borrow_mut() = languages

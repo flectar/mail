@@ -5,6 +5,7 @@ import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton, LineEdit, TextEdit } from "controls.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { PopupMenu } from "popup-menu.slint";
 
 export component EmailTemplates inherits Rectangle {
     in-out property <bool> open: false;
@@ -325,27 +326,29 @@ export component EmailTemplates inherits Rectangle {
                 HorizontalLayout {
                     height: 32px;
 
-                    placeholder-menu := ContextMenuArea {
+                    Rectangle {
                         width: placeholder-button.width;
 
                         placeholder-button := Button {
                             width: self.content-width;
                             text: @tr("Insert placeholder");
-                            clicked => { placeholder-menu.show({ x: 0px, y: self.height + 4px }); }
+                            clicked => { placeholder-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                         }
 
-                        Menu {
-                            MenuItem { title: @tr("Recipient's first name"); activated => { add-placeholder("{{recipient.first_name}}"); } }
-                            MenuItem { title: @tr("Recipient's last name"); activated => { add-placeholder("{{recipient.last_name}}"); } }
-                            MenuItem { title: @tr("Recipient's full name"); activated => { add-placeholder("{{recipient.name}}"); } }
-                            MenuItem { title: @tr("Recipient's email address"); activated => { add-placeholder("{{recipient.email}}"); } }
-                            MenuSeparator {}
-                            MenuItem { title: @tr("Your first name"); activated => { add-placeholder("{{sender.first_name}}"); } }
-                            MenuItem { title: @tr("Your last name"); activated => { add-placeholder("{{sender.last_name}}"); } }
-                            MenuItem { title: @tr("Your full name"); activated => { add-placeholder("{{sender.name}}"); } }
-                            MenuItem { title: @tr("Your email address"); activated => { add-placeholder("{{sender.email}}"); } }
-                            MenuSeparator {}
-                            MenuItem { title: @tr("Today's date"); activated => { add-placeholder("{{date}}"); } }
+                        placeholder-menu := PopupMenu {
+                            label: @tr("Insert placeholder");
+                            entries: [
+                                { id: "{{recipient.first_name}}", title: @tr("Recipient's first name") },
+                                { id: "{{recipient.last_name}}", title: @tr("Recipient's last name") },
+                                { id: "{{recipient.name}}", title: @tr("Recipient's full name") },
+                                { id: "{{recipient.email}}", title: @tr("Recipient's email address") },
+                                { id: "{{sender.first_name}}", title: @tr("Your first name"), group: 1 },
+                                { id: "{{sender.last_name}}", title: @tr("Your last name"), group: 1 },
+                                { id: "{{sender.name}}", title: @tr("Your full name"), group: 1 },
+                                { id: "{{sender.email}}", title: @tr("Your email address"), group: 1 },
+                                { id: "{{date}}", title: @tr("Today's date"), group: 2 },
+                            ];
+                            activated(id, index) => { add-placeholder(id); }
                         }
                     }
 

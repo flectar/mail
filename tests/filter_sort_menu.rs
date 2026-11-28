@@ -26,10 +26,9 @@ slint::slint! {
             y: 10px;
             width: 400px;
             filters: [
-                { title: "All mail", value: "All mail" },
-                { title: "Unread", value: "Unread" },
+                { id: "All mail", title: "All mail", checkable: true, checked: true },
+                { id: "Unread", title: "Unread", checkable: true },
             ];
-            selected-filter: "All mail";
             show-sort: true;
             sort-enabled: !root.searching;
             oldest-first: root.oldest;
@@ -85,15 +84,7 @@ fn find(window: &slint::Window, label: &str) -> Option<ItemRc> {
     find_all(window, label).into_iter().next()
 }
 
-/// The window's vertical span of `item`.
-fn span(item: &ItemRc) -> (f32, f32) {
-    let geometry = item.geometry();
-    let top = item.map_to_window(geometry.origin).y;
-    (top, top + geometry.size.height)
-}
-
-/// Click the middle of `item`. Menu items in Slint 1.19 take clicks; they
-/// have no default accessibility action.
+/// Click the middle of `item`, as the pointer does.
 fn click(window: &slint::Window, item: &ItemRc) {
     let geometry = item.geometry();
     let middle = item.map_to_window(geometry.origin) + geometry.size.to_vector() / 2.0;
@@ -115,21 +106,15 @@ fn open_menu(window: &slint::Window) {
     click(window, &button);
 }
 
-/// The items of the open menu that show a check mark, top to bottom.
+/// The items the menu shows checked, as screen readers hear them.
 fn checked(window: &slint::Window) -> Vec<&'static str> {
-    let marks = find_all(window, "✓")
-        .iter()
-        .map(|mark| {
-            let (top, bottom) = span(mark);
-            (top + bottom) / 2.0
-        })
-        .collect::<Vec<_>>();
     ["All mail", "Unread", "Newest first", "Oldest first"]
         .into_iter()
         .filter(|label| {
             let item = find(window, label).expect("the menu lists every item");
-            let (top, bottom) = span(&item);
-            marks.iter().any(|middle| (top..bottom).contains(middle))
+            item.accessible_string_property(AccessibleStringProperty::Checked)
+                .as_deref()
+                == Some("true")
         })
         .collect()
 }

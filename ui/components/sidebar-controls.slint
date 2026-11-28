@@ -8,6 +8,7 @@ import { IconButton, LineEdit } from "controls.slint";
 import { WorkspaceMiniHeading } from "workspace-layout.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { PopupMenu } from "popup-menu.slint";
 
 component SidebarIcon {
     in property <image> icon;
@@ -224,86 +225,84 @@ export component SidebarItem inherits SidebarRowSurface {
     }
 
     // Folder and label actions. Rows without any keep the area disabled.
-    row-menu := ContextMenuArea {
-        enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-hide || root.can-empty-trash || root.label-manageable || root.saved-search);
+    private property <bool> row-menu-enabled: root.interactive && (root.can-mark-all-read || root.folder-menu-enabled || root.can-hide || root.can-empty-trash || root.label-manageable || root.saved-search);
+
+    Rectangle {
         width: parent.width;
         height: parent.height;
-        Menu {
-            if root.can-mark-all-read: MenuItem {
-                title: @tr("Mark all as read…");
-                activated => { root.mark-all-read(root.scope, root.label); }
-            }
-            if root.can-mark-all-read && (root.folder-menu-enabled || root.can-hide || root.can-empty-trash || root.label-manageable): MenuSeparator {}
-            if root.folder-menu-enabled: MenuItem {
-                title: @tr("New subfolder");
-                enabled: root.can-create-child;
-                activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
-            }
-            if root.folder-menu-enabled: MenuItem {
-                title: @tr("Rename folder");
-                enabled: root.can-rename;
-                activated => { root.rename-folder(root.folder-id, root.label); }
-            }
-            if root.can-hide: MenuItem {
-                title: @tr("Hide folder");
-                activated => { root.hide-folder(root.folder-id); }
-            }
-            if root.folder-menu-enabled: MenuItem {
-                title: @tr("Delete folder");
-                enabled: root.can-delete;
-                activated => { root.delete-folder(root.folder-id, root.label); }
-            }
-            if root.can-empty-trash: MenuItem {
-                title: @tr("Empty Trash…");
-                activated => { root.empty-trash(root.account-id); }
-            }
-            if root.label-manageable && root.label-can-create-child: MenuItem {
-                title: @tr("New nested label");
-                activated => { root.new-child-label(root.account-id, root.label-id, root.label-path, root.label-account-name); }
-            }
-            if root.label-manageable: MenuItem {
-                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
-                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
-            }
-            if root.label-can-show: MenuItem {
-                title: @tr("Show label");
-                activated => { root.set-label-listed(root.label-id, true); }
-            }
-            if root.label-can-hide: MenuItem {
-                title: @tr("Hide label");
-                activated => { root.set-label-listed(root.label-id, false); }
-            }
-            if root.label-manageable: MenuItem {
-                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
-                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
-            }
-            if root.saved-search: MenuItem {
-                title: @tr("Edit saved search…");
-                activated => { SavedSearchUi.start-edit(root.label-id); }
-            }
-            if root.saved-search: MenuItem {
-                title: @tr("Move up");
-                activated => { SavedSearchUi.move(root.label-id, -1); }
-            }
-            if root.saved-search: MenuItem {
-                title: @tr("Move down");
-                activated => { SavedSearchUi.move(root.label-id, 1); }
-            }
-            if root.saved-search: MenuItem {
-                title: @tr("Delete saved search…");
-                activated => { SavedSearchUi.start-delete(root.label-id); }
+        row-menu := PopupMenu {
+            label: root.accessible-name;
+            entries: [
+                { id: "mark-all-read", title: @tr("Mark all as read…"), hidden: !root.can-mark-all-read },
+                { id: "new-subfolder", title: @tr("New subfolder"), group: 1, hidden: !root.folder-menu-enabled, disabled: !root.can-create-child },
+                { id: "rename-folder", title: @tr("Rename folder"), group: 1, hidden: !root.folder-menu-enabled, disabled: !root.can-rename },
+                { id: "hide-folder", title: @tr("Hide folder"), group: 1, hidden: !root.can-hide },
+                { id: "delete-folder", title: @tr("Delete folder"), group: 1, hidden: !root.folder-menu-enabled, disabled: !root.can-delete },
+                { id: "empty-trash", title: @tr("Empty Trash…"), group: 1, hidden: !root.can-empty-trash },
+                { id: "new-label", title: @tr("New nested label"), group: 1, hidden: !(root.label-manageable && root.label-can-create-child) },
+                {
+                    id: "rename-label",
+                    title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name),
+                    group: 1,
+                    hidden: !root.label-manageable,
+                },
+                { id: "show-label", title: @tr("Show label"), group: 1, hidden: !root.label-can-show },
+                { id: "hide-label", title: @tr("Hide label"), group: 1, hidden: !root.label-can-hide },
+                {
+                    id: "delete-label",
+                    title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name),
+                    group: 1,
+                    hidden: !root.label-manageable,
+                },
+                { id: "edit-search", title: @tr("Edit saved search…"), group: 1, hidden: !root.saved-search },
+                { id: "search-up", title: @tr("Move up"), group: 1, hidden: !root.saved-search },
+                { id: "search-down", title: @tr("Move down"), group: 1, hidden: !root.saved-search },
+                { id: "delete-search", title: @tr("Delete saved search…"), group: 1, hidden: !root.saved-search },
+            ];
+            activated(id, index) => {
+                if id == "mark-all-read" {
+                    root.mark-all-read(root.scope, root.label);
+                } else if id == "new-subfolder" {
+                    root.new-subfolder(root.account-id, root.folder-id, root.label);
+                } else if id == "rename-folder" {
+                    root.rename-folder(root.folder-id, root.label);
+                } else if id == "hide-folder" {
+                    root.hide-folder(root.folder-id);
+                } else if id == "delete-folder" {
+                    root.delete-folder(root.folder-id, root.label);
+                } else if id == "empty-trash" {
+                    root.empty-trash(root.account-id);
+                } else if id == "new-label" {
+                    root.new-child-label(root.account-id, root.label-id, root.label-path, root.label-account-name);
+                } else if id == "rename-label" {
+                    root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global);
+                } else if id == "show-label" {
+                    root.set-label-listed(root.label-id, true);
+                } else if id == "hide-label" {
+                    root.set-label-listed(root.label-id, false);
+                } else if id == "delete-label" {
+                    root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children);
+                } else if id == "edit-search" {
+                    SavedSearchUi.start-edit(root.label-id);
+                } else if id == "search-up" {
+                    SavedSearchUi.move(root.label-id, -1);
+                } else if id == "search-down" {
+                    SavedSearchUi.move(root.label-id, 1);
+                } else if id == "delete-search" {
+                    SavedSearchUi.start-delete(root.label-id);
+                }
             }
         }
 
         row-hit := SidebarRowHit {
             enabled: root.interactive;
-            menu-enabled: row-menu.enabled;
+            menu-enabled: root.row-menu-enabled;
             accessible-role: button;
             accessible-label: root.accessible-name;
             accessible-checked: root.selected;
             accessible-action-default => { root.clicked(root.scope); }
             activated => { root.clicked(root.scope); }
-            open-menu(position) => { row-menu.show(position); }
+            open-menu(position) => { row-menu.open-at(self.absolute-position.x + position.x, self.absolute-position.y + position.y, false); }
             mouse-cursor: pointer;
         }
     }
@@ -476,46 +475,43 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         muted-color: root.muted-color;
     }
 
-    heading-menu := ContextMenuArea {
-        enabled: root.interactive && root.account-menu;
+    private property <bool> heading-menu-enabled: root.interactive && root.account-menu;
+
+    Rectangle {
         width: parent.width;
         height: parent.height;
-        Menu {
-            // How the account's checks are going, then when it checks again
-            // while it waits for the server, or its last complete check when
-            // another problem stops them.
-            if root.status-line != "" : MenuItem {
-                title: root.status-line;
-                enabled: false;
-            }
-
-            if root.waiting && !root.status.checking && root.status.resume_at != "" : MenuItem {
-                title: AccountStatusText.checks-again(root.status.resume_day, root.status.resume_at);
-                enabled: false;
-            }
-
-            if root.problem-title != "" && !root.waiting && !root.status.checking && root.last-checked != "" : MenuItem {
-                title: root.last-checked;
-                enabled: false;
-            }
-
-            if root.status-line != "" : MenuSeparator {}
-
-            MenuItem {
-                title: @tr("Check for new mail");
-                enabled: root.can-check-mail;
-                activated => { root.check-mail(); }
-            }
-
-            MenuItem {
-                title: @tr("Account settings");
-                activated => { root.account-settings(); }
+        heading-menu := PopupMenu {
+            label: root.label;
+            // How the account's checks are going, then when it checks again while it
+            // waits for the server, or its last complete check when another problem
+            // stops them.
+            entries: [
+                { title: root.status-line, hidden: root.status-line == "", disabled: true },
+                {
+                    title: AccountStatusText.checks-again(root.status.resume_day, root.status.resume_at),
+                    hidden: !(root.waiting && !root.status.checking && root.status.resume_at != ""),
+                    disabled: true,
+                },
+                {
+                    title: root.last-checked,
+                    hidden: !(root.problem-title != "" && !root.waiting && !root.status.checking && root.last-checked != ""),
+                    disabled: true,
+                },
+                { id: "check-mail", title: @tr("Check for new mail"), group: 1, disabled: !root.can-check-mail },
+                { id: "account-settings", title: @tr("Account settings"), group: 1 },
+            ];
+            activated(id, index) => {
+                if id == "check-mail" {
+                    root.check-mail();
+                } else if id == "account-settings" {
+                    root.account-settings();
+                }
             }
         }
 
         header-hit := SidebarRowHit {
             enabled: root.interactive;
-            menu-enabled: heading-menu.enabled;
+            menu-enabled: root.heading-menu-enabled;
             accessible-role: button;
             accessible-label: root.label;
             accessible-description: root.status-line;
@@ -526,7 +522,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
             activated => {
                 root.toggled(!root.open);
             }
-            open-menu(position) => { heading-menu.show(position); }
+            open-menu(position) => { heading-menu.open-at(self.absolute-position.x + position.x, self.absolute-position.y + position.y, false); }
             mouse-cursor: pointer;
         }
     }

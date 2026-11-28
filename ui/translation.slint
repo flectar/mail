@@ -5,6 +5,7 @@ import { SettingsSelectRow, SettingsSwitchRow } from "components/settings-compon
 import { LayoutMetrics } from "design-system.slint";
 import { TypeScale } from "typography.slint";
 import { Ai } from "ai.slint";
+import { PopupMenu } from "components/popup-menu.slint";
 
 // A language on the Always or Never list, or one to translate into.
 export struct TranslationLanguage {
@@ -167,7 +168,7 @@ export component TranslationBar {
         }
     }
 
-    more := ContextMenuArea {
+    Rectangle {
         visible: root.has-menu;
         x: action.x + action.width + 8px;
         y: action.y;
@@ -180,22 +181,33 @@ export component TranslationBar {
             icon: @image-url("icons/lucide/outline/kebab-horizontal.svg");
             icon-color: root.text-color;
             tooltip-text: @tr("Translation options");
-            clicked => { more.show({ x: 0px, y: self.height }); }
+            clicked => { more.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
         }
-        Menu {
-            MenuItem {
-                title: Translation.always ? @tr("Stop always translating {}", Translation.language-name) : @tr("Always translate {}", Translation.language-name);
-                enabled: Translation.language-name != "";
-                activated => { Translation.choose(Translation.always ? "ask" : "always"); }
-            }
-            MenuItem {
-                title: @tr("Never translate {}", Translation.language-name);
-                enabled: Translation.language-name != "" && Translation.state == "offer";
-                activated => { Translation.choose("never"); }
-            }
-            MenuItem {
-                title: @tr("Translation settings…");
-                activated => { Translation.open-settings(); }
+        more := PopupMenu {
+            align-end: true;
+            compact: root.compact;
+            label: @tr("Translation options");
+            entries: [
+                {
+                    id: "always",
+                    title: Translation.always ? @tr("Stop always translating {}", Translation.language-name) : @tr("Always translate {}", Translation.language-name),
+                    disabled: Translation.language-name == "",
+                },
+                {
+                    id: "never",
+                    title: @tr("Never translate {}", Translation.language-name),
+                    disabled: Translation.language-name == "" || Translation.state != "offer",
+                },
+                { id: "settings", title: @tr("Translation settings…") },
+            ];
+            activated(id, index) => {
+                if id == "always" {
+                    Translation.choose(Translation.always ? "ask" : "always");
+                } else if id == "never" {
+                    Translation.choose("never");
+                } else {
+                    Translation.open-settings();
+                }
             }
         }
     }
