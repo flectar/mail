@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- An Android phone's screen showing the app: the status bar, app.png and the
+     gesture bar, 400 x 860 dp in CSS pixels. scripts/generate-store-assets.sh
+     renders it with Chromium at two pixels per dp next to app.png (the app at
+     400 x 820 dp) and GoogleSansFlex.ttf. The bars take the colors of the
+     app's own edges, and the URL's fragment, #light or #dark, picks their
+     icons'. The icons are full, as Play's screenshot guidelines ask. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Google Sans Flex"; src: url(GoogleSansFlex.ttf); font-weight: 100 1000; }
+
+:root { --icons: #1f1f1f; }
+:root[data-theme="dark"] { --icons: #e3e3e3; }
+html, body { margin: 0; width: 400px; height: 860px; overflow: hidden; }
+body { display: flex; flex-direction: column; position: relative; }
+
+/* Each bar stretches the app's first or last row of pixels. */
+.bar { flex: none; border: 0 solid transparent; border-image-source: url(app.png); border-image-repeat: stretch; }
+.top { border-top-width: 28px; border-image-slice: 1 0 0 0; border-image-width: 28px 0 0 0; }
+.bottom { border-bottom-width: 12px; border-image-slice: 0 0 1 0; border-image-width: 0 0 12px 0; }
+.app { flex: none; display: block; width: 400px; height: 820px; }
+
+.status { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px 0 24px; box-sizing: border-box; color: var(--icons); font: 500 14px "Google Sans Flex", sans-serif; }
+.status .icons { display: flex; gap: 5px; align-items: center; }
+.status svg { height: 13px; display: block; }
+.handle { position: absolute; left: 146px; bottom: 4px; width: 108px; height: 4px; border-radius: 2px; background: var(--icons); }
+</style>
+<script>document.documentElement.dataset.theme = location.hash.slice(1) || "light";</script>
+</head>
+<body>
+<div class="bar top"></div>
+<img class="app" src="app.png" alt="" decoding="sync">
+<div class="bar bottom"></div>
+<div class="status">
+  <span>9:41</span>
+  <span class="icons">
+    <svg viewBox="0 0 16 13"><path d="M8 12.5 0.6 4.6A10.6 10.6 0 0 1 15.4 4.6Z" fill="currentColor"/></svg>
+    <svg viewBox="0 0 13 13"><path d="M12.5 0.5V12.5H0.5Z" fill="currentColor"/></svg>
+    <svg viewBox="0 0 8 13"><rect x="0.5" y="1.5" width="7" height="11" rx="1.3" fill="none" stroke="currentColor"/><rect x="2.5" y="0.2" width="3" height="1.6" rx=".5" fill="currentColor"/><rect x="1.7" y="2.7" width="4.6" height="8.6" rx=".6" fill="currentColor"/></svg>
+  </span>
+</div>
+<span class="handle"></span>
+</body>
+</html>
