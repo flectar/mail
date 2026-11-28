@@ -5,6 +5,8 @@ use crate::{
     error::{CoreError, Result},
     models::{Signature, SignatureDefaults},
 };
+use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer};
+use std::{cell::RefCell, collections::HashSet};
 
 /// A signature's HTML, pictures included, can be this large.
 pub const MAX_SIGNATURE_BYTES: usize = 256 * 1024;
@@ -171,7 +173,131 @@ pub fn sanitize_html(html: &str) -> String {
                 .link_rel(Some("noopener noreferrer"));
             builder
         });
-    without_unsourced_pictures(SANITIZER.clean(html).to_string())
+    with_layout_tables_marked(without_unsourced_pictures(
+        SANITIZER.clean(html).to_string(),
+    ))
+}
+
+/// A tag or a text of HTML ammonia wrote, read back.
+enum Piece {
+    Start {
+        name: String,
+        attributes: Vec<(String, String)>,
+    },
+    End(String),
+    Text(String),
+}
+
+struct Pieces(RefCell<Vec<Piece>>);
+
+impl TokenSink for Pieces {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+        let piece = match token {
+            Token::TagToken(tag) if tag.kind == TagKind::EndTag => Piece::End(tag.name.to_string()),
+            Token::TagToken(tag) => Piece::Start {
+                name: tag.name.to_string(),
+                attributes: tag
+                    .attrs
+                    .iter()
+                    .map(|attribute| {
+                        (
+                            attribute.name.local.to_string(),
+                            attribute.value.to_string(),
+                        )
+                    })
+                    .collect(),
+            },
+            Token::CharacterTokens(text) => Piece::Text(text.to_string()),
+            _ => return TokenSinkResult::Continue,
+        };
+        self.0.borrow_mut().push(piece);
+        TokenSinkResult::Continue
+    }
+}
+
+/// `html`, as ammonia writes it, with each table that only lays the signature out marked so for
+/// screen readers, as the W3C and the Email Markup Consortium advise for mail: one without a
+/// role, header cells, a caption or a summary of its own. Everything else is written as it was.
+fn with_layout_tables_marked(html: String) -> String {
+    if !html.contains("<table") {
+        return html;
+    }
+    let tokenizer = Tokenizer::new(Pieces(RefCell::default()), Default::default());
+    let input = BufferQueue::default();
+    input.push_back(html.as_str().into());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    let pieces = tokenizer.sink.0.into_inner();
+    // The start tags of the layout tables, by their place among the pieces. A header cell or a
+    // caption belongs to the innermost table open.
+    let mut layout = HashSet::new();
+    let mut open: Vec<(usize, bool)> = Vec::new();
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece {
+            Piece::Start { name, attributes } if name == "table" => {
+                let described = attributes.iter().any(|(attribute, value)| {
+                    attribute == "role" || (attribute == "summary" && !value.trim().is_empty())
+                });
+                open.push((index, !described));
+            }
+            Piece::Start { name, .. } if name == "th" || name == "caption" => {
+                if let Some(table) = open.last_mut() {
+                    table.1 = false;
+                }
+            }
+            Piece::End(name) if name == "table" => {
+                if let Some((index, true)) = open.pop() {
+                    layout.insert(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    if layout.is_empty() {
+        return html;
+    }
+    // Written back the way ammonia's serializer escapes, so only the roles change.
+    let escape = |output: &mut String, text: &str, attribute: bool| {
+        for character in text.chars() {
+            match character {
+                '&' => output.push_str("&amp;"),
+                '\u{a0}' => output.push_str("&nbsp;"),
+                '"' if attribute => output.push_str("&quot;"),
+                '<' if !attribute => output.push_str("&lt;"),
+                '>' if !attribute => output.push_str("&gt;"),
+                character => output.push(character),
+            }
+        }
+    };
+    let mut marked = String::with_capacity(html.len() + layout.len() * 20);
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece {
+            Piece::Start { name, attributes } => {
+                marked.push('<');
+                marked.push_str(name);
+                for (attribute, value) in attributes {
+                    marked.push(' ');
+                    marked.push_str(attribute);
+                    marked.push_str("=\"");
+                    escape(&mut marked, value, true);
+                    marked.push('"');
+                }
+                if layout.contains(&index) {
+                    marked.push_str(" role=\"presentation\"");
+                }
+                marked.push('>');
+            }
+            Piece::End(name) => {
+                marked.push_str("</");
+                marked.push_str(name);
+                marked.push('>');
+            }
+            Piece::Text(text) => escape(&mut marked, text, false),
+        }
+    }
+    marked
 }
 
 /// `html` as ammonia writes it, without the pictures whose address it took out: some mail apps
@@ -505,6 +631,30 @@ mod tests {
         }
         // Classes of its own, which nothing styles here, go.
         assert!(!clean.contains("brand"), "{clean}");
+    }
+
+    #[test]
+    fn layout_tables_are_marked_for_screen_readers() {
+        let clean = sanitize_html(
+            "<p>Fish &amp; chips\u{a0}&lt;3 \"x\"</p><table cellpadding=\"0\"><tr><td><table><tr>\
+             <td title=\"A &amp; B\">nested</td></tr></table></td></tr></table>\
+             <table><tr><th>Day</th></tr></table>\
+             <table><caption>Hours</caption><tr><td>9</td></tr></table>\
+             <table summary=\"Opening hours\"><tr><td>9</td></tr></table>\
+             <table role=\"grid\"><tr><td>9</td></tr></table>",
+        );
+        assert_eq!(
+            clean,
+            "<p>Fish &amp; chips&nbsp;&lt;3 \"x\"</p><table cellpadding=\"0\" role=\"presentation\">\
+             <tbody><tr><td><table role=\"presentation\"><tbody><tr><td title=\"A &amp; B\">nested\
+             </td></tr></tbody></table></td></tr></tbody></table>\
+             <table><tbody><tr><th>Day</th></tr></tbody></table>\
+             <table><caption>Hours</caption><tbody><tr><td>9</td></tr></tbody></table>\
+             <table summary=\"Opening hours\"><tbody><tr><td>9</td></tr></tbody></table>\
+             <table role=\"grid\"><tbody><tr><td>9</td></tr></tbody></table>"
+        );
+        // Cleaning it again changes nothing.
+        assert_eq!(sanitize_html(&clean), clean);
     }
 
     #[test]
