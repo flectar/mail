@@ -264,7 +264,7 @@ msgstr ""
 "Enhver server med OpenAI chat-API virker. Ollama og LM Studio kører modeller "
 "på denne computer, så det, du sender, forbliver her."
 
-#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4637
+#: ui/ai.slint:135 ui/dialogs/settings-dialog.slint:4676
 #: ui/link-services.slint:181
 msgid "Server address"
 msgstr "Serveradresse"
@@ -293,7 +293,7 @@ msgstr "Fjern nøgle"
 msgid "API key, if the server asks for one"
 msgstr "API-nøgle, hvis serveren beder om en"
 
-#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:565
+#: ui/ai.slint:208 ui/components/account-mail-preferences.slint:601
 #: ui/dialogs/folder-dialog.slint:138 ui/network.slint:325
 #: ui/translation.slint:378 ui/views/files-view.slint:675
 msgid "Save"
@@ -338,7 +338,7 @@ msgstr "Hvad den beder om"
 msgid "Make it shorter, keeping what matters."
 msgstr "Gør den kortere, og behold det vigtige."
 
-#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:381
+#: ui/ai.slint:275 ui/components/account-mail-preferences.slint:408
 #: ui/dialogs/settings-dialog.slint:83 ui/link-services.slint:118
 #: ui/views/contacts-view.slint:632
 msgid "Remove"
@@ -386,7 +386,7 @@ msgid "Graphite"
 msgstr "Grafit"
 
 #: ui/app-icon.slint:21 ui/components/theme-editor.slint:612
-#: ui/dialogs/settings-dialog.slint:1522
+#: ui/dialogs/settings-dialog.slint:1534
 msgid "Light"
 msgstr "Lys"
 
@@ -775,7 +775,7 @@ msgstr "Samtalehistorik tilgængelig"
 msgid "New address-book entry"
 msgstr "Ny adressebogsindgang"
 
-#: ui/app.slint:274 ui/app.slint:1576 ui/components/composer-fields.slint:95
+#: ui/app.slint:274 ui/app.slint:1586 ui/components/composer-fields.slint:95
 #: ui/components/email-composer.slint:60
 msgid "No connected account"
 msgstr "Ingen tilknyttet konto"
@@ -836,12 +836,12 @@ msgstr[1] "{n} ulæste samtaler"
 
 #. Local mail has no archive or spam.
 #: ui/app.slint:296 ui/components/rule-editor.slint:70
-#: ui/dialogs/settings-dialog.slint:3998 ui/views/mail-list-pane.slint:1752
+#: ui/dialogs/settings-dialog.slint:4037 ui/views/mail-list-pane.slint:1752
 #: ui/views/mail-reading-pane.slint:564
 msgid "Archive"
 msgstr "Arkivér"
 
-#: ui/app.slint:297 ui/components/account-mail-preferences.slint:464
+#: ui/app.slint:297 ui/components/account-mail-preferences.slint:491
 #: ui/dialogs/saved-search-dialog.slint:121 ui/views/files-view.slint:635
 msgid "Delete"
 msgstr "Slet"
@@ -1030,7 +1030,7 @@ msgstr "Oplistede kalenderbegivenheder"
 msgid "Wrote a draft"
 msgstr "Skrev en kladde"
 
-#: ui/app.slint:376 ui/dialogs/settings-dialog.slint:3774
+#: ui/app.slint:376 ui/dialogs/settings-dialog.slint:3813
 msgid "Mail on this device"
 msgstr "E-mail på denne enhed"
 
@@ -1886,7 +1886,7 @@ msgstr "Godkend kalenderadgang i din browser."
 msgid "Google Contacts connected and initial sync started."
 msgstr "Kalenderen er forbundet, og indledende synkronisering er startet."
 
-#: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3588
+#: ui/app.slint:586 ui/dialogs/settings-dialog.slint:3627
 #, fuzzy
 #| msgid "Could not connect calendar: {}"
 msgid "Could not connect Google Contacts: {}"
@@ -2888,148 +2888,170 @@ msgstr "Kunne ikke slette mappe: {}"
 
 #: ui/app.slint:852
 #, fuzzy
+#| msgid "Labels"
+msgid "Label shown."
+msgstr "Labels"
+
+#: ui/app.slint:853
+msgid "Label hidden. It's under More."
+msgstr ""
+
+#: ui/app.slint:854
+#, fuzzy
+#| msgid "Could not save label: {}"
+msgid "Could not show label: {}"
+msgstr "Kunne ikke gemme label: {}"
+
+#: ui/app.slint:855
+#, fuzzy
+#| msgid "Could not update label: {}"
+msgid "Could not hide label: {}"
+msgstr "Kunne ikke opdatere label: {}"
+
+#: ui/app.slint:856
+#, fuzzy
 #| msgid "Could not choose the folder: {}"
 msgid "Could not change the folder: {}"
 msgstr "Kunne ikke vælge mappen: {}"
 
-#: ui/app.slint:853
+#: ui/app.slint:857
 msgid "Could not close preview: {}"
 msgstr "Kunne ikke lukke forhåndsvisning: {}"
 
-#: ui/app.slint:854
+#: ui/app.slint:858
 msgid "Opened the system print view."
 msgstr "Åbnede systemets udskriftsvisning."
 
-#: ui/app.slint:855
+#: ui/app.slint:859
 msgid "Could not print message: {}"
 msgstr "Kunne ikke udskrive besked: {}"
 
-#: ui/app.slint:856
+#: ui/app.slint:860
 msgid "Opened the message in your browser."
 msgstr "Åbnede beskeden i din browser."
 
-#: ui/app.slint:857
+#: ui/app.slint:861
 msgid "Could not open message in browser: {}"
 msgstr "Kunne ikke åbne besked i browser: {}"
 
-#: ui/app.slint:858
+#: ui/app.slint:862
 msgid "Connect an account before replying or forwarding."
 msgstr "Forbind en konto, før du svarer eller videresender."
 
-#: ui/app.slint:859
+#: ui/app.slint:863
 msgid "Choose a message first."
 msgstr "Vælg først en besked."
 
-#: ui/app.slint:860
+#: ui/app.slint:864
 msgid "Only drafts can be reopened for editing."
 msgstr "Kun kladder kan genåbnes til redigering."
 
-#: ui/app.slint:861
+#: ui/app.slint:865
 msgid "Could not open draft: {}"
 msgstr "Kunne ikke åbne kladde: {}"
 
-#: ui/app.slint:862
+#: ui/app.slint:866
 msgid "Could not open draft: invalid account identifier"
 msgstr "Kunne ikke åbne kladde: ugyldigt konto-id"
 
-#: ui/app.slint:863
+#: ui/app.slint:867
 msgid "Connected account"
 msgstr "Tilknyttet konto"
 
-#: ui/app.slint:864
+#: ui/app.slint:868
 msgid "Could not open composer: {}"
 msgstr "Kunne ikke åbne skrivevinduet: {}"
 
-#: ui/app.slint:865
+#: ui/app.slint:869
 #, fuzzy
 #| msgid "Could not open the message in its own window."
 msgid "Could not open the conversation's window: {}"
 msgstr "Kunne ikke åbne beskeden i sit eget vindue."
 
-#: ui/app.slint:866
+#: ui/app.slint:870
 msgid "Add an account to send mail."
 msgstr "Tilføj en konto for at sende e-mail."
 
-#: ui/app.slint:867 ui/components/sidebar.slint:688
-#: ui/dialogs/settings-dialog.slint:2704
+#: ui/app.slint:871 ui/components/sidebar.slint:690
+#: ui/dialogs/settings-dialog.slint:2743
 msgid "On this device"
 msgstr "På denne enhed"
 
-#: ui/app.slint:868
+#: ui/app.slint:872
 msgid "Could not open composer: invalid account identifier"
 msgstr "Kunne ikke åbne skrivevinduet: ugyldigt konto-id"
 
 #. Reply and forward quotation headers, written into the draft.
-#: ui/app.slint:874
+#: ui/app.slint:878
 msgid "On {}, {} wrote:"
 msgstr "Den {}, skrev {}:"
 
-#: ui/app.slint:875
+#: ui/app.slint:879
 msgid "{} wrote:"
 msgstr "{} skrev:"
 
-#: ui/app.slint:876 ui/components/email-composer.slint:950
+#: ui/app.slint:880 ui/components/email-composer.slint:950
 msgid "Forwarded message"
 msgstr "Videresendt besked"
 
-#: ui/app.slint:877
+#: ui/app.slint:881
 msgid "All profiles"
 msgstr "Alle profiler"
 
-#: ui/app.slint:878
+#: ui/app.slint:882
 msgid "A saved search named “{}” already exists."
 msgstr "En gemt søgning med navnet ”{}” findes allerede."
 
-#: ui/app.slint:879
+#: ui/app.slint:883
 msgid "Couldn't save the search: {}"
 msgstr "Kunne ikke gemme søgningen: {}"
 
-#: ui/app.slint:880
+#: ui/app.slint:884
 msgctxt "forwarded message header"
 msgid "From: {}"
 msgstr "Fra: {}"
 
-#: ui/app.slint:881
+#: ui/app.slint:885
 msgctxt "forwarded message header"
 msgid "Date: {}"
 msgstr "Dato: {}"
 
-#: ui/app.slint:882
+#: ui/app.slint:886
 msgctxt "forwarded message header"
 msgid "Subject: {}"
 msgstr "Emne: {}"
 
-#: ui/app.slint:883
+#: ui/app.slint:887
 msgctxt "forwarded message header"
 msgid "To: {}"
 msgstr "Til: {}"
 
-#: ui/app.slint:884
+#: ui/app.slint:888
 msgctxt "forwarded message header"
 msgid "Cc: {}"
 msgstr "Cc: {}"
 
-#: ui/app.slint:885
+#: ui/app.slint:889
 msgid "Attach files to this email"
 msgstr "Vedhæft filer til denne e-mail"
 
-#: ui/app.slint:886
+#: ui/app.slint:890
 msgid "Could not add attachments: {}"
 msgstr "Kunne ikke tilføje vedhæftede filer: {}"
 
-#: ui/app.slint:887
+#: ui/app.slint:891
 msgid "Could not show the quoted message: {}"
 msgstr "Kunne ikke vise den citerede besked: {}"
 
-#: ui/app.slint:888
+#: ui/app.slint:892
 msgid "Added 1 attachment."
 msgstr "Tilføjede 1 vedhæftet fil."
 
-#: ui/app.slint:889
+#: ui/app.slint:893
 msgid "Added {} attachments."
 msgstr "Tilføjede {} vedhæftede filer."
 
-#: ui/app.slint:890
+#: ui/app.slint:894
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
@@ -3037,214 +3059,214 @@ msgstr ""
 "Vedhæftede filer tilføjet: {}. Sprang over: {} (duplikat, ulæselig eller "
 "over grænsen på i alt 25 MB)."
 
-#: ui/app.slint:891
+#: ui/app.slint:895
 msgid "Attachment removed."
 msgstr "Vedhæftet fil fjernet."
 
-#: ui/app.slint:892
+#: ui/app.slint:896
 msgid "Insert images in this email"
 msgstr "Indsæt billeder i denne e-mail"
 
-#: ui/app.slint:893
+#: ui/app.slint:897
 msgid "Images"
 msgstr "Billeder"
 
-#: ui/app.slint:894
+#: ui/app.slint:898
 msgid "Could not add images: {}"
 msgstr "Kunne ikke tilføje billeder: {}"
 
-#: ui/app.slint:895
+#: ui/app.slint:899
 msgid "Attaching the message…"
 msgid_plural "Attaching {0} messages…"
 msgstr[0] "Vedhæfter beskeden…"
 msgstr[1] "Vedhæfter {0} beskeder…"
 
-#: ui/app.slint:896
+#: ui/app.slint:900
 msgid "Could not attach a forwarded message: {}"
 msgstr "Kunne ikke vedhæfte en videresendt besked: {}"
 
-#: ui/app.slint:897
+#: ui/app.slint:901
 msgid "{} isn't a PNG, JPEG, GIF or WebP image."
 msgstr "{} er ikke et PNG-, JPEG-, GIF- eller WebP-billede."
 
-#: ui/app.slint:898
+#: ui/app.slint:902
 msgid "Images and attachments can take up to 25 MB in all."
 msgstr "Billeder og vedhæftede filer kan tage i alt op til 25 MB."
 
-#: ui/app.slint:899
+#: ui/app.slint:903
 msgid "At full size, the photos would take the message over 25 MB."
 msgstr "I fuld størrelse ville billederne bringe beskeden over 25 MB."
 
-#: ui/app.slint:900
+#: ui/app.slint:904
 msgid "Formatting and pictures removed. Undo restores them."
 msgstr "Formatering og billeder fjernet. Fortryd gendanner dem."
 
-#: ui/app.slint:901
+#: ui/app.slint:905
 msgid "Give the signature a name."
 msgstr "Giv signaturen et navn."
 
-#: ui/app.slint:902
+#: ui/app.slint:906
 msgid "A signature can hold pictures, but not attachments."
 msgstr "En signatur kan indeholde billeder, men ikke vedhæftede filer."
 
-#: ui/app.slint:903
+#: ui/app.slint:907
 msgid "Choose the account this message should be sent from."
 msgstr "Vælg den konto, denne besked skal sendes fra."
 
-#: ui/app.slint:904
+#: ui/app.slint:908
 msgid "Choose a verified sender identity for this message."
 msgstr "Vælg en verificeret afsenderidentitet til denne besked."
 
-#: ui/app.slint:905
+#: ui/app.slint:909
 msgid "Connect an account before saving or sending mail."
 msgstr "Forbind en konto, før du gemmer eller sender e-mail."
 
-#: ui/app.slint:906
+#: ui/app.slint:910
 msgid "Message queued for delivery (action {})."
 msgstr "Besked sat i kø til afsendelse (handling {})."
 
-#: ui/app.slint:907
+#: ui/app.slint:911
 msgid "Sending message…"
 msgstr "Sender besked…"
 
-#: ui/app.slint:908
+#: ui/app.slint:912
 msgid "This message has already been sent."
 msgstr "Denne besked er allerede sendt."
 
-#: ui/app.slint:909
+#: ui/app.slint:913
 msgid "Could not take the message back: {}"
 msgstr "Kunne ikke tage beskeden tilbage: {}"
 
-#: ui/app.slint:910
+#: ui/app.slint:914
 msgid "Message sent."
 msgstr "Beskeden er sendt."
 
-#: ui/app.slint:911
+#: ui/app.slint:915
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "Beskeden blev ikke sendt: {} Din kladde er bevaret."
 
-#: ui/app.slint:912
+#: ui/app.slint:916
 msgid "Draft saved locally (#{})."
 msgstr "Kladde gemt lokalt (#{})."
 
-#: ui/app.slint:913
+#: ui/app.slint:917
 msgid "Compose failed: {}"
 msgstr "Skrivning mislykkedes: {}"
 
-#: ui/app.slint:914
+#: ui/app.slint:918
 msgid "Could not open the message in its own window."
 msgstr "Kunne ikke åbne beskeden i sit eget vindue."
 
-#: ui/app.slint:915
+#: ui/app.slint:919
 msgid ""
 "Could not open the message in its own window, so it was saved to Drafts."
 msgstr ""
 "Kunne ikke åbne beskeden i sit eget vindue, så den blev gemt i Kladder."
 
-#: ui/app.slint:916
+#: ui/app.slint:920
 msgid "Connect an account before managing email templates."
 msgstr "Forbind en konto, før du administrerer e-mailskabeloner."
 
-#: ui/app.slint:917
+#: ui/app.slint:921
 msgid "Could not load email templates: {}"
 msgstr "Kunne ikke indlæse e-mailskabeloner: {}"
 
-#: ui/app.slint:918
+#: ui/app.slint:922
 msgid "Enter a template name."
 msgstr "Indtast et skabelonnavn."
 
-#: ui/app.slint:919
+#: ui/app.slint:923
 msgid "Add a subject or message to the template."
 msgstr "Tilføj et emne eller en besked til skabelonen."
 
-#: ui/app.slint:920
+#: ui/app.slint:924
 msgid "Email template saved."
 msgstr "E-mailskabelon gemt."
 
-#: ui/app.slint:921
+#: ui/app.slint:925
 msgid "Could not save email template: {}"
 msgstr "Kunne ikke gemme e-mailskabelon: {}"
 
-#: ui/app.slint:922
+#: ui/app.slint:926
 msgid "Email template deleted."
 msgstr "E-mailskabelon slettet."
 
-#: ui/app.slint:923
+#: ui/app.slint:927
 msgid "Could not delete email template: {}"
 msgstr "Kunne ikke slette e-mailskabelon: {}"
 
-#: ui/app.slint:924
+#: ui/app.slint:928
 msgid "Email template is no longer available."
 msgstr "E-mailskabelonen er ikke længere tilgængelig."
 
-#: ui/app.slint:925
+#: ui/app.slint:929
 msgid "Email template inserted."
 msgstr "E-mailskabelon indsat."
 
-#: ui/app.slint:926 ui/components/composer-actions.slint:978
+#: ui/app.slint:930 ui/components/composer-actions.slint:978
 msgid "Share files by link"
 msgstr "Del filer via link"
 
-#: ui/app.slint:927
+#: ui/app.slint:931
 msgid "Connect a storage service in Settings to send files by link."
 msgstr ""
 "Forbind en lagertjeneste under Indstillinger for at sende filer via link."
 
-#: ui/app.slint:928
+#: ui/app.slint:932
 msgid "{} asks for the password {}. Pass it on another way."
 msgstr "{} kræver adgangskoden {}. Videregiv den på en anden måde."
 
-#: ui/app.slint:929
+#: ui/app.slint:933
 msgid "{} couldn't go up: {}"
 msgstr "{} kunne ikke navigere op: {}"
 
-#: ui/app.slint:930
+#: ui/app.slint:934
 msgid "Uploading… {}%"
 msgstr "Uploader… {}%"
 
-#: ui/app.slint:931 ui/app.slint:964
+#: ui/app.slint:935 ui/app.slint:968
 msgid "{} · until {}"
 msgstr "{} · indtil {}"
 
-#: ui/app.slint:932
+#: ui/app.slint:936
 msgid "1 file shared by link"
 msgid_plural "{0} files shared by link"
 msgstr[0] "1 fil delt via link"
 msgstr[1] "{0} filer delt via link"
 
-#: ui/app.slint:933
+#: ui/app.slint:937
 msgid "available until {}"
 msgstr "tilgængelig indtil {}"
 
-#: ui/app.slint:934
+#: ui/app.slint:938
 msgid "password protected"
 msgstr "adgangskodebeskyttet"
 
-#: ui/app.slint:935
+#: ui/app.slint:939
 msgid "Remove {} to send the message."
 msgstr "Fjern {} for at sende beskeden."
 
-#: ui/app.slint:936
+#: ui/app.slint:940
 msgid "Files over the 25 MB limit go as links."
 msgstr "Filer over grænsen på 25 MB sendes som links."
 
-#: ui/app.slint:937
+#: ui/app.slint:941
 msgid "Large files preference saved."
 msgstr "Præference for store filer gemt."
 
-#: ui/app.slint:938
+#: ui/app.slint:942
 msgid "Could not save the large files preference: {}"
 msgstr "Kunne ikke gemme præference for store filer: {}"
 
-#: ui/app.slint:939
+#: ui/app.slint:943
 msgid "Fill in {} before sending."
 msgstr "Udfyld {}, før du sender."
 
-#: ui/app.slint:940
+#: ui/app.slint:944
 msgid "Fill in {} or send again."
 msgstr "Udfyld {} eller send igen."
 
-#: ui/app.slint:941
+#: ui/app.slint:945
 msgctxt ""
 "Comma-separated words that suggest a message has a file attached. Keep the "
 "English ones out: they always count."
@@ -3257,43 +3279,43 @@ msgstr ""
 "cv, motiveret ansøgning, "
 "følgebrev, .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .odt, .ods, .odp, .rtf, .zip"
 
-#: ui/app.slint:942
+#: ui/app.slint:946
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "E-mailskabelon indsat, men dens brug kunne ikke gemmes: {}"
 
-#: ui/app.slint:943
+#: ui/app.slint:947
 msgid "Choose a supported account type and connection security."
 msgstr "Vælg en understøttet kontotype og forbindelsessikkerhed."
 
-#: ui/app.slint:944
+#: ui/app.slint:948
 msgid "IMAP port must be between 1 and 65535."
 msgstr "IMAP-porten skal være mellem 1 og 65535."
 
-#: ui/app.slint:945
+#: ui/app.slint:949
 msgid "POP3 port must be between 1 and 65535."
 msgstr "POP3-porten skal være mellem 1 og 65535."
 
-#: ui/app.slint:946
+#: ui/app.slint:950
 msgid "SMTP port must be between 1 and 65535."
 msgstr "SMTP-porten skal være mellem 1 og 65535."
 
-#: ui/app.slint:947
+#: ui/app.slint:951
 msgid "Local mail data is unavailable. Retry startup."
 msgstr "Lokale e-maildata er ikke tilgængelige. Prøv at starte igen."
 
-#: ui/app.slint:948
+#: ui/app.slint:952
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "Finder JMAP og kontrollerer funktioner…"
 
-#: ui/app.slint:949
+#: ui/app.slint:953
 msgid "Certificate imported. Connect to verify the server."
 msgstr "Certifikat importeret. Forbind for at verificere serveren."
 
-#: ui/app.slint:950
+#: ui/app.slint:954
 msgid "Could not load account preferences: {}"
 msgstr "Kunne ikke indlæse kontoindstillinger: {}"
 
-#: ui/app.slint:951
+#: ui/app.slint:955
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -3301,27 +3323,27 @@ msgstr ""
 "Din redigerede signatur er bevaret. Vælg Ingen signatur for at beholde den "
 "som beskedtekst, før du indsætter en anden."
 
-#: ui/app.slint:952
+#: ui/app.slint:956
 msgid "Certificate import failed: {}"
 msgstr "Import af certifikat mislykkedes: {}"
 
-#: ui/app.slint:953
+#: ui/app.slint:957
 msgid "Testing IMAP and SMTP connections…"
 msgstr "Tester IMAP- og SMTP-forbindelser…"
 
-#: ui/app.slint:954
+#: ui/app.slint:958
 msgid "Testing POP3 and SMTP connections…"
 msgstr "Tester POP3- og SMTP-forbindelser…"
 
-#: ui/app.slint:955
+#: ui/app.slint:959
 msgid "Testing the IMAP connection…"
 msgstr "Tester IMAP-forbindelsen…"
 
-#: ui/app.slint:956
+#: ui/app.slint:960
 msgid "Testing the POP3 connection…"
 msgstr "Tester POP3-forbindelsen…"
 
-#: ui/app.slint:961
+#: ui/app.slint:965
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
@@ -3329,17 +3351,17 @@ msgstr ""
 "En anden browserautorisation er allerede i gang; afslut den, eller vælg "
 "Annullér."
 
-#: ui/app.slint:962
+#: ui/app.slint:966
 msgid "{n} account"
 msgid_plural "{n} accounts"
 msgstr[0] "{n} konto"
 msgstr[1] "{n} konti"
 
-#: ui/app.slint:963
+#: ui/app.slint:967
 msgid "{} · from {}"
 msgstr "{} · fra {}"
 
-#: ui/app.slint:965
+#: ui/app.slint:969
 msgid ""
 "POP3 accounts can't have automatic replies from Flectar Mail. Your "
 "provider's webmail may offer them."
@@ -3347,7 +3369,7 @@ msgstr ""
 "POP3-konti kan ikke have automatiske svar fra Flectar Mail. Din udbyders "
 "webmail tilbyder dem muligvis."
 
-#: ui/app.slint:966
+#: ui/app.slint:970
 msgid ""
 "Flectar Mail can't set this account's automatic replies yet. Your provider's "
 "webmail can."
@@ -3355,7 +3377,7 @@ msgstr ""
 "Flectar Mail kan ikke indstille denne kontos automatiske svar endnu. Din "
 "udbyders webmail kan."
 
-#: ui/app.slint:967
+#: ui/app.slint:971
 msgid ""
 "Gmail answers each sender once, and again after four days. Mailing lists and "
 "spam get no reply."
@@ -3363,18 +3385,18 @@ msgstr ""
 "Gmail svarer hver afsender én gang og igen efter fire dage. Postlister og "
 "spam får intet svar."
 
-#: ui/app.slint:968
+#: ui/app.slint:972
 msgid "Outlook answers each sender once while replies are on."
 msgstr ""
 "Outlook svarer hver afsender én gang, mens automatiske svar er slået til."
 
-#: ui/app.slint:969
+#: ui/app.slint:973
 msgid ""
 "Your server answers each sender once every few days, and never mailing lists."
 msgstr ""
 "Din server svarer hver afsender én gang hvert par dage og aldrig postlister."
 
-#: ui/app.slint:970
+#: ui/app.slint:974
 msgid ""
 "Your server answers each sender once, and again after four days. Mailing "
 "lists and spam get no reply."
@@ -3382,7 +3404,7 @@ msgstr ""
 "Din server svarer hver afsender én gang og igen efter fire dage. Postlister "
 "og spam får intet svar."
 
-#: ui/app.slint:971
+#: ui/app.slint:975
 msgid ""
 "Flectar Mail found no way to set automatic replies on this account's server. "
 "Your provider's webmail may offer them."
@@ -3390,231 +3412,231 @@ msgstr ""
 "Flectar Mail fandt ingen måde at indstille automatiske svar på denne kontos "
 "server. Din udbyders webmail tilbyder dem muligvis."
 
-#: ui/app.slint:972
+#: ui/app.slint:976
 msgid "Checking whether this account's server can send automatic replies…"
 msgstr "Tjekker, om denne kontos server kan sende automatiske svar…"
 
-#: ui/app.slint:973
+#: ui/app.slint:977
 msgid "Couldn't check this account's server: {}"
 msgstr "Kunne ikke tjekke denne kontos server: {}"
 
-#: ui/app.slint:974
+#: ui/app.slint:978
 msgid "Outlook needs a last day with a first day."
 msgstr "Outlook kræver en sidste dag sammen med en første dag."
 
-#: ui/app.slint:975
+#: ui/app.slint:979
 msgid "Senders who aren't in your contacts get no reply."
 msgstr "Afsendere, der ikke er i dine kontakter, får intet svar."
 
-#: ui/app.slint:976
+#: ui/app.slint:980
 msgid ""
 "Senders outside your organization who aren't in your contacts get no reply."
 msgstr ""
 "Afsendere uden for din organisation, som ikke er i dine kontakter, får intet "
 "svar."
 
-#: ui/app.slint:977
+#: ui/app.slint:981
 msgid "Write the first day as YYYY-MM-DD."
 msgstr "Skriv den første dag som YYYY-MM-DD."
 
-#: ui/app.slint:978
+#: ui/app.slint:982
 msgid "Write the last day as YYYY-MM-DD."
 msgstr "Skriv den sidste dag som YYYY-MM-DD."
 
-#: ui/app.slint:979
+#: ui/app.slint:983
 msgid "The last day comes before the first."
 msgstr "Den sidste dag ligger før den første."
 
-#: ui/app.slint:980
+#: ui/app.slint:984
 msgid "Write the message to send."
 msgstr "Skriv den besked, der skal sendes."
 
-#: ui/app.slint:981
+#: ui/app.slint:985
 msgid "Allow Flectar Mail to change Gmail settings in your browser."
 msgstr "Tillad Flectar Mail at ændre Gmail-indstillinger i din browser."
 
-#: ui/app.slint:982 ui/network.slint:206
+#: ui/app.slint:986 ui/network.slint:206
 msgid "Saved."
 msgstr "Gemt."
 
-#: ui/app.slint:983
+#: ui/app.slint:987
 msgid "Could not save automatic replies: {}"
 msgstr "Kunne ikke gemme automatiske svar: {}"
 
-#: ui/app.slint:984 ui/dialogs/settings-dialog.slint:2969
-#: ui/dialogs/settings-dialog.slint:3012 ui/views/onboarding-view.slint:184
+#: ui/app.slint:988 ui/dialogs/settings-dialog.slint:3008
+#: ui/dialogs/settings-dialog.slint:3051 ui/views/onboarding-view.slint:184
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "Tilføj app-nøgler i Log ind-indstillinger for at aktivere denne udbyder."
 
-#: ui/app.slint:985
+#: ui/app.slint:989
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Vælg Gmail- eller Outlook-OAuth."
 
-#: ui/app.slint:986
+#: ui/app.slint:990
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr "Fuldfør logind i din browser, eller vælg Annullér her."
 
-#: ui/app.slint:987
+#: ui/app.slint:991
 msgid "Cancelling browser sign-in…"
 msgstr "Annullerer browserlogind…"
 
-#: ui/app.slint:988
+#: ui/app.slint:992
 msgid "Finishing browser sign-in…"
 msgstr "Fuldfører browserlogind…"
 
-#: ui/app.slint:989
+#: ui/app.slint:993
 msgid "Could not use that browser address: {}"
 msgstr "Kunne ikke bruge den browseradresse: {}"
 
-#: ui/app.slint:990
+#: ui/app.slint:994
 msgid "Calendar core is unavailable."
 msgstr "Kalenderkernen er ikke tilgængelig."
 
-#: ui/app.slint:991
+#: ui/app.slint:995
 msgid "Account no longer exists."
 msgstr "Kontoen findes ikke længere."
 
-#: ui/app.slint:992
+#: ui/app.slint:996
 msgid "Authorize calendar access in your browser."
 msgstr "Godkend kalenderadgang i din browser."
 
-#: ui/app.slint:993
+#: ui/app.slint:997
 msgid "OAuth app keys saved."
 msgstr "OAuth-appnøgler gemt."
 
-#: ui/app.slint:994
+#: ui/app.slint:998
 msgid "{} OAuth settings saved."
 msgstr "{} OAuth-indstillinger gemt."
 
-#: ui/app.slint:995
+#: ui/app.slint:999
 msgid "OAuth settings failed: {}"
 msgstr "OAuth-indstillinger mislykkedes: {}"
 
-#: ui/app.slint:996
+#: ui/app.slint:1000
 msgid "Mail refresh failed: {}"
 msgstr "E-mailopdatering mislykkedes: {}"
 
-#: ui/app.slint:997
+#: ui/app.slint:1001
 msgid "Mail filter failed: {}"
 msgstr "E-mailfilter mislykkedes: {}"
 
-#: ui/app.slint:998
+#: ui/app.slint:1002
 msgid "Mail pagination failed: {}"
 msgstr "E-mailpaginering mislykkedes: {}"
 
-#: ui/app.slint:999
+#: ui/app.slint:1003
 msgid "Could not mark message as read: {}"
 msgstr "Kunne ikke markere besked som læst: {}"
 
-#: ui/app.slint:1000 ui/views/mail-reading-pane.slint:242
+#: ui/app.slint:1004 ui/views/mail-reading-pane.slint:242
 #: ui/views/mail-reading-pane.slint:1738
 msgid "Loading message…"
 msgstr "Indlæser besked…"
 
-#: ui/app.slint:1087 ui/components/workspace-navigation.slint:774
+#: ui/app.slint:1091 ui/components/workspace-navigation.slint:774
 #: ui/tray.slint:23 ui/tray.slint:24 ui/tray.slint:26
 #: ui/views/onboarding-view.slint:150
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1842 ui/app.slint:1855
+#: ui/app.slint:1852 ui/app.slint:1865
 msgid "Global Labels (local only)"
 msgstr "Globale labels (kun lokale)"
 
-#: ui/app.slint:2773
+#: ui/app.slint:2788
 msgid "Drop to start a new message"
 msgstr "Slip for at starte en ny besked"
 
-#: ui/app.slint:2781 ui/components/email-composer.slint:1272
+#: ui/app.slint:2796 ui/components/email-composer.slint:1272
 msgid "Pictures go in the text, and other files are attached."
 msgstr "Billeder kommer i teksten, og andre filer vedhæftes."
 
-#: ui/app.slint:2847
+#: ui/app.slint:2862
 msgid "Empty Trash?"
 msgstr "Tøm papirkurven?"
 
-#: ui/app.slint:2847 ui/reader-window.slint:152 ui/views/files-view.slint:593
+#: ui/app.slint:2862 ui/reader-window.slint:152 ui/views/files-view.slint:593
 msgid "Delete permanently?"
 msgstr "Slet permanent?"
 
-#: ui/app.slint:2851
+#: ui/app.slint:2866
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 "Slet permanent alle beskeder i papirkurven på tværs af alle tilknyttede "
 "konti?"
 
-#: ui/app.slint:2852
+#: ui/app.slint:2867
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "Slet permanent alle beskeder i denne kontos papirkurv?"
 
-#: ui/app.slint:2854
+#: ui/app.slint:2869
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "Slet permanent de valgte samtaler fra papirkurven?"
 
-#: ui/app.slint:2855 ui/reader-window.slint:153
+#: ui/app.slint:2870 ui/reader-window.slint:153
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Slet permanent denne samtale fra papirkurven?"
 
-#: ui/app.slint:2856 ui/app.slint:2882 ui/components/calendar.slint:1272
+#: ui/app.slint:2871 ui/app.slint:2897 ui/components/calendar.slint:1272
 #: ui/reader-window.slint:154
 msgid "This action cannot be undone."
 msgstr "Denne handling kan ikke fortrydes."
 
-#: ui/app.slint:2857 ui/dialogs/settings-dialog.slint:2771
+#: ui/app.slint:2872 ui/dialogs/settings-dialog.slint:2810
 msgid "Empty Trash"
 msgstr "Tøm papirkurven"
 
-#: ui/app.slint:2857 ui/reader-window.slint:155 ui/views/files-view.slint:675
+#: ui/app.slint:2872 ui/reader-window.slint:155 ui/views/files-view.slint:675
 msgid "Delete permanently"
 msgstr "Slet permanent"
 
-#: ui/app.slint:2879
+#: ui/app.slint:2894
 msgid "Mark all as read?"
 msgstr "Markér alle som læst?"
 
-#: ui/app.slint:2881
+#: ui/app.slint:2896
 msgid "All unread messages in {} will be marked as read."
 msgstr "Alle ulæste beskeder i {} markeres som læst."
 
-#: ui/app.slint:2883
+#: ui/app.slint:2898
 msgid "Mark all as read"
 msgstr "Markér alle som læst"
 
-#: ui/app.slint:2901
+#: ui/app.slint:2916
 msgid "Run this rule on the Inbox?"
 msgstr "Kør denne regel på Indbakken?"
 
-#: ui/app.slint:2903
+#: ui/app.slint:2918
 msgid "It matches one message there now."
 msgid_plural "It matches {n} messages there now."
 msgstr[0] "Den matcher én besked der nu."
 msgstr[1] "Den matcher {n} beskeder der nu."
 
-#: ui/app.slint:2905
+#: ui/app.slint:2920
 msgid "One more can only be checked once its body is downloaded."
 msgid_plural "{n} more can only be checked once their bodies are downloaded."
 msgstr[0] "Én mere kan først tjekkes, når dens brødtekst er downloadet."
 msgstr[1] "{n} flere kan først tjekkes, når deres brødtekst er downloadet."
 
-#: ui/app.slint:2906
+#: ui/app.slint:2921
 msgid "Undo takes it back."
 msgstr "Fortryd henter den tilbage."
 
-#: ui/app.slint:2907
+#: ui/app.slint:2922
 msgid "Run rule"
 msgstr "Kør regel"
 
-#: ui/app.slint:2926
+#: ui/app.slint:2941
 msgid "Replace changes made elsewhere?"
 msgstr "Erstat ændringer foretaget andre steder?"
 
-#: ui/app.slint:2927
+#: ui/app.slint:2942
 msgid "Run replies before your filters?"
 msgstr "Kør automatiske svar før dine filtre?"
 
-#: ui/app.slint:2930
+#: ui/app.slint:2945
 msgid ""
 "The automatic replies script Flectar Mail keeps on your server was changed "
 "outside Flectar Mail."
@@ -3622,7 +3644,7 @@ msgstr ""
 "Scriptet til automatiske svar, som Flectar Mail opbevarer på din server, er "
 "blevet ændret uden for Flectar Mail."
 
-#: ui/app.slint:2931
+#: ui/app.slint:2946
 msgid ""
 "Your server runs this filter script of yours. Flectar Mail would run the "
 "automatic replies first, then your script, unchanged."
@@ -3630,44 +3652,44 @@ msgstr ""
 "Din server kører dette filter-script fra dig. Flectar Mail ville køre de "
 "automatiske svar først og derefter dit script uændret."
 
-#: ui/app.slint:2933
+#: ui/app.slint:2948
 msgid "Saving replaces those changes with what you set here."
 msgstr "Når du gemmer, erstattes de ændringer med det, du har indstillet her."
 
-#: ui/app.slint:2934
+#: ui/app.slint:2949
 msgid "Your filters keep running, also once replies are off."
 msgstr ""
 "Dine filtre fortsætter med at køre, også når automatiske svar er slået fra."
 
-#: ui/app.slint:2935
+#: ui/app.slint:2950
 msgid "Replace changes"
 msgstr "Erstat ændringer"
 
-#: ui/app.slint:2935
+#: ui/app.slint:2950
 msgid "Run both"
 msgstr "Kør begge"
 
-#: ui/app.slint:3169
+#: ui/app.slint:3184
 msgid "Mailbox startup failed"
 msgstr "Opstart af postkasse mislykkedes"
 
-#: ui/app.slint:3175
+#: ui/app.slint:3190
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail kunne ikke åbne den lokale lagring"
 
-#: ui/app.slint:3188
+#: ui/app.slint:3203
 msgid "Diagnostic ID: {}"
 msgstr "Diagnostik-id: {}"
 
-#: ui/app.slint:3191
+#: ui/app.slint:3206
 msgid "Diagnostic ID {}"
 msgstr "Diagnostik-id {}"
 
-#: ui/app.slint:3196
+#: ui/app.slint:3211
 msgid "Retry"
 msgstr "Prøv igen"
 
-#: ui/app.slint:3204 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:3219 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Kopiér diagnostik"
 
@@ -3679,7 +3701,7 @@ msgstr "Automatiske svar er slået til"
 msgid "Turn off"
 msgstr "Slå fra"
 
-#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:611
+#: ui/auto-replies.slint:80 ui/components/sidebar-controls.slint:625
 #: ui/translation.slint:155
 msgid "Settings"
 msgstr "Indstillinger"
@@ -3715,7 +3737,7 @@ msgid "Paused"
 msgstr "Sat på pause"
 
 #: ui/components/account-calendars.slint:73
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Sign-in required"
 msgstr "Logind påkrævet"
 
@@ -3731,7 +3753,7 @@ msgstr "Offline · forsøger automatisk igen"
 msgid "Calendar sync error: {}"
 msgstr "Fejl i kalendersynkronisering: {}"
 
-#: ui/components/account-calendars.slint:170 ui/folder-visibility.slint:235
+#: ui/components/account-calendars.slint:170 ui/folder-visibility.slint:236
 msgid "Sync {}"
 msgstr "Synkronisér {}"
 
@@ -3756,145 +3778,157 @@ msgid "Invitations for events you create here are sent from {}."
 msgstr "Invitationer til begivenheder, du opretter her, sendes fra {}."
 
 #: ui/components/account-calendars.slint:275
-#: ui/dialogs/settings-dialog.slint:4611
+#: ui/dialogs/settings-dialog.slint:4650
 msgid "Add CalDAV calendar"
 msgstr "Tilføj CalDAV-kalender"
 
-#: ui/components/account-mail-preferences.slint:271
+#: ui/components/account-mail-preferences.slint:274
 #: ui/views/mail-reading-pane.slint:413
 msgid "Cc"
 msgstr "Cc"
 
-#: ui/components/account-mail-preferences.slint:272
+#: ui/components/account-mail-preferences.slint:275
 msgid "Addresses that get a copy (optional)"
 msgstr "Adresser, der får en kopi (valgfrit)"
 
-#: ui/components/account-mail-preferences.slint:275
+#: ui/components/account-mail-preferences.slint:278
 msgid "Bcc"
 msgstr "Bcc"
 
-#: ui/components/account-mail-preferences.slint:276
+#: ui/components/account-mail-preferences.slint:279
 msgid "Addresses that get a hidden copy (optional)"
 msgstr "Adresser, der får en skjult kopi (valgfrit)"
 
+#: ui/components/account-mail-preferences.slint:289
+msgid "Signatures"
+msgstr "Signaturer"
+
+#: ui/components/account-mail-preferences.slint:290
+#, fuzzy
+#| msgid "Company"
+msgid "Composing"
+msgstr "Virksomhed"
+
+#: ui/components/account-mail-preferences.slint:291
+msgid "OpenPGP"
+msgstr "OpenPGP"
+
 #: ui/components/account-mail-preferences.slint:292
+msgid "Automatic replies"
+msgstr "Automatiske svar"
+
+#: ui/components/account-mail-preferences.slint:301
 msgid "Cc {}"
 msgstr "Cc {}"
 
-#: ui/components/account-mail-preferences.slint:293
+#: ui/components/account-mail-preferences.slint:302
 msgid "Bcc {}"
 msgstr "Bcc {}"
 
-#: ui/components/account-mail-preferences.slint:294
+#: ui/components/account-mail-preferences.slint:303
 msgid "Bcc {} from your provider"
 msgstr "Bcc {} fra din udbyder"
 
-#: ui/components/account-mail-preferences.slint:300
+#: ui/components/account-mail-preferences.slint:309
 msgid "Server allows any address at this domain"
 msgstr "Serveren tillader enhver adresse på dette domæne"
 
-#: ui/components/account-mail-preferences.slint:303
+#: ui/components/account-mail-preferences.slint:312
 msgid "Awaiting verification by the provider; cannot be selected yet"
 msgstr "Afventer verificering af udbyderen; kan ikke vælges endnu"
 
-#: ui/components/account-mail-preferences.slint:306
+#: ui/components/account-mail-preferences.slint:315
 msgid "The server refused the last message from this address: {}"
 msgstr "Serveren afviste den sidste besked fra denne adresse: {}"
 
-#: ui/components/account-mail-preferences.slint:306
+#: ui/components/account-mail-preferences.slint:315
 msgid "The server refused the last message from this address"
 msgstr "Serveren afviste den sidste besked fra denne adresse"
 
-#: ui/components/account-mail-preferences.slint:309
+#: ui/components/account-mail-preferences.slint:318
 msgid "Sign-in address · replies go to {}"
 msgstr "Logindadresse · svar sendes til {}"
 
-#: ui/components/account-mail-preferences.slint:309
+#: ui/components/account-mail-preferences.slint:318
 msgid "Sign-in address"
 msgstr "Logindadresse"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:322
 msgid "Added by you · accepted by the server · replies go to {}"
 msgstr "Tilføjet af dig · accepteret af serveren · svar sendes til {}"
 
-#: ui/components/account-mail-preferences.slint:313
+#: ui/components/account-mail-preferences.slint:322
 msgid "Added by you · accepted by the server"
 msgstr "Tilføjet af dig · accepteret af serveren"
 
-#: ui/components/account-mail-preferences.slint:315
+#: ui/components/account-mail-preferences.slint:324
 msgid "Added by you · not used yet · replies go to {}"
 msgstr "Tilføjet af dig · endnu ikke brugt · svar sendes til {}"
 
-#: ui/components/account-mail-preferences.slint:315
+#: ui/components/account-mail-preferences.slint:324
 msgid "Added by you · not used yet"
 msgstr "Tilføjet af dig · endnu ikke brugt"
 
-#: ui/components/account-mail-preferences.slint:317
+#: ui/components/account-mail-preferences.slint:326
 msgid "Provided by the server · replies go to {}"
 msgstr "Leveret af serveren · svar sendes til {}"
 
-#: ui/components/account-mail-preferences.slint:317
+#: ui/components/account-mail-preferences.slint:326
 msgid "Provided by the server"
 msgstr "Leveret af serveren"
 
-#: ui/components/account-mail-preferences.slint:321
-msgid "Sender identities, signatures, OpenPGP & automatic replies"
+#: ui/components/account-mail-preferences.slint:330
+#, fuzzy
+#| msgid "Sender identities, signatures, OpenPGP & automatic replies"
+msgid "Sender identities, signatures, composing, OpenPGP & automatic replies"
 msgstr "Afsenderidentiteter, signaturer, OpenPGP & automatiske svar"
 
-#: ui/components/account-mail-preferences.slint:322
+#: ui/components/account-mail-preferences.slint:331
+#, fuzzy
+#| msgid ""
+#| "Choose an account to manage its sender identity, signature, message "
+#| "protection and automatic replies."
 msgid ""
-"Choose an account to manage its sender identity, signature, message "
-"protection and automatic replies."
+"Choose an account to manage its sender identity, signature, how its messages "
+"are written, message protection and automatic replies."
 msgstr ""
 "Vælg en konto for at administrere dens afsenderidentitet, signatur, "
 "beskedbeskyttelse og automatiske svar."
 
-#: ui/components/account-mail-preferences.slint:333
-msgid "Signatures"
-msgstr "Signaturer"
-
-#: ui/components/account-mail-preferences.slint:334
-msgid "OpenPGP"
-msgstr "OpenPGP"
-
-#: ui/components/account-mail-preferences.slint:335
-msgid "Automatic replies"
-msgstr "Automatiske svar"
-
-#: ui/components/account-mail-preferences.slint:340
+#: ui/components/account-mail-preferences.slint:367
 msgid "Default sender identity"
 msgstr "Standardafsenderidentitet"
 
-#: ui/components/account-mail-preferences.slint:340
+#: ui/components/account-mail-preferences.slint:367
 msgid "Preselected for new messages. Your sign-in address is unchanged."
 msgstr "Forudvalgt til nye beskeder. Din logindadresse er uændret."
 
-#: ui/components/account-mail-preferences.slint:359
+#: ui/components/account-mail-preferences.slint:386
 msgid "Save sender default"
 msgstr "Gem afsenderstandard"
 
-#: ui/components/account-mail-preferences.slint:360
+#: ui/components/account-mail-preferences.slint:387
 msgid "Refresh sender identities"
 msgstr "Opdatér afsenderidentiteter"
 
-#: ui/components/account-mail-preferences.slint:365
+#: ui/components/account-mail-preferences.slint:392
 msgid "Search sender addresses"
 msgstr "Søg afsenderadresser"
 
-#: ui/components/account-mail-preferences.slint:380
-#: ui/dialogs/settings-dialog.slint:3193
+#: ui/components/account-mail-preferences.slint:407
+#: ui/dialogs/settings-dialog.slint:3232
 msgid "Edit"
 msgstr "Redigér"
 
-#: ui/components/account-mail-preferences.slint:386
+#: ui/components/account-mail-preferences.slint:413
 msgid "Showing {} of {} addresses. Search to find the others."
 msgstr "Viser {} af {} adresser. Søg for at finde de andre."
 
-#: ui/components/account-mail-preferences.slint:390
+#: ui/components/account-mail-preferences.slint:417
 msgid "No matching addresses"
 msgstr "Ingen matchende adresser"
 
-#: ui/components/account-mail-preferences.slint:392
+#: ui/components/account-mail-preferences.slint:419
 msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
@@ -3903,19 +3937,19 @@ msgstr ""
 "indstillingerne under Konti › Send mail som, og opdatér derefter "
 "afsenderidentiteter."
 
-#: ui/components/account-mail-preferences.slint:397
+#: ui/components/account-mail-preferences.slint:424
 msgid "Copies of mail from {}"
 msgstr "Kopier af e-mail fra {}"
 
-#: ui/components/account-mail-preferences.slint:398
+#: ui/components/account-mail-preferences.slint:425
 msgid "Edit sender address"
 msgstr "Redigér afsenderadresse"
 
-#: ui/components/account-mail-preferences.slint:398
+#: ui/components/account-mail-preferences.slint:425
 msgid "Add a sender address"
 msgstr "Tilføj en afsenderadresse"
 
-#: ui/components/account-mail-preferences.slint:403
+#: ui/components/account-mail-preferences.slint:430
 msgid ""
 "Your provider sets this address's name and reply-to address. Mail you write "
 "from it starts with these copies too."
@@ -3923,7 +3957,7 @@ msgstr ""
 "Din udbyder angiver navnet og svaradressen for denne adresse. E-mails, du "
 "skriver fra den, starter også med disse kopier."
 
-#: ui/components/account-mail-preferences.slint:405
+#: ui/components/account-mail-preferences.slint:432
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
@@ -3931,7 +3965,7 @@ msgstr ""
 "Din server lader dig sende fra enhver adresse på de domæner, der vises som "
 "jokertegn. Tilføj de adresser, du vil vælge imellem."
 
-#: ui/components/account-mail-preferences.slint:406
+#: ui/components/account-mail-preferences.slint:433
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
 "server decides when you send; Flectar Mail shows whether it accepted the "
@@ -3941,58 +3975,58 @@ msgstr ""
 "Serveren beslutter, når du sender; Flectar Mail viser, om den accepterede "
 "den sidste besked."
 
-#: ui/components/account-mail-preferences.slint:408
-#: ui/dialogs/settings-dialog.slint:4936 ui/views/onboarding-view.slint:342
+#: ui/components/account-mail-preferences.slint:435
+#: ui/dialogs/settings-dialog.slint:4975 ui/views/onboarding-view.slint:342
 msgid "Email address"
 msgstr "E-mailadresse"
 
-#: ui/components/account-mail-preferences.slint:408
+#: ui/components/account-mail-preferences.slint:435
 msgid "alias@example.com"
 msgstr "alias@example.com"
 
-#: ui/components/account-mail-preferences.slint:409
+#: ui/components/account-mail-preferences.slint:436
 msgid "Sender name"
 msgstr "Afsendernavn"
 
-#: ui/components/account-mail-preferences.slint:409
+#: ui/components/account-mail-preferences.slint:436
 msgid "Name shown to recipients (optional)"
 msgstr "Navn vist til modtagere (valgfri)"
 
-#: ui/components/account-mail-preferences.slint:410
+#: ui/components/account-mail-preferences.slint:437
 msgid "Reply-to address"
 msgstr "Svar-til-adresse"
 
-#: ui/components/account-mail-preferences.slint:410
+#: ui/components/account-mail-preferences.slint:437
 msgid "Where replies should go (optional)"
 msgstr "Hvor svar skal sendes (valgfri)"
 
-#: ui/components/account-mail-preferences.slint:417
+#: ui/components/account-mail-preferences.slint:444
 msgid "Save copies"
 msgstr "Gem kopier"
 
-#: ui/components/account-mail-preferences.slint:418
+#: ui/components/account-mail-preferences.slint:445
 msgid "Save sender address"
 msgstr "Gem afsenderadresse"
 
-#: ui/components/account-mail-preferences.slint:418
+#: ui/components/account-mail-preferences.slint:445
 msgid "Add sender address"
 msgstr "Tilføj afsenderadresse"
 
-#: ui/components/account-mail-preferences.slint:423
+#: ui/components/account-mail-preferences.slint:450
 #: ui/components/rule-editor.slint:516 ui/device-sync.slint:1189
 #: ui/device-sync.slint:1440 ui/dialogs/block-sender-dialog.slint:120
-#: ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4687
-#: ui/dialogs/settings-dialog.slint:5025 ui/dialogs/settings-dialog.slint:5339
+#: ui/dialogs/import-dialog.slint:316 ui/dialogs/settings-dialog.slint:4726
+#: ui/dialogs/settings-dialog.slint:5064 ui/dialogs/settings-dialog.slint:5378
 #: ui/link-services.slint:131 ui/network.slint:433
-#: ui/views/files-view.slint:480 ui/views/mail-reading-pane.slint:2630
+#: ui/views/files-view.slint:480 ui/views/mail-reading-pane.slint:2629
 msgid "Cancel"
 msgstr "Annullér"
 
-#: ui/components/account-mail-preferences.slint:430
+#: ui/components/account-mail-preferences.slint:457
 msgid "Automatic Cc and Bcc"
 msgstr "Automatisk Cc og Bcc"
 
-#: ui/components/account-mail-preferences.slint:431
+#: ui/components/account-mail-preferences.slint:458
 msgid ""
 "Every message you write from this account starts with these copies, and "
 "shows them so you can take them out. Each sender address can add its own."
@@ -4000,19 +4034,19 @@ msgstr ""
 "Hver besked, du skriver fra denne konto, starter med disse kopier, og viser "
 "dem, så du kan fjerne dem. Hver afsenderadresse kan tilføje sine egne."
 
-#: ui/components/account-mail-preferences.slint:441
+#: ui/components/account-mail-preferences.slint:468
 msgid "Signature"
 msgstr "Signatur"
 
-#: ui/components/account-mail-preferences.slint:441
+#: ui/components/account-mail-preferences.slint:468
 msgid "Saved separately for each account."
 msgstr "Gemmes separat for hver konto."
 
-#: ui/components/account-mail-preferences.slint:457
+#: ui/components/account-mail-preferences.slint:484
 msgid "Signature preview"
 msgstr "Forhåndsvisning af signatur"
 
-#: ui/components/account-mail-preferences.slint:460
+#: ui/components/account-mail-preferences.slint:487
 msgid ""
 "Signatures can have formatting and pictures. They open in the composer to "
 "write."
@@ -4020,67 +4054,77 @@ msgstr ""
 "Signaturer kan have formatering og billeder. De åbnes i skrivevinduet for at "
 "skrive."
 
-#: ui/components/account-mail-preferences.slint:462
+#: ui/components/account-mail-preferences.slint:489
 msgid "Edit signature"
 msgstr "Redigér signatur"
 
-#: ui/components/account-mail-preferences.slint:463
+#: ui/components/account-mail-preferences.slint:490
 msgid "New signature"
 msgstr "Ny signatur"
 
-#: ui/components/account-mail-preferences.slint:467
+#: ui/components/account-mail-preferences.slint:494
 msgid "New messages"
 msgstr "Nye beskeder"
 
-#: ui/components/account-mail-preferences.slint:467
+#: ui/components/account-mail-preferences.slint:494
 msgid "Signature inserted when you start a message."
 msgstr "Signatur indsættes, når du starter en besked."
 
-#: ui/components/account-mail-preferences.slint:473
+#: ui/components/account-mail-preferences.slint:500
 msgid "Replies & forwards"
 msgstr "Svar & videresendelser"
 
-#: ui/components/account-mail-preferences.slint:473
+#: ui/components/account-mail-preferences.slint:500
 msgid "Placed above the quoted message."
 msgstr "Placeres over den citerede besked."
 
-#: ui/components/account-mail-preferences.slint:478
+#: ui/components/account-mail-preferences.slint:505
 msgid "Save signature defaults"
 msgstr "Gem signaturstandarder"
 
-#: ui/components/account-mail-preferences.slint:481
+#: ui/components/account-mail-preferences.slint:510
 msgid "Message format"
 msgstr "Beskedformat"
 
-#: ui/components/account-mail-preferences.slint:481
+#: ui/components/account-mail-preferences.slint:510
 msgid "How new messages start. Each message can change it."
 msgstr "Hvordan nye beskeder starter. Hver besked kan ændre det."
 
-#: ui/components/account-mail-preferences.slint:482
+#: ui/components/account-mail-preferences.slint:511
 msgctxt "message format"
 msgid "Formatted text"
 msgstr "Formateret tekst"
 
-#: ui/components/account-mail-preferences.slint:482
+#: ui/components/account-mail-preferences.slint:511
 msgctxt "message format"
 msgid "Plain text"
 msgstr "Almindelig tekst"
 
-#: ui/components/account-mail-preferences.slint:491
+#: ui/components/account-mail-preferences.slint:520
 msgid "Plain text in replies to plain text"
 msgstr "Almindelig tekst i svar til almindelig tekst"
 
-#: ui/components/account-mail-preferences.slint:491
+#: ui/components/account-mail-preferences.slint:520
 msgid "Replies and forwards to plain-text messages start as plain text."
 msgstr ""
 "Svar og videresendelser til almindelige tekstbeskeder starter som almindelig "
 "tekst."
 
-#: ui/components/account-mail-preferences.slint:498
+#: ui/components/account-mail-preferences.slint:527
+msgid "Start replies below the quote"
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:527
+msgid ""
+"The message you answer goes into your reply as text, to answer between its "
+"lines, and you write below it."
+msgstr ""
+
+#: ui/components/account-mail-preferences.slint:534
 msgid "Request read receipts"
 msgstr "Anmod om læsekvitteringer"
 
-#: ui/components/account-mail-preferences.slint:498
+#: ui/components/account-mail-preferences.slint:534
 msgid ""
 "New messages ask to be told when they're read. Each message can change it "
 "under More options."
@@ -4088,68 +4132,68 @@ msgstr ""
 "Nye beskeder beder om at blive underrettet, når de er læst. Hver besked kan "
 "ændre det under Flere indstillinger."
 
-#: ui/components/account-mail-preferences.slint:513
+#: ui/components/account-mail-preferences.slint:549
 msgid "Send automatic replies"
 msgstr "Send automatiske svar"
 
-#: ui/components/account-mail-preferences.slint:522
+#: ui/components/account-mail-preferences.slint:558
 msgid "FIRST DAY (OPTIONAL)"
 msgstr "FØRSTE DAG (VALGFRI)"
 
-#: ui/components/account-mail-preferences.slint:523
+#: ui/components/account-mail-preferences.slint:559
 msgid "First day"
 msgstr "Første dag"
 
-#: ui/components/account-mail-preferences.slint:523
+#: ui/components/account-mail-preferences.slint:559
 #: ui/views/contacts-view.slint:809
 msgid "YYYY-MM-DD"
 msgstr "YYYY-MM-DD"
 
-#: ui/components/account-mail-preferences.slint:527
+#: ui/components/account-mail-preferences.slint:563
 msgid "LAST DAY (OPTIONAL)"
 msgstr "SIDSTE DAG (VALGFRI)"
 
-#: ui/components/account-mail-preferences.slint:528
+#: ui/components/account-mail-preferences.slint:564
 msgid "Last day"
 msgstr "Sidste dag"
 
-#: ui/components/account-mail-preferences.slint:533
+#: ui/components/account-mail-preferences.slint:569
 msgid "SUBJECT"
 msgstr "EMNE"
 
-#: ui/components/account-mail-preferences.slint:534
+#: ui/components/account-mail-preferences.slint:570
 msgid "Subject"
 msgstr "Emne"
 
-#: ui/components/account-mail-preferences.slint:534
+#: ui/components/account-mail-preferences.slint:570
 msgid "Such as Out of office"
 msgstr "F.eks. Væk fra kontoret"
 
-#: ui/components/account-mail-preferences.slint:536
+#: ui/components/account-mail-preferences.slint:572
 msgid "MESSAGE"
 msgstr "BESKED"
 
-#: ui/components/account-mail-preferences.slint:540
+#: ui/components/account-mail-preferences.slint:576
 msgid "Message, such as I'm away until Monday and will answer when I'm back."
 msgstr "Besked, f.eks. Jeg er væk indtil mandag og svarer, når jeg er tilbage."
 
-#: ui/components/account-mail-preferences.slint:544
+#: ui/components/account-mail-preferences.slint:580
 msgid "Only reply to my contacts"
 msgstr "Svar kun mine kontakter"
 
-#: ui/components/account-mail-preferences.slint:550
+#: ui/components/account-mail-preferences.slint:586
 msgid "Only reply inside my organization"
 msgstr "Svar kun internt i min organisation"
 
-#: ui/components/account-mail-preferences.slint:550
+#: ui/components/account-mail-preferences.slint:586
 msgid "Senders from other domains get no reply."
 msgstr "Afsendere fra andre domæner får intet svar."
 
-#: ui/components/account-mail-preferences.slint:565 ui/network.slint:203
+#: ui/components/account-mail-preferences.slint:601 ui/network.slint:203
 msgid "Saving…"
 msgstr "Gemmer…"
 
-#: ui/components/account-mail-preferences.slint:574
+#: ui/components/account-mail-preferences.slint:610
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
@@ -4157,7 +4201,7 @@ msgstr ""
 "OpenPGP beskytter beskedbrødtekster og vedhæftede filer. Digitale signaturer "
 "lader modtagere kontrollere, hvem der har signeret en besked."
 
-#: ui/components/account-mail-preferences.slint:575
+#: ui/components/account-mail-preferences.slint:611
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
@@ -4165,7 +4209,7 @@ msgstr ""
 "Bruger installeret GnuPG 2.x og dets sikre nøglelager. Adgangsfraser "
 "indtastes i GnuPG's oplåsningsdialog."
 
-#: ui/components/account-mail-preferences.slint:575
+#: ui/components/account-mail-preferences.slint:611
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
@@ -4173,11 +4217,11 @@ msgstr ""
 "OpenPGP er ikke tilgængelig på denne mobile build. Beskyttede konti kan ikke "
 "sende uden en understøttet krypteringsmotor."
 
-#: ui/components/account-mail-preferences.slint:576
+#: ui/components/account-mail-preferences.slint:612
 msgid "Create a new key"
 msgstr "Opret en ny nøgle"
 
-#: ui/components/account-mail-preferences.slint:577
+#: ui/components/account-mail-preferences.slint:613
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
@@ -4185,37 +4229,37 @@ msgstr ""
 "Nye nøgler udløber efter to år. GnuPG beder dig om at beskytte den private "
 "nøgle med en adgangsfrase."
 
-#: ui/components/account-mail-preferences.slint:578
+#: ui/components/account-mail-preferences.slint:614
 msgid "Your full OpenPGP fingerprint"
 msgstr "Dit fulde OpenPGP-fingeraftryk"
 
-#: ui/components/account-mail-preferences.slint:578
+#: ui/components/account-mail-preferences.slint:614
 msgid "Your full OpenPGP key fingerprint"
 msgstr "Dit fulde OpenPGP-nøglefingeraftryk"
 
-#: ui/components/account-mail-preferences.slint:580
+#: ui/components/account-mail-preferences.slint:616
 msgid "Digitally sign messages"
 msgstr "Signér beskeder digitalt"
 
-#: ui/components/account-mail-preferences.slint:580
+#: ui/components/account-mail-preferences.slint:616
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr "Beviser, at du har din private nøgle; krypterer ikke beskeden."
 
-#: ui/components/account-mail-preferences.slint:585
+#: ui/components/account-mail-preferences.slint:621
 msgid "Require encryption"
 msgstr "Kræv kryptering"
 
-#: ui/components/account-mail-preferences.slint:585
+#: ui/components/account-mail-preferences.slint:621
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 "Forhindrer afsendelse, medmindre hver modtager har en verificeret, brugbar "
 "nøgle."
 
-#: ui/components/account-mail-preferences.slint:589
+#: ui/components/account-mail-preferences.slint:625
 msgid "Verified recipient keys"
 msgstr "Verificerede modtagernøgler"
 
-#: ui/components/account-mail-preferences.slint:590
+#: ui/components/account-mail-preferences.slint:626
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
@@ -4225,31 +4269,31 @@ msgstr ""
 "indtast én email=fingeraftryk pr. linje. Det verificerer ikke en nøgle alene "
 "at importere den."
 
-#: ui/components/account-mail-preferences.slint:591
+#: ui/components/account-mail-preferences.slint:627
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr "person@example.org=FULL_FINGERPRINT"
 
-#: ui/components/account-mail-preferences.slint:592
+#: ui/components/account-mail-preferences.slint:628
 msgid "Save OpenPGP settings"
 msgstr "Gem OpenPGP-indstillinger"
 
-#: ui/components/account-mail-preferences.slint:594
+#: ui/components/account-mail-preferences.slint:630
 msgid "Import key"
 msgstr "Importér nøgle"
 
-#: ui/components/account-mail-preferences.slint:595
+#: ui/components/account-mail-preferences.slint:631
 msgid "Export public key"
 msgstr "Eksportér offentlig nøgle"
 
-#: ui/components/account-mail-preferences.slint:596
+#: ui/components/account-mail-preferences.slint:632
 msgid "Show keys"
 msgstr "Vis nøgler"
 
-#: ui/components/account-mail-preferences.slint:604
+#: ui/components/account-mail-preferences.slint:640
 msgid "Open message file (.eml)"
 msgstr "Åbn beskedfil (.eml)"
 
-#: ui/components/account-mail-preferences.slint:606
+#: ui/components/account-mail-preferences.slint:642
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
@@ -4257,7 +4301,7 @@ msgstr ""
 "Administrér udløb, tilbagekaldelse og sikkerhedskopier af private nøgler i "
 "GnuPG. Kun offentlige nøgler eksporteres her."
 
-#: ui/components/account-mail-preferences.slint:607
+#: ui/components/account-mail-preferences.slint:643
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
@@ -4267,15 +4311,15 @@ msgstr ""
 "enhed. Eksisterende serverkladder beskyttes ikke med tilbagevirkende kraft. "
 "S/MIME-certifikater understøttes ikke."
 
-#: ui/components/account-mail-preferences.slint:610
+#: ui/components/account-mail-preferences.slint:646
 msgid "Working…"
 msgstr "Arbejder…"
 
-#: ui/components/account-mail-preferences.slint:622
+#: ui/components/account-mail-preferences.slint:658
 msgid "OpenPGP message"
 msgstr "OpenPGP-besked"
 
-#: ui/components/account-mail-preferences.slint:625
+#: ui/components/account-mail-preferences.slint:661
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
@@ -4283,16 +4327,16 @@ msgstr ""
 "Dekrypteret indhold vises som tekst uden fjernt indhold. Det tilføjes ikke "
 "til søgning eller gemmes i e-maildatabasen."
 
-#: ui/components/account-mail-preferences.slint:626
+#: ui/components/account-mail-preferences.slint:662
 msgid "Export decrypted message"
 msgstr "Eksportér dekrypteret besked"
 
-#: ui/components/account-mail-preferences.slint:627
+#: ui/components/account-mail-preferences.slint:663
 #: ui/components/composer-fields.slint:83 ui/components/notice-toast.slint:90
 #: ui/components/rule-editor.slint:349 ui/device-sync.slint:1440
-#: ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4768
-#: ui/dialogs/settings-dialog.slint:5111 ui/dialogs/when-dialog.slint:197
-#: ui/folder-visibility.slint:136 ui/views/files-view.slint:566
+#: ui/dialogs/move-dialog.slint:213 ui/dialogs/settings-dialog.slint:4807
+#: ui/dialogs/settings-dialog.slint:5150 ui/dialogs/when-dialog.slint:197
+#: ui/folder-visibility.slint:137 ui/views/files-view.slint:566
 #: ui/views/files-view.slint:739 ui/window-chrome.slint:238
 msgid "Close"
 msgstr "Luk"
@@ -4553,7 +4597,7 @@ msgid "Show calendars"
 msgstr "Vis kalendere"
 
 #: ui/components/calendar-agenda.slint:68 ui/components/theme-editor.slint:782
-#: ui/dialogs/settings-dialog.slint:2300
+#: ui/dialogs/settings-dialog.slint:2339
 msgid "Reset"
 msgstr "Nulstil"
 
@@ -4680,7 +4724,7 @@ msgstr "MINE KALENDERE"
 msgid "Hide {}"
 msgstr "Skjul {}"
 
-#: ui/components/calendar.slint:375 ui/folder-visibility.slint:227
+#: ui/components/calendar.slint:375 ui/folder-visibility.slint:228
 msgid "Show {}"
 msgstr "Vis {}"
 
@@ -5299,12 +5343,12 @@ msgstr "Hvad handler denne e-mail om?"
 msgid "Confirm"
 msgstr "Bekræft"
 
-#: ui/components/controls.slint:114 ui/dialogs/settings-dialog.slint:1663
+#: ui/components/controls.slint:114 ui/dialogs/settings-dialog.slint:1675
 msgid "On"
 msgstr "Til"
 
-#: ui/components/controls.slint:114 ui/dialogs/settings-dialog.slint:863
-#: ui/dialogs/settings-dialog.slint:1663
+#: ui/components/controls.slint:114 ui/dialogs/settings-dialog.slint:875
+#: ui/dialogs/settings-dialog.slint:1675
 msgid "Off"
 msgstr "Fra"
 
@@ -6296,11 +6340,11 @@ msgstr "alle disse betingelser"
 msgid "any of these conditions"
 msgstr "en af disse betingelser"
 
-#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:2636
+#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:2675
 msgid "New rule"
 msgstr "Ny regel"
 
-#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:5198
+#: ui/components/rule-editor.slint:336 ui/dialogs/settings-dialog.slint:5237
 msgid "Edit rule"
 msgstr "Redigér regel"
 
@@ -6497,91 +6541,103 @@ msgstr "eller"
 msgid "{}, {}"
 msgstr "{}, {}"
 
-#: ui/components/sidebar-controls.slint:226
+#: ui/components/sidebar-controls.slint:232
 msgid "Mark all as read…"
 msgstr "Markér alle som læst…"
 
-#: ui/components/sidebar-controls.slint:231
+#: ui/components/sidebar-controls.slint:237
 msgid "New subfolder"
 msgstr "Ny undermappe"
 
-#: ui/components/sidebar-controls.slint:236 ui/dialogs/folder-dialog.slint:30
+#: ui/components/sidebar-controls.slint:242 ui/dialogs/folder-dialog.slint:30
 msgid "Rename folder"
 msgstr "Omdøb mappe"
 
-#: ui/components/sidebar-controls.slint:241
+#: ui/components/sidebar-controls.slint:247
 #, fuzzy
 #| msgid "Hide folders"
 msgid "Hide folder"
 msgstr "Skjul mapper"
 
-#: ui/components/sidebar-controls.slint:245
+#: ui/components/sidebar-controls.slint:251
 msgid "Delete folder"
 msgstr "Slet mappe"
 
-#: ui/components/sidebar-controls.slint:250
+#: ui/components/sidebar-controls.slint:256
 msgid "Empty Trash…"
 msgstr "Tøm papirkurven…"
 
-#: ui/components/sidebar-controls.slint:254
+#: ui/components/sidebar-controls.slint:260
 msgid "New nested label"
 msgstr "Ny indlejret label"
 
-#: ui/components/sidebar-controls.slint:258
+#: ui/components/sidebar-controls.slint:264
 msgid "Rename global label"
 msgstr "Omdøb globalt label"
 
-#: ui/components/sidebar-controls.slint:258
+#: ui/components/sidebar-controls.slint:264
 msgid "Rename label in {}"
 msgstr "Omdøb label i {}"
 
-#: ui/components/sidebar-controls.slint:262
+#: ui/components/sidebar-controls.slint:268
+#, fuzzy
+#| msgid "New label"
+msgid "Show label"
+msgstr "Nyt label"
+
+#: ui/components/sidebar-controls.slint:272
+#, fuzzy
+#| msgid "Add label"
+msgid "Hide label"
+msgstr "Tilføj label"
+
+#: ui/components/sidebar-controls.slint:276
 msgid "Delete global label"
 msgstr "Slet globalt label"
 
-#: ui/components/sidebar-controls.slint:262
+#: ui/components/sidebar-controls.slint:276
 msgid "Delete label from {}"
 msgstr "Slet label fra {}"
 
-#: ui/components/sidebar-controls.slint:266
+#: ui/components/sidebar-controls.slint:280
 msgid "Edit saved search…"
 msgstr "Redigér gemt søgning…"
 
-#: ui/components/sidebar-controls.slint:270
+#: ui/components/sidebar-controls.slint:284
 msgid "Move up"
 msgstr "Flyt op"
 
-#: ui/components/sidebar-controls.slint:274
+#: ui/components/sidebar-controls.slint:288
 msgid "Move down"
 msgstr "Flyt ned"
 
-#: ui/components/sidebar-controls.slint:278
+#: ui/components/sidebar-controls.slint:292
 msgid "Delete saved search…"
 msgstr "Slet gemt søgning…"
 
-#: ui/components/sidebar-controls.slint:304
+#: ui/components/sidebar-controls.slint:318
 msgid "Collapse label"
 msgstr "Fold label sammen"
 
-#: ui/components/sidebar-controls.slint:304
+#: ui/components/sidebar-controls.slint:318
 msgid "Expand label"
 msgstr "Fold label ud"
 
-#: ui/components/sidebar-controls.slint:305
+#: ui/components/sidebar-controls.slint:319
 msgid "Collapse folder"
 msgstr "Fold mappe sammen"
 
-#: ui/components/sidebar-controls.slint:305
+#: ui/components/sidebar-controls.slint:319
 msgid "Expand folder"
 msgstr "Fold mappe ud"
 
 #. The menu's first line.
-#: ui/components/sidebar-controls.slint:381
+#: ui/components/sidebar-controls.slint:395
 msgid "Checking for new mail…"
 msgstr "Tjekker for ny e-mail…"
 
-#: ui/components/sidebar-controls.slint:485
-#: ui/dialogs/settings-dialog.slint:3314 ui/views/mail-list-pane.slint:884
+#: ui/components/sidebar-controls.slint:499
+#: ui/dialogs/settings-dialog.slint:3353 ui/views/mail-list-pane.slint:884
 msgid "Check for new mail"
 msgstr "Søg efter ny e-mail"
 
@@ -6589,7 +6645,7 @@ msgstr "Søg efter ny e-mail"
 msgid "New version available"
 msgstr "Ny version tilgængelig"
 
-#: ui/components/sidebar.slint:82 ui/dialogs/settings-dialog.slint:4259
+#: ui/components/sidebar.slint:82 ui/dialogs/settings-dialog.slint:4298
 msgid "Version {}"
 msgstr "Version {}"
 
@@ -6601,73 +6657,93 @@ msgstr "Flectar Mail {} er ude. Åbn dets udgivelsesside."
 msgid "Hide until the next version"
 msgstr "Skjul indtil næste version"
 
-#: ui/components/sidebar.slint:194 ui/views/mail-list-pane.slint:1893
+#: ui/components/sidebar.slint:196 ui/views/mail-list-pane.slint:1893
 msgid "New email"
 msgstr "Ny e-mail"
 
-#: ui/components/sidebar.slint:194
+#: ui/components/sidebar.slint:196
 msgid "Add an account"
 msgstr "Tilføj en konto"
 
-#: ui/components/sidebar.slint:248 ui/components/sidebar.slint:257
-#: ui/components/sidebar.slint:277
+#: ui/components/sidebar.slint:250 ui/components/sidebar.slint:259
+#: ui/components/sidebar.slint:279
 msgid "Find folder or label"
 msgstr "Find mappe eller label"
 
-#: ui/components/sidebar.slint:294
+#: ui/components/sidebar.slint:296
 msgid "Clear folder filter"
 msgstr "Ryd mappefilter"
 
-#: ui/components/sidebar.slint:310
+#: ui/components/sidebar.slint:312
 msgid "Add account"
 msgstr "Tilføj konto"
 
-#: ui/components/sidebar.slint:359
+#: ui/components/sidebar.slint:361
 msgid "ALL ACCOUNTS"
 msgstr "ALLE KONTI"
 
-#: ui/components/sidebar.slint:368
+#: ui/components/sidebar.slint:370
 msgid "All Inboxes"
 msgstr "Alle indbakker"
 
-#: ui/components/sidebar.slint:487
+#: ui/components/sidebar.slint:489
 msgid "Categories"
 msgstr "Kategorier"
 
-#: ui/components/sidebar.slint:577 ui/components/sidebar.slint:795
+#: ui/components/sidebar.slint:579 ui/components/sidebar.slint:797
 msgid "Labels"
 msgstr "Labels"
 
-#: ui/components/sidebar.slint:596
+#: ui/components/sidebar.slint:598
 msgid "Global label {}"
 msgstr "Globalt label {}"
 
-#: ui/components/sidebar.slint:631
+#: ui/components/sidebar.slint:633
 msgid "Saved searches"
 msgstr "Gemte søgninger"
 
-#: ui/components/sidebar.slint:651
+#: ui/components/sidebar.slint:653
 msgid "Saved search {}"
 msgstr "Gemt søgning {}"
 
-#: ui/components/sidebar.slint:675 ui/views/contacts-view.slint:222
+#: ui/components/sidebar.slint:677 ui/views/contacts-view.slint:222
 msgid "ACCOUNTS"
 msgstr "KONTI"
 
-#: ui/components/sidebar.slint:815
+#: ui/components/sidebar.slint:817
 msgid "{} label, {} account"
 msgstr "{} label, {} konto"
 
-#: ui/components/sidebar.slint:860 ui/dialogs/folder-dialog.slint:28
+#: ui/components/sidebar.slint:867
+msgid "Less"
+msgstr ""
+
+#: ui/components/sidebar.slint:867
+msgid "More"
+msgstr ""
+
+#: ui/components/sidebar.slint:868
+#, fuzzy
+#| msgid "Search labels"
+msgid "Show fewer labels"
+msgstr "Søg i labels"
+
+#: ui/components/sidebar.slint:868
+#, fuzzy
+#| msgid "Show folders"
+msgid "Show more labels"
+msgstr "Vis mapper"
+
+#: ui/components/sidebar.slint:886 ui/dialogs/folder-dialog.slint:28
 #: ui/views/files-view.slint:362 ui/views/files-view.slint:593
 msgid "New folder"
 msgstr "Ny mappe"
 
-#: ui/components/sidebar.slint:877 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:903 ui/dialogs/folder-dialog.slint:27
 msgid "New label"
 msgstr "Nyt label"
 
-#: ui/components/sidebar.slint:897
+#: ui/components/sidebar.slint:923
 msgid "No folders found"
 msgstr "Ingen mapper fundet"
 
@@ -6685,12 +6761,12 @@ msgstr[1] "{n} faner åbne"
 msgid "Files"
 msgstr "Filer"
 
-#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2325
-#: ui/dialogs/settings-dialog.slint:3559 ui/dialogs/settings-dialog.slint:4539
+#: ui/components/tab-overview.slint:70 ui/dialogs/settings-dialog.slint:2364
+#: ui/dialogs/settings-dialog.slint:3598 ui/dialogs/settings-dialog.slint:4578
 msgid "Contacts"
 msgstr "Kontakter"
 
-#: ui/components/tab-overview.slint:72 ui/dialogs/settings-dialog.slint:3990
+#: ui/components/tab-overview.slint:72 ui/dialogs/settings-dialog.slint:4029
 msgid "Mail"
 msgstr "Mail"
 
@@ -6699,7 +6775,7 @@ msgid "Close tab"
 msgstr "Luk fane"
 
 #: ui/components/tab-overview.slint:200 ui/components/tab-overview.slint:224
-#: ui/dialogs/settings-dialog.slint:4018
+#: ui/dialogs/settings-dialog.slint:4057
 msgid "Tabs"
 msgstr "Faner"
 
@@ -6786,7 +6862,7 @@ msgstr "Tema"
 msgid "Color scheme"
 msgstr "Farveskema"
 
-#: ui/components/theme-editor.slint:610 ui/dialogs/settings-dialog.slint:1663
+#: ui/components/theme-editor.slint:610 ui/dialogs/settings-dialog.slint:1675
 msgid "System"
 msgstr "System"
 
@@ -6799,7 +6875,7 @@ msgid "Palette"
 msgstr "Palet"
 
 #: ui/components/theme-editor.slint:621 ui/components/theme-editor.slint:633
-#: ui/dialogs/settings-dialog.slint:1696
+#: ui/dialogs/settings-dialog.slint:1708
 msgid "Default"
 msgstr "Standard"
 
@@ -6894,7 +6970,7 @@ msgstr "Luk andre faner"
 msgid "Close tabs to the right"
 msgstr "Luk faner til højre"
 
-#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:4014
+#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:4053
 msgid "Zoom out"
 msgstr "Zoom ud"
 
@@ -6906,7 +6982,7 @@ msgstr "Nulstil zoom ({}%)"
 msgid "Zoom percentage"
 msgstr "Zoomprocent"
 
-#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:4013
+#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:4052
 msgid "Zoom in"
 msgstr "Zoom ind"
 
@@ -6919,7 +6995,7 @@ msgstr "Tilpas til bredde"
 msgid "Scan the QR code your other device shows."
 msgstr "Scan QR-koden, din anden enhed viser."
 
-#: ui/device-sync.slint:185 ui/dialogs/settings-dialog.slint:5525
+#: ui/device-sync.slint:185 ui/dialogs/settings-dialog.slint:5564
 msgid "Unnamed device"
 msgstr "Unavngiven enhed"
 
@@ -6935,7 +7011,7 @@ msgstr "Månedlig"
 msgid "Yearly"
 msgstr "Årlig"
 
-#: ui/device-sync.slint:400 ui/dialogs/settings-dialog.slint:4147
+#: ui/device-sync.slint:400 ui/dialogs/settings-dialog.slint:4186
 msgid "Flectar Mail Sync"
 msgstr "Flectar Mail Sync"
 
@@ -6943,7 +7019,7 @@ msgstr "Flectar Mail Sync"
 msgid "All your devices, one subscription"
 msgstr "Alle dine enheder, ét abonnement"
 
-#: ui/device-sync.slint:437 ui/dialogs/settings-dialog.slint:4151
+#: ui/device-sync.slint:437 ui/dialogs/settings-dialog.slint:4190
 msgid "Scheduled emails go out from any of your devices"
 msgstr "Planlagte e-mails sendes fra enhver af dine enheder"
 
@@ -6955,7 +7031,7 @@ msgstr "Udskydelser, svarpåmindelser og skabeloner på hver enhed"
 msgid "Accounts, sign-ins, signatures, profiles and preferences"
 msgstr "Konti, logind, signaturer, profiler og præferencer"
 
-#: ui/device-sync.slint:440 ui/dialogs/settings-dialog.slint:4154
+#: ui/device-sync.slint:440 ui/dialogs/settings-dialog.slint:4193
 msgid "End-to-end encrypted: not even Flectar Mail can read it"
 msgstr "Ende-til-ende-krypteret: ikke engang Flectar Mail kan læse det"
 
@@ -7016,7 +7092,7 @@ msgid "{} a year"
 msgstr "{} om året"
 
 #: ui/device-sync.slint:638 ui/dialogs/settings-dialog.slint:92
-#: ui/dialogs/settings-dialog.slint:4461 ui/folder-visibility.slint:185
+#: ui/dialogs/settings-dialog.slint:4500 ui/folder-visibility.slint:186
 msgid "Sync"
 msgstr "Synkroniser"
 
@@ -7207,7 +7283,7 @@ msgstr "Ændringer foretaget her venter på at blive uploadet; intet går tabt."
 msgid "Syncing with {}"
 msgstr "Synkroniserer med {}"
 
-#: ui/device-sync.slint:759 ui/dialogs/settings-dialog.slint:2180
+#: ui/device-sync.slint:759 ui/dialogs/settings-dialog.slint:2219
 msgid "Syncing…"
 msgstr "Synkroniserer…"
 
@@ -7223,7 +7299,7 @@ msgstr "Sidst synkroniseret kl. {}."
 msgid "Last synced on {}."
 msgstr "Sidst synkroniseret den {}."
 
-#: ui/device-sync.slint:772 ui/dialogs/settings-dialog.slint:2180
+#: ui/device-sync.slint:772 ui/dialogs/settings-dialog.slint:2219
 msgid "Sync now"
 msgstr "Synkronisér nu"
 
@@ -7303,7 +7379,7 @@ msgstr "Slå fornyelse til igen, eller se fakturaer."
 msgid "Change your plan or payment method, see invoices, or cancel."
 msgstr "Skift din plan eller betalingsmetode, se fakturaer eller opsig."
 
-#: ui/device-sync.slint:829 ui/dialogs/settings-dialog.slint:3580
+#: ui/device-sync.slint:829 ui/dialogs/settings-dialog.slint:3619
 #: ui/views/files-view.slint:512
 msgid "Manage"
 msgstr "Administrér"
@@ -7312,7 +7388,7 @@ msgstr "Administrér"
 msgid "Devices"
 msgstr "Enheder"
 
-#: ui/device-sync.slint:841 ui/dialogs/settings-dialog.slint:5526
+#: ui/device-sync.slint:841 ui/dialogs/settings-dialog.slint:5565
 msgid "Removing a device stops it from reading anything new."
 msgstr "At fjerne en enhed stopper den i at læse noget nyt."
 
@@ -7394,7 +7470,7 @@ msgstr ""
 "At slå fra beholder denne enheds konti og indstillinger. At slette fjerner "
 "også den krypterede kopi fra serveren; hver enhed beholder sin egen."
 
-#: ui/device-sync.slint:967 ui/dialogs/settings-dialog.slint:3785
+#: ui/device-sync.slint:967 ui/dialogs/settings-dialog.slint:3824
 msgid "Delete…"
 msgstr "Slet…"
 
@@ -7533,7 +7609,7 @@ msgstr "Enhed tilføjet"
 
 #. Connecting once this device has scanned the other one's code.
 #: ui/device-sync.slint:1316 ui/device-sync.slint:1518
-#: ui/dialogs/settings-dialog.slint:4841 ui/views/onboarding-view.slint:494
+#: ui/dialogs/settings-dialog.slint:4880 ui/views/onboarding-view.slint:494
 msgid "Connecting…"
 msgstr "Forbinder…"
 
@@ -7689,13 +7765,13 @@ msgstr ""
 "tilføjes på andre enheder, beder dig logge ind én gang."
 
 #: ui/device-sync.slint:1567 ui/device-sync.slint:1575
-#: ui/dialogs/settings-dialog.slint:3615 ui/dialogs/settings-dialog.slint:4841
+#: ui/dialogs/settings-dialog.slint:3654 ui/dialogs/settings-dialog.slint:4880
 #: ui/link-services.slint:224
 msgid "Connect"
 msgstr "Forbind"
 
 #: ui/dialogs/attachment-preview-dialog.slint:39
-#: ui/dialogs/settings-dialog.slint:4321 ui/views/files-view.slint:510
+#: ui/dialogs/settings-dialog.slint:4360 ui/views/files-view.slint:510
 msgid "Download"
 msgstr "Download"
 
@@ -7920,7 +7996,7 @@ msgid "Importing…"
 msgstr "Importerer…"
 
 #: ui/dialogs/contact-import-dialog.slint:170
-#: ui/dialogs/settings-dialog.slint:3813
+#: ui/dialogs/settings-dialog.slint:3852
 msgid "Import"
 msgstr "Importér"
 
@@ -7969,7 +8045,7 @@ msgstr "Opret på øverste niveau"
 msgid "Inside “{}”"
 msgstr "Inde i ”{}”"
 
-#: ui/dialogs/folder-dialog.slint:136 ui/views/mail-reading-pane.slint:2577
+#: ui/dialogs/folder-dialog.slint:136 ui/views/mail-reading-pane.slint:2576
 msgid "Create label"
 msgstr "Opret label"
 
@@ -8128,11 +8204,11 @@ msgid "This account syncs with {} instead of downloading mail with POP3."
 msgstr ""
 "Denne konto synkroniserer med {} i stedet for at downloade e-mail med POP3."
 
-#: ui/dialogs/import-dialog.slint:155 ui/dialogs/settings-dialog.slint:3430
+#: ui/dialogs/import-dialog.slint:155 ui/dialogs/settings-dialog.slint:3469
 msgid "Mail is removed from the server once it's on this device."
 msgstr "E-mail fjernes fra serveren, når den er på denne enhed."
 
-#: ui/dialogs/import-dialog.slint:156 ui/dialogs/settings-dialog.slint:3429
+#: ui/dialogs/import-dialog.slint:156 ui/dialogs/settings-dialog.slint:3468
 msgid "Mail you delete here is removed from the server too."
 msgstr "E-mail, du sletter her, fjernes også fra serveren."
 
@@ -8324,7 +8400,7 @@ msgstr "Stop"
 msgid "Continue in background"
 msgstr "Fortsæt i baggrunden"
 
-#: ui/dialogs/import-dialog.slint:337 ui/dialogs/settings-dialog.slint:2259
+#: ui/dialogs/import-dialog.slint:337 ui/dialogs/settings-dialog.slint:2298
 msgid "Choose folder…"
 msgstr "Vælg mappe…"
 
@@ -8561,7 +8637,7 @@ msgstr "E-mail i {} kunne ikke læses: {}"
 msgid "Importing mail… {}%"
 msgstr "Importerer e-mail… {}%"
 
-#: ui/dialogs/import-dialog.slint:942 ui/folder-visibility.slint:176
+#: ui/dialogs/import-dialog.slint:942 ui/folder-visibility.slint:177
 msgid "Show"
 msgstr "Vis"
 
@@ -8582,16 +8658,16 @@ msgid "Move to"
 msgstr "Flyt til"
 
 #: ui/dialogs/move-dialog.slint:221 ui/dialogs/move-dialog.slint:222
-#: ui/folder-visibility.slint:160
+#: ui/folder-visibility.slint:161
 msgid "Search folders"
 msgstr "Søg i mapper"
 
-#: ui/dialogs/move-dialog.slint:234 ui/dialogs/settings-dialog.slint:3474
-#: ui/folder-visibility.slint:199
+#: ui/dialogs/move-dialog.slint:234 ui/dialogs/settings-dialog.slint:3513
+#: ui/folder-visibility.slint:200
 msgid "Folders"
 msgstr "Mapper"
 
-#: ui/dialogs/move-dialog.slint:334 ui/folder-visibility.slint:244
+#: ui/dialogs/move-dialog.slint:334 ui/folder-visibility.slint:245
 msgid "No matching folders"
 msgstr "Ingen matchende mapper"
 
@@ -8766,7 +8842,7 @@ msgstr "Gem indstillinger"
 
 #: ui/dialogs/rendering-info-dialog.slint:30
 #: ui/views/mail-reading-pane.slint:527 ui/views/mail-reading-pane.slint:587
-#: ui/views/mail-reading-pane.slint:2496
+#: ui/views/mail-reading-pane.slint:2495
 msgid "About email rendering"
 msgstr "Om e-mailgengivelse"
 
@@ -8916,242 +8992,254 @@ msgstr "Opsæt"
 msgid "Learn more"
 msgstr "Få mere at vide"
 
-#: ui/dialogs/settings-dialog.slint:822
+#: ui/dialogs/settings-dialog.slint:826
 msgctxt "list density"
 msgid "Comfortable"
 msgstr "Komfortabel"
 
-#: ui/dialogs/settings-dialog.slint:823
+#: ui/dialogs/settings-dialog.slint:827
 msgctxt "list density"
 msgid "Compact"
 msgstr "Kompakt"
 
-#: ui/dialogs/settings-dialog.slint:826
+#: ui/dialogs/settings-dialog.slint:830
 msgctxt "message preview"
 msgid "None"
 msgstr "Ingen"
 
-#: ui/dialogs/settings-dialog.slint:827
+#: ui/dialogs/settings-dialog.slint:831
 msgctxt "message preview"
 msgid "1 line"
 msgstr "1 linje"
 
-#: ui/dialogs/settings-dialog.slint:828
+#: ui/dialogs/settings-dialog.slint:832
 msgctxt "message preview"
 msgid "2 lines"
 msgstr "2 linjer"
 
-#: ui/dialogs/settings-dialog.slint:829
+#: ui/dialogs/settings-dialog.slint:833
 msgctxt "message preview"
 msgid "3 lines"
 msgstr "3 linjer"
 
-#: ui/dialogs/settings-dialog.slint:833 ui/dialogs/settings-dialog.slint:844
+#: ui/dialogs/settings-dialog.slint:837 ui/dialogs/settings-dialog.slint:848
 msgid "Never"
 msgstr "Aldrig"
 
-#: ui/dialogs/settings-dialog.slint:834
+#: ui/dialogs/settings-dialog.slint:838
 msgid "After 7 days"
 msgstr "Efter 7 dage"
 
-#: ui/dialogs/settings-dialog.slint:835
+#: ui/dialogs/settings-dialog.slint:839
 msgid "After 14 days"
 msgstr "Efter 14 dage"
 
-#: ui/dialogs/settings-dialog.slint:836
+#: ui/dialogs/settings-dialog.slint:840
 msgid "After 30 days"
 msgstr "Efter 30 dage"
 
-#: ui/dialogs/settings-dialog.slint:837
+#: ui/dialogs/settings-dialog.slint:841
 msgid "After 60 days"
 msgstr "Efter 60 dage"
 
-#: ui/dialogs/settings-dialog.slint:838
+#: ui/dialogs/settings-dialog.slint:842
 msgid "After 90 days"
 msgstr "Efter 90 dage"
 
-#: ui/dialogs/settings-dialog.slint:841
+#: ui/dialogs/settings-dialog.slint:845
 msgid "Immediately"
 msgstr "Med det samme"
 
-#: ui/dialogs/settings-dialog.slint:842
+#: ui/dialogs/settings-dialog.slint:846
 msgid "After 2 seconds"
 msgstr "Efter 2 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:843
+#: ui/dialogs/settings-dialog.slint:847
 msgid "After 5 seconds"
 msgstr "Efter 5 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:851
+#: ui/dialogs/settings-dialog.slint:855
+#, fuzzy
+#| msgctxt "image size"
+#| msgid "Original size"
+msgctxt "message view"
+msgid "Original"
+msgstr "Original størrelse"
+
+#: ui/dialogs/settings-dialog.slint:856 ui/views/mail-reading-pane.slint:1667
+msgid "Reader mode"
+msgstr "Læsetilstand"
+
+#: ui/dialogs/settings-dialog.slint:863
 msgid "Never send"
 msgstr "Send aldrig"
 
-#: ui/dialogs/settings-dialog.slint:852
+#: ui/dialogs/settings-dialog.slint:864
 msgid "Ask each time"
 msgstr "Spørg hver gang"
 
-#: ui/dialogs/settings-dialog.slint:853
+#: ui/dialogs/settings-dialog.slint:865
 msgid "Always send"
 msgstr "Send altid"
 
-#: ui/dialogs/settings-dialog.slint:858 ui/dialogs/settings-dialog.slint:915
+#: ui/dialogs/settings-dialog.slint:870 ui/dialogs/settings-dialog.slint:927
 msgid "Every minute"
 msgstr "Hvert minut"
 
-#: ui/dialogs/settings-dialog.slint:859 ui/dialogs/settings-dialog.slint:916
+#: ui/dialogs/settings-dialog.slint:871 ui/dialogs/settings-dialog.slint:928
 msgid "Every 5 minutes"
 msgstr "Hvert 5. minut"
 
-#: ui/dialogs/settings-dialog.slint:860 ui/dialogs/settings-dialog.slint:917
+#: ui/dialogs/settings-dialog.slint:872 ui/dialogs/settings-dialog.slint:929
 msgid "Every 15 minutes"
 msgstr "Hvert 15. minut"
 
-#: ui/dialogs/settings-dialog.slint:864
+#: ui/dialogs/settings-dialog.slint:876
 msgid "5 seconds"
 msgstr "5 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:865
+#: ui/dialogs/settings-dialog.slint:877
 msgid "10 seconds"
 msgstr "10 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:866
+#: ui/dialogs/settings-dialog.slint:878
 msgid "20 seconds"
 msgstr "20 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:867 ui/dialogs/settings-dialog.slint:908
+#: ui/dialogs/settings-dialog.slint:879 ui/dialogs/settings-dialog.slint:920
 msgid "30 seconds"
 msgstr "30 sekunder"
 
-#: ui/dialogs/settings-dialog.slint:891
+#: ui/dialogs/settings-dialog.slint:903
 msgid "Important mail"
 msgstr "Vigtig e-mail"
 
-#: ui/dialogs/settings-dialog.slint:892
+#: ui/dialogs/settings-dialog.slint:904
 msgid "All new mail"
 msgstr "Al ny e-mail"
 
-#: ui/dialogs/settings-dialog.slint:895
+#: ui/dialogs/settings-dialog.slint:907
 msgid "1 month"
 msgstr "1 måned"
 
-#: ui/dialogs/settings-dialog.slint:896
+#: ui/dialogs/settings-dialog.slint:908
 msgid "3 months"
 msgstr "3 måneder"
 
-#: ui/dialogs/settings-dialog.slint:897
+#: ui/dialogs/settings-dialog.slint:909
 msgid "6 months · Recommended"
 msgstr "6 måneder · Anbefalet"
 
-#: ui/dialogs/settings-dialog.slint:898
+#: ui/dialogs/settings-dialog.slint:910
 msgid "1 year"
 msgstr "1 år"
 
-#: ui/dialogs/settings-dialog.slint:899 ui/views/mail-list-pane.slint:867
+#: ui/dialogs/settings-dialog.slint:911 ui/views/mail-list-pane.slint:867
 msgid "All mail"
 msgstr "Al e-mail"
 
-#: ui/dialogs/settings-dialog.slint:903
+#: ui/dialogs/settings-dialog.slint:915
 msgid "Headers only"
 msgstr "Kun headere"
 
-#: ui/dialogs/settings-dialog.slint:904 ui/translation.slint:420
+#: ui/dialogs/settings-dialog.slint:916 ui/translation.slint:420
 msgid "Messages"
 msgstr "Beskeder"
 
-#: ui/dialogs/settings-dialog.slint:905
+#: ui/dialogs/settings-dialog.slint:917
 msgid "Messages and attachments"
 msgstr "Beskeder og vedhæftede filer"
 
-#: ui/dialogs/settings-dialog.slint:909
+#: ui/dialogs/settings-dialog.slint:921
 msgid "1 minute"
 msgstr "1 minut"
 
-#: ui/dialogs/settings-dialog.slint:910
+#: ui/dialogs/settings-dialog.slint:922
 msgid "2 minutes"
 msgstr "2 minutter"
 
-#: ui/dialogs/settings-dialog.slint:911
+#: ui/dialogs/settings-dialog.slint:923
 msgid "5 minutes"
 msgstr "5 minutter"
 
-#: ui/dialogs/settings-dialog.slint:914
+#: ui/dialogs/settings-dialog.slint:926
 msgid "Same as all accounts"
 msgstr "Samme som alle konti"
 
-#: ui/dialogs/settings-dialog.slint:918
+#: ui/dialogs/settings-dialog.slint:930
 msgid "Every 30 minutes"
 msgstr "Hvert 30. minut"
 
-#: ui/dialogs/settings-dialog.slint:919
+#: ui/dialogs/settings-dialog.slint:931
 msgid "Every hour"
 msgstr "Hver time"
 
-#: ui/dialogs/settings-dialog.slint:920
+#: ui/dialogs/settings-dialog.slint:932
 msgid "Only when I ask"
 msgstr "Kun når jeg beder om det"
 
-#: ui/dialogs/settings-dialog.slint:923
+#: ui/dialogs/settings-dialog.slint:935
 msgid "Always"
 msgstr "Altid"
 
-#: ui/dialogs/settings-dialog.slint:924
+#: ui/dialogs/settings-dialog.slint:936
 msgid "Until deleted here"
 msgstr "Indtil slettet her"
 
-#: ui/dialogs/settings-dialog.slint:925 ui/link-services.slint:250
+#: ui/dialogs/settings-dialog.slint:937 ui/link-services.slint:250
 msgid "7 days"
 msgstr "7 dage"
 
-#: ui/dialogs/settings-dialog.slint:926 ui/link-services.slint:250
+#: ui/dialogs/settings-dialog.slint:938 ui/link-services.slint:250
 msgid "14 days"
 msgstr "14 dage"
 
-#: ui/dialogs/settings-dialog.slint:927 ui/link-services.slint:250
+#: ui/dialogs/settings-dialog.slint:939 ui/link-services.slint:250
 msgid "30 days"
 msgstr "30 dage"
 
-#: ui/dialogs/settings-dialog.slint:928
+#: ui/dialogs/settings-dialog.slint:940
 msgid "Until downloaded"
 msgstr "Indtil downloadet"
 
-#: ui/dialogs/settings-dialog.slint:931
+#: ui/dialogs/settings-dialog.slint:943
 msgid "System language"
 msgstr "Systemsprog"
 
-#: ui/dialogs/settings-dialog.slint:932
+#: ui/dialogs/settings-dialog.slint:944
 msgid "English"
 msgstr "Engelsk"
 
-#: ui/dialogs/settings-dialog.slint:933
+#: ui/dialogs/settings-dialog.slint:945
 msgid "Spanish"
 msgstr "Spansk"
 
-#: ui/dialogs/settings-dialog.slint:934
+#: ui/dialogs/settings-dialog.slint:946
 msgid "Turkish"
 msgstr "Tyrkisk"
 
-#: ui/dialogs/settings-dialog.slint:935
+#: ui/dialogs/settings-dialog.slint:947
 msgid "Simplified Chinese"
 msgstr "Forenklet kinesisk"
 
-#: ui/dialogs/settings-dialog.slint:936
+#: ui/dialogs/settings-dialog.slint:948
 msgid "Russian"
 msgstr "Russisk"
 
-#: ui/dialogs/settings-dialog.slint:940
+#: ui/dialogs/settings-dialog.slint:952
 msgid "12-hour"
 msgstr "12-timer"
 
-#: ui/dialogs/settings-dialog.slint:941
+#: ui/dialogs/settings-dialog.slint:953
 msgid "24-hour"
 msgstr "24-timer"
 
-#: ui/dialogs/settings-dialog.slint:954
+#: ui/dialogs/settings-dialog.slint:966
 msgid "Notifications from Flectar Mail are turned off in your system settings."
 msgstr ""
 "Notifikationer fra Flectar Mail er slået fra i dine systemindstillinger."
 
-#: ui/dialogs/settings-dialog.slint:956
+#: ui/dialogs/settings-dialog.slint:968
 msgid ""
 "macOS doesn't allow notifications from Flectar Mail where it is now. Move it "
 "to the Applications folder, then open it again."
@@ -9159,7 +9247,7 @@ msgstr ""
 "macOS tillader ikke notifikationer fra Flectar Mail, hvor den er nu. Flyt "
 "den til mappen Programmer, og åbn den igen."
 
-#: ui/dialogs/settings-dialog.slint:957
+#: ui/dialogs/settings-dialog.slint:969
 msgid ""
 "This system has no notification service running, so notifications can't be "
 "shown."
@@ -9167,35 +9255,35 @@ msgstr ""
 "Dette system har ingen notifikationstjeneste kørende, så notifikationer kan "
 "ikke vises."
 
-#: ui/dialogs/settings-dialog.slint:963
+#: ui/dialogs/settings-dialog.slint:975
 msgid "Desktop notifications"
 msgstr "Skrivebordsnotifikationer"
 
-#: ui/dialogs/settings-dialog.slint:963
+#: ui/dialogs/settings-dialog.slint:975
 msgid "New mail notifications"
 msgstr "Notifikationer om ny e-mail"
 
-#: ui/dialogs/settings-dialog.slint:968
+#: ui/dialogs/settings-dialog.slint:980
 msgid "Flectar Mail {} is out."
 msgstr "Flectar Mail {} er ude."
 
-#: ui/dialogs/settings-dialog.slint:969
+#: ui/dialogs/settings-dialog.slint:981
 msgid "Checking for a new version…"
 msgstr "Tjekker for en ny version…"
 
-#: ui/dialogs/settings-dialog.slint:970
+#: ui/dialogs/settings-dialog.slint:982
 msgid "GitHub couldn't be reached. Flectar Mail tries again later."
 msgstr "GitHub kunne ikke nås. Flectar Mail prøver igen senere."
 
-#: ui/dialogs/settings-dialog.slint:971
+#: ui/dialogs/settings-dialog.slint:983
 msgid "Flectar Mail is up to date."
 msgstr "Flectar Mail er opdateret."
 
-#: ui/dialogs/settings-dialog.slint:972
+#: ui/dialogs/settings-dialog.slint:984
 msgid "Flectar Mail checks soon after it starts."
 msgstr "Flectar Mail tjekker kort efter, at den starter."
 
-#: ui/dialogs/settings-dialog.slint:977
+#: ui/dialogs/settings-dialog.slint:989
 msgid ""
 "Android restricts Flectar Mail in the background, so new mail shows up only "
 "while the app is open."
@@ -9203,7 +9291,7 @@ msgstr ""
 "Android begrænser Flectar Mail i baggrunden, så ny e-mail vises kun, mens "
 "appen er åben."
 
-#: ui/dialogs/settings-dialog.slint:979
+#: ui/dialogs/settings-dialog.slint:991
 msgid ""
 "Battery Saver pauses checking for new mail while Flectar Mail is in the "
 "background."
@@ -9211,7 +9299,7 @@ msgstr ""
 "Batterisparer sætter tjek for ny e-mail på pause, mens Flectar Mail er i "
 "baggrunden."
 
-#: ui/dialogs/settings-dialog.slint:980
+#: ui/dialogs/settings-dialog.slint:992
 msgid ""
 "Flectar Mail checks for new mail about every 15 minutes in the background, "
 "and less often while your phone is idle."
@@ -9219,7 +9307,7 @@ msgstr ""
 "Flectar Mail tjekker for ny e-mail ca. hvert 15. minut i baggrunden og "
 "sjældnere, mens din telefon er inaktiv."
 
-#: ui/dialogs/settings-dialog.slint:982
+#: ui/dialogs/settings-dialog.slint:994
 msgid ""
 "Background App Refresh is off for Flectar Mail, so new mail shows up only "
 "while the app is open."
@@ -9227,7 +9315,7 @@ msgstr ""
 "Baggrundsappopdatering er slået fra for Flectar Mail, så ny e-mail vises "
 "kun, mens appen er åben."
 
-#: ui/dialogs/settings-dialog.slint:984
+#: ui/dialogs/settings-dialog.slint:996
 msgid ""
 "Low Power Mode pauses checking for new mail while Flectar Mail is in the "
 "background."
@@ -9235,7 +9323,7 @@ msgstr ""
 "Energisparetilstand sætter tjek for ny e-mail på pause, mens Flectar Mail er "
 "i baggrunden."
 
-#: ui/dialogs/settings-dialog.slint:985
+#: ui/dialogs/settings-dialog.slint:997
 msgid ""
 "iOS decides how often Flectar Mail checks for new mail in the background, so "
 "notifications can arrive late."
@@ -9243,7 +9331,7 @@ msgstr ""
 "iOS beslutter, hvor ofte Flectar Mail tjekker for ny e-mail i baggrunden, så "
 "notifikationer kan komme for sent."
 
-#: ui/dialogs/settings-dialog.slint:1021
+#: ui/dialogs/settings-dialog.slint:1033
 msgid ""
 "general theme appearance palette app icon dock taskbar launcher language "
 "time clock 12-hour 24-hour workspace layout window frameless title bar "
@@ -9259,11 +9347,11 @@ msgstr ""
 "filer gem faner samtaler tråde reduceret bevægelse animation tilgængelighed "
 "tekststørrelse skrifttype"
 
-#: ui/dialogs/settings-dialog.slint:1021
+#: ui/dialogs/settings-dialog.slint:1033
 msgid "sending undo send delay take back"
 msgstr "afsendelse fortryd afsendelse forsinkelse tag tilbage"
 
-#: ui/dialogs/settings-dialog.slint:1021
+#: ui/dialogs/settings-dialog.slint:1033
 msgid ""
 "large files share by link cloud storage nextcloud owncloud google drive "
 "onedrive expiry password"
@@ -9271,23 +9359,23 @@ msgstr ""
 "store filer del via link cloud-lagring nextcloud owncloud google drive "
 "onedrive udløb adgangskode"
 
-#: ui/dialogs/settings-dialog.slint:1022
+#: ui/dialogs/settings-dialog.slint:1034
 msgid "spelling spell check dictionary misspelled words"
 msgstr "stavning stavekontrol ordbog stavefejl ord"
 
-#: ui/dialogs/settings-dialog.slint:1023
+#: ui/dialogs/settings-dialog.slint:1035
 msgid "writing default text style font typeface text size"
 msgstr "skrivning standard tekststil skrifttype tekststørrelse"
 
-#: ui/dialogs/settings-dialog.slint:1024
+#: ui/dialogs/settings-dialog.slint:1036
 msgid "message list density compact comfortable rows preview lines"
 msgstr "beskedliste tæthed kompakt komfortabel rækker forhåndsvisning linjer"
 
-#: ui/dialogs/settings-dialog.slint:1025
+#: ui/dialogs/settings-dialog.slint:1037
 msgid "mark read opened delay receipts"
 msgstr "markér læst åbnet forsinkelse kvitteringer"
 
-#: ui/dialogs/settings-dialog.slint:1027
+#: ui/dialogs/settings-dialog.slint:1039
 msgid ""
 "accounts profiles personal work colors providers gmail outlook imap pop3 "
 "jmap caldav carddav mail history server oauth security signatures"
@@ -9295,7 +9383,7 @@ msgstr ""
 "konti profiler privat arbejde farver udbydere gmail outlook imap pop3 jmap "
 "caldav carddav mailhistorik server oauth sikkerhed signaturer"
 
-#: ui/dialogs/settings-dialog.slint:1029
+#: ui/dialogs/settings-dialog.slint:1041
 msgid ""
 "sync devices phone computer pair qr code recovery code encrypted backup "
 "setup server subscription billing trial plan price redeem passwords sign-ins"
@@ -9304,7 +9392,7 @@ msgstr ""
 "krypteret sikkerhedskopi opsætning server abonnement fakturering "
 "prøveperiode plan pris indløs adgangskoder logind"
 
-#: ui/dialogs/settings-dialog.slint:1031
+#: ui/dialogs/settings-dialog.slint:1043
 msgid ""
 "contacts people suggestions autocomplete recipients senders address book "
 "privacy clear"
@@ -9312,7 +9400,7 @@ msgstr ""
 "kontakter personer forslag autofuldførelse modtagere afsendere adressebog "
 "privatliv ryd"
 
-#: ui/dialogs/settings-dialog.slint:1033
+#: ui/dialogs/settings-dialog.slint:1045
 msgid ""
 "rules filters sort incoming new mail automatically move folder label mark "
 "read star archive trash spam junk conditions actions"
@@ -9320,7 +9408,7 @@ msgstr ""
 "regler filtre sortér indkommende ny e-mail automatisk flyt mappe label "
 "markér læst stjerne arkivér papirkurv spam junk betingelser handlinger"
 
-#: ui/dialogs/settings-dialog.slint:1035
+#: ui/dialogs/settings-dialog.slint:1047
 msgid ""
 "translation translate languages foreign deepl libretranslate ai model ollama "
 "lm studio always never"
@@ -9328,7 +9416,7 @@ msgstr ""
 "oversættelse oversæt sprog fremmed deepl libretranslate ai model ollama lm "
 "studio altid aldrig"
 
-#: ui/dialogs/settings-dialog.slint:1037
+#: ui/dialogs/settings-dialog.slint:1049
 msgid ""
 "ai artificial intelligence assistant model server ollama lm studio openai "
 "summary summarize replies writing proofread prompts"
@@ -9336,7 +9424,7 @@ msgstr ""
 "ai kunstig intelligens assistent model server ollama lm studio openai "
 "oversigt opsummér svar skrivning korrekturlæsning prompts"
 
-#: ui/dialogs/settings-dialog.slint:1039
+#: ui/dialogs/settings-dialog.slint:1051
 msgid ""
 "notifications alerts sounds desktop new mail unread count badge app icon "
 "dock taskbar background app refresh low power mode battery saver"
@@ -9344,7 +9432,7 @@ msgstr ""
 "notifikationer alarmer lyde skrivebord ny e-mail ulæst antal badge appikon "
 "dock proceslinje baggrundsappopdatering energisparetilstand batterisparer"
 
-#: ui/dialogs/settings-dialog.slint:1041
+#: ui/dialogs/settings-dialog.slint:1053
 msgid ""
 "shortcuts keyboard keys compose search archive spam junk trash delete "
 "navigation messages reading find zoom caret tabs"
@@ -9352,7 +9440,7 @@ msgstr ""
 "genveje tastatur taster skriv søg arkivér spam papirkurv slet navigation "
 "beskeder læsning find zoom tekstmarkør faner"
 
-#: ui/dialogs/settings-dialog.slint:1043
+#: ui/dialogs/settings-dialog.slint:1055
 msgid ""
 "storage data usage mail attachments files databases backup snapshot import "
 "export delete"
@@ -9360,7 +9448,7 @@ msgstr ""
 "lagerplads data forbrug e-mail vedhæftede filer databaser sikkerhedskopi "
 "snapshot import eksport slet"
 
-#: ui/dialogs/settings-dialog.slint:1045
+#: ui/dialogs/settings-dialog.slint:1057
 msgid ""
 "network proxy socks http connect internet connection firewall tor vpn office "
 "no proxy"
@@ -9368,7 +9456,7 @@ msgstr ""
 "netværk proxy socks http forbindelse internettet firewall tor vpn kontor "
 "ingen proxy"
 
-#: ui/dialogs/settings-dialog.slint:1047
+#: ui/dialogs/settings-dialog.slint:1059
 msgid ""
 "ai agents assistant local model llm mcp model context protocol automation "
 "connected apps access activity"
@@ -9376,7 +9464,7 @@ msgstr ""
 "ai agenter assistent lokal model llm mcp model context protocol automation "
 "tilknyttede apps adgang aktivitet"
 
-#: ui/dialogs/settings-dialog.slint:1049
+#: ui/dialogs/settings-dialog.slint:1061
 msgid ""
 "services flectar base account sign in subscription paid sync devices "
 "business email custom domain mailbox"
@@ -9384,234 +9472,234 @@ msgstr ""
 "tjenester flectar base konto log ind abonnement betalt synkronisering "
 "enheder virksomhed e-mail brugerdefineret domæne postkasse"
 
-#: ui/dialogs/settings-dialog.slint:1050
+#: ui/dialogs/settings-dialog.slint:1062
 msgid "about version credits contributors license flectar"
 msgstr "om version krediteringer bidragydere licens flectar"
 
-#: ui/dialogs/settings-dialog.slint:1050 ui/dialogs/settings-dialog.slint:4414
+#: ui/dialogs/settings-dialog.slint:1062 ui/dialogs/settings-dialog.slint:4453
 msgid "Privacy policy"
 msgstr "Privatlivspolitik"
 
-#: ui/dialogs/settings-dialog.slint:1051 ui/dialogs/settings-dialog.slint:4428
+#: ui/dialogs/settings-dialog.slint:1063 ui/dialogs/settings-dialog.slint:4467
 msgid "Withdraw consent…"
 msgstr "Tilbagekald samtykke…"
 
-#: ui/dialogs/settings-dialog.slint:1052
+#: ui/dialogs/settings-dialog.slint:1064
 msgid "updates new version release download check"
 msgstr "opdateringer ny version udgivelse download tjek"
 
-#: ui/dialogs/settings-dialog.slint:1467 ui/dialogs/settings-dialog.slint:4533
+#: ui/dialogs/settings-dialog.slint:1479 ui/dialogs/settings-dialog.slint:4572
 msgid "SETTINGS"
 msgstr "INDSTILLINGER"
 
-#: ui/dialogs/settings-dialog.slint:1470 ui/dialogs/settings-dialog.slint:4535
+#: ui/dialogs/settings-dialog.slint:1482 ui/dialogs/settings-dialog.slint:4574
 msgid "No settings found"
 msgstr "Ingen indstillinger fundet"
 
-#: ui/dialogs/settings-dialog.slint:1471 ui/dialogs/settings-dialog.slint:1507
-#: ui/dialogs/settings-dialog.slint:4459
+#: ui/dialogs/settings-dialog.slint:1483 ui/dialogs/settings-dialog.slint:1519
+#: ui/dialogs/settings-dialog.slint:4498
 msgid "General"
 msgstr "Generelt"
 
-#: ui/dialogs/settings-dialog.slint:1472 ui/dialogs/settings-dialog.slint:2814
-#: ui/dialogs/settings-dialog.slint:4537 ui/dialogs/settings-dialog.slint:5156
+#: ui/dialogs/settings-dialog.slint:1484 ui/dialogs/settings-dialog.slint:2853
+#: ui/dialogs/settings-dialog.slint:4576 ui/dialogs/settings-dialog.slint:5195
 msgid "Accounts"
 msgstr "Konti"
 
-#: ui/dialogs/settings-dialog.slint:1475 ui/dialogs/settings-dialog.slint:2583
-#: ui/dialogs/settings-dialog.slint:4540
+#: ui/dialogs/settings-dialog.slint:1487 ui/dialogs/settings-dialog.slint:2622
+#: ui/dialogs/settings-dialog.slint:4579
 msgid "Rules"
 msgstr "Regler"
 
-#: ui/dialogs/settings-dialog.slint:1476 ui/dialogs/settings-dialog.slint:2524
-#: ui/dialogs/settings-dialog.slint:4541
+#: ui/dialogs/settings-dialog.slint:1488 ui/dialogs/settings-dialog.slint:2563
+#: ui/dialogs/settings-dialog.slint:4580
 msgid "Translation"
 msgstr "Oversættelse"
 
-#: ui/dialogs/settings-dialog.slint:1477 ui/dialogs/settings-dialog.slint:2555
-#: ui/dialogs/settings-dialog.slint:4542
+#: ui/dialogs/settings-dialog.slint:1489 ui/dialogs/settings-dialog.slint:2594
+#: ui/dialogs/settings-dialog.slint:4581
 msgid "AI"
 msgstr "AI"
 
-#: ui/dialogs/settings-dialog.slint:1478 ui/dialogs/settings-dialog.slint:3837
-#: ui/dialogs/settings-dialog.slint:4543
+#: ui/dialogs/settings-dialog.slint:1490 ui/dialogs/settings-dialog.slint:3876
+#: ui/dialogs/settings-dialog.slint:4582
 msgid "Notifications"
 msgstr "Notifikationer"
 
-#: ui/dialogs/settings-dialog.slint:1479 ui/dialogs/settings-dialog.slint:4467
+#: ui/dialogs/settings-dialog.slint:1491 ui/dialogs/settings-dialog.slint:4506
 msgid "Shortcuts"
 msgstr "Genveje"
 
-#: ui/dialogs/settings-dialog.slint:1480 ui/dialogs/settings-dialog.slint:3745
-#: ui/dialogs/settings-dialog.slint:4545
+#: ui/dialogs/settings-dialog.slint:1492 ui/dialogs/settings-dialog.slint:3784
+#: ui/dialogs/settings-dialog.slint:4584
 msgid "Storage"
 msgstr "Lagerplads"
 
-#: ui/dialogs/settings-dialog.slint:1481 ui/dialogs/settings-dialog.slint:3718
-#: ui/dialogs/settings-dialog.slint:4546
+#: ui/dialogs/settings-dialog.slint:1493 ui/dialogs/settings-dialog.slint:3757
+#: ui/dialogs/settings-dialog.slint:4585
 msgid "Network"
 msgstr "Netværk"
 
-#: ui/dialogs/settings-dialog.slint:1482 ui/dialogs/settings-dialog.slint:4077
-#: ui/dialogs/settings-dialog.slint:4547
+#: ui/dialogs/settings-dialog.slint:1494 ui/dialogs/settings-dialog.slint:4116
+#: ui/dialogs/settings-dialog.slint:4586
 msgid "AI agents"
 msgstr "AI-agenter"
 
-#: ui/dialogs/settings-dialog.slint:1483 ui/dialogs/settings-dialog.slint:4106
-#: ui/dialogs/settings-dialog.slint:4548
+#: ui/dialogs/settings-dialog.slint:1495 ui/dialogs/settings-dialog.slint:4145
+#: ui/dialogs/settings-dialog.slint:4587
 msgid "Services"
 msgstr "Tjenester"
 
-#: ui/dialogs/settings-dialog.slint:1484 ui/dialogs/settings-dialog.slint:4210
-#: ui/dialogs/settings-dialog.slint:4549
+#: ui/dialogs/settings-dialog.slint:1496 ui/dialogs/settings-dialog.slint:4249
+#: ui/dialogs/settings-dialog.slint:4588
 msgid "About"
 msgstr "Om"
 
-#: ui/dialogs/settings-dialog.slint:1508
+#: ui/dialogs/settings-dialog.slint:1520
 msgid "Manage appearance, privacy, and synchronization."
 msgstr "Administrér udseende, privatliv og synkronisering."
 
-#: ui/dialogs/settings-dialog.slint:1520
+#: ui/dialogs/settings-dialog.slint:1532
 msgid "Message appearance"
 msgstr "Beskedudseende"
 
-#: ui/dialogs/settings-dialog.slint:1521
+#: ui/dialogs/settings-dialog.slint:1533
 msgid "Choose the background and text colors used to read messages."
 msgstr "Vælg de baggrunds- og tekstfarver, der bruges til at læse beskeder."
 
-#: ui/dialogs/settings-dialog.slint:1522
+#: ui/dialogs/settings-dialog.slint:1534
 msgid "Follow app theme"
 msgstr "Følg appens tema"
 
-#: ui/dialogs/settings-dialog.slint:1581
+#: ui/dialogs/settings-dialog.slint:1593
 msgid "Interface"
 msgstr "Grænseflade"
 
-#: ui/dialogs/settings-dialog.slint:1584
+#: ui/dialogs/settings-dialog.slint:1596
 msgid "Monochrome sidebar icons"
 msgstr "Monokrome sidepanelikoner"
 
-#: ui/dialogs/settings-dialog.slint:1585
+#: ui/dialogs/settings-dialog.slint:1597
 msgid "Use one neutral color for mailbox and folder icons."
 msgstr "Brug én neutral farve til postkasse- og mappeikoner."
 
-#: ui/dialogs/settings-dialog.slint:1597
+#: ui/dialogs/settings-dialog.slint:1609
 msgid "No avatars"
 msgstr "Ingen avatarer"
 
-#: ui/dialogs/settings-dialog.slint:1598
+#: ui/dialogs/settings-dialog.slint:1610
 msgid "Hide sender images in the message list and reader."
 msgstr "Skjul afsenderbilleder i beskedlisten og læseren."
 
-#: ui/dialogs/settings-dialog.slint:1610
+#: ui/dialogs/settings-dialog.slint:1622
 msgid "Message list density"
 msgstr "Tæthed af beskedliste"
 
-#: ui/dialogs/settings-dialog.slint:1611
+#: ui/dialogs/settings-dialog.slint:1623
 msgid "Compact rows fit more messages on the screen."
 msgstr "Kompakte rækker giver plads til flere beskeder på skærmen."
 
-#: ui/dialogs/settings-dialog.slint:1624
+#: ui/dialogs/settings-dialog.slint:1636
 msgid "Message preview"
 msgstr "Forhåndsvisning af besked"
 
-#: ui/dialogs/settings-dialog.slint:1625
+#: ui/dialogs/settings-dialog.slint:1637
 msgid "How many lines of each message's text the list shows below its subject."
 msgstr "Hvor mange linjer af hver beskeds tekst, listen viser under emnet."
 
-#: ui/dialogs/settings-dialog.slint:1639
+#: ui/dialogs/settings-dialog.slint:1651
 msgid "Keep several mailboxes, conversations and other places open in tabs."
 msgstr "Hold flere postkasser, samtaler og andre steder åbne i faner."
 
-#: ui/dialogs/settings-dialog.slint:1651
+#: ui/dialogs/settings-dialog.slint:1663
 msgid "Frameless window"
 msgstr "Vindue uden ramme"
 
-#: ui/dialogs/settings-dialog.slint:1652
+#: ui/dialogs/settings-dialog.slint:1664
 msgid "Replace the system title bar with window controls in the toolbar."
 msgstr "Erstat systemets titellinje med vindueskontroller i værktøjslinjen."
 
-#: ui/dialogs/settings-dialog.slint:1661
+#: ui/dialogs/settings-dialog.slint:1673
 msgid "Reduce motion"
 msgstr "Reducér bevægelse"
 
-#: ui/dialogs/settings-dialog.slint:1662
+#: ui/dialogs/settings-dialog.slint:1674
 msgid "Show changes at once instead of sliding or growing."
 msgstr "Vis ændringer med det samme i stedet for at glide eller vokse."
 
-#: ui/dialogs/settings-dialog.slint:1675
+#: ui/dialogs/settings-dialog.slint:1687
 msgid "Interface text size"
 msgstr "Tekststørrelse i grænseflade"
 
-#: ui/dialogs/settings-dialog.slint:1676
+#: ui/dialogs/settings-dialog.slint:1688
 msgid "Text in menus, lists and settings. Message zoom stays separate."
 msgstr "Tekst i menuer, lister og indstillinger. Beskedzoom forbliver separat."
 
-#: ui/dialogs/settings-dialog.slint:1677
+#: ui/dialogs/settings-dialog.slint:1689
 msgid "Smaller"
 msgstr "Mindre"
 
-#: ui/dialogs/settings-dialog.slint:1677
+#: ui/dialogs/settings-dialog.slint:1689
 msgid "Large"
 msgstr "Stor"
 
-#: ui/dialogs/settings-dialog.slint:1677
+#: ui/dialogs/settings-dialog.slint:1689
 msgid "Larger"
 msgstr "Større"
 
-#: ui/dialogs/settings-dialog.slint:1677
+#: ui/dialogs/settings-dialog.slint:1689
 msgid "Largest"
 msgstr "Størst"
 
-#: ui/dialogs/settings-dialog.slint:1690
+#: ui/dialogs/settings-dialog.slint:1702
 msgid "Workspace layout"
 msgstr "Arbejdsområdelayout"
 
-#: ui/dialogs/settings-dialog.slint:1702
+#: ui/dialogs/settings-dialog.slint:1714
 msgid "Minimal"
 msgstr "Minimal"
 
-#: ui/dialogs/settings-dialog.slint:1722
+#: ui/dialogs/settings-dialog.slint:1734
 msgid "Language and time"
 msgstr "Sprog og tid"
 
-#: ui/dialogs/settings-dialog.slint:1725
+#: ui/dialogs/settings-dialog.slint:1737
 msgid "Display language"
 msgstr "Visningssprog"
 
-#: ui/dialogs/settings-dialog.slint:1726
+#: ui/dialogs/settings-dialog.slint:1738
 msgid "Follow your device language when a translation is available."
 msgstr "Følg dit enhedssprog, når en oversættelse er tilgængelig."
 
-#: ui/dialogs/settings-dialog.slint:1726
+#: ui/dialogs/settings-dialog.slint:1738
 msgid "Choose the language used throughout Flectar Mail."
 msgstr "Vælg det sprog, der bruges i hele Flectar Mail."
 
-#: ui/dialogs/settings-dialog.slint:1736
+#: ui/dialogs/settings-dialog.slint:1748
 msgid "Time format"
 msgstr "Tidsformat"
 
-#: ui/dialogs/settings-dialog.slint:1737
+#: ui/dialogs/settings-dialog.slint:1749
 msgid "Follow your region, for example {}."
 msgstr "Følg din region, f.eks. {}."
 
-#: ui/dialogs/settings-dialog.slint:1737
+#: ui/dialogs/settings-dialog.slint:1749
 msgid "Times appear as {}."
 msgstr "Klokkeslæt vises som {}."
 
-#: ui/dialogs/settings-dialog.slint:1749
+#: ui/dialogs/settings-dialog.slint:1761
 msgid ""
 "Add a language in Windows Settings, under Time & language, to check spelling."
 msgstr ""
 "Tilføj et sprog i Windows-indstillinger under Tid og sprog for at "
 "kontrollere stavning."
 
-#: ui/dialogs/settings-dialog.slint:1751
+#: ui/dialogs/settings-dialog.slint:1763
 msgid "Turn on the spell checker in Android's settings to check spelling."
 msgstr ""
 "Slå stavekontrollen til i Androids indstillinger for at kontrollere stavning."
 
-#: ui/dialogs/settings-dialog.slint:1753
+#: ui/dialogs/settings-dialog.slint:1765
 msgid ""
 "Install Hunspell dictionaries for your languages from your system's software "
 "to check spelling."
@@ -9619,7 +9707,7 @@ msgstr ""
 "Installér Hunspell-ordbøger til dine sprog fra dit systems software for at "
 "kontrollere stavning."
 
-#: ui/dialogs/settings-dialog.slint:1755
+#: ui/dialogs/settings-dialog.slint:1767
 msgid ""
 "Underline misspelled words in messages you write, in the languages set in "
 "System Settings. Right-click a word for corrections."
@@ -9627,7 +9715,7 @@ msgstr ""
 "Understreg ord med stavefejl i beskeder, du skriver, på de sprog, der er "
 "angivet i Systemindstillinger. Højreklik på et ord for rettelser."
 
-#: ui/dialogs/settings-dialog.slint:1757
+#: ui/dialogs/settings-dialog.slint:1769
 msgid ""
 "Underline misspelled words in messages you write, in the language set for "
 "Android's spell checker. Tap a word for corrections."
@@ -9635,7 +9723,7 @@ msgstr ""
 "Understreg ord med stavefejl i beskeder, du skriver, på det sprog, der er "
 "angivet til Androids stavekontrol. Tryk på et ord for rettelser."
 
-#: ui/dialogs/settings-dialog.slint:1759
+#: ui/dialogs/settings-dialog.slint:1771
 msgid ""
 "Underline misspelled words in messages you write, in your preferred "
 "languages from Settings. Tap a word for corrections."
@@ -9643,7 +9731,7 @@ msgstr ""
 "Understreg ord med stavefejl i beskeder, du skriver, på dine foretrukne "
 "sprog fra Indstillinger. Tryk på et ord for rettelser."
 
-#: ui/dialogs/settings-dialog.slint:1760
+#: ui/dialogs/settings-dialog.slint:1772
 msgid ""
 "Underline misspelled words in messages you write. Right-click a word for "
 "corrections and languages."
@@ -9651,35 +9739,35 @@ msgstr ""
 "Understreg ord med stavefejl i beskeder, du skriver. Højreklik på et ord for "
 "rettelser og sprog."
 
-#: ui/dialogs/settings-dialog.slint:1784
+#: ui/dialogs/settings-dialog.slint:1796
 msgid "Inbox behavior"
 msgstr "Indbakkeadfærd"
 
-#: ui/dialogs/settings-dialog.slint:1787 ui/mailbox-words.slint:55
+#: ui/dialogs/settings-dialog.slint:1799 ui/mailbox-words.slint:55
 msgid "Unified Inbox"
 msgstr "Samlet indbakke"
 
-#: ui/dialogs/settings-dialog.slint:1788
+#: ui/dialogs/settings-dialog.slint:1800
 msgid "DEFAULT"
 msgstr "STANDARD"
 
-#: ui/dialogs/settings-dialog.slint:1790
+#: ui/dialogs/settings-dialog.slint:1802
 msgid "Combines incoming messages from every connected account."
 msgstr "Kombinerer indkommende beskeder fra alle tilknyttede konti."
 
-#: ui/dialogs/settings-dialog.slint:1794
+#: ui/dialogs/settings-dialog.slint:1806
 msgid "Group messages by date"
 msgstr "Gruppér beskeder efter dato"
 
-#: ui/dialogs/settings-dialog.slint:1795
+#: ui/dialogs/settings-dialog.slint:1807
 msgid "Show collapsible date sections in the mail list."
 msgstr "Vis sammenklappelige datosektioner i e-maillisten."
 
-#: ui/dialogs/settings-dialog.slint:1807
+#: ui/dialogs/settings-dialog.slint:1819
 msgid "Conversation view"
 msgstr "Samtalevisning"
 
-#: ui/dialogs/settings-dialog.slint:1808
+#: ui/dialogs/settings-dialog.slint:1820
 msgid ""
 "Group replies with the messages they answer. Turn this off to list, open and "
 "act on each message on its own."
@@ -9687,23 +9775,23 @@ msgstr ""
 "Gruppér svar med de beskeder, de besvarer. Slå fra for at vise, åbne og "
 "handle på hver besked for sig."
 
-#: ui/dialogs/settings-dialog.slint:1820
+#: ui/dialogs/settings-dialog.slint:1832
 #, fuzzy
 #| msgid "New messages"
 msgid "Keep messages open"
 msgstr "Nye beskeder"
 
-#: ui/dialogs/settings-dialog.slint:1821
+#: ui/dialogs/settings-dialog.slint:1833
 msgid ""
 "Messages you open in a conversation stay open when you open another. Turn "
 "this off to read one at a time."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1834
+#: ui/dialogs/settings-dialog.slint:1846
 msgid "Mark messages as read"
 msgstr "Markér beskeder som læst"
 
-#: ui/dialogs/settings-dialog.slint:1835
+#: ui/dialogs/settings-dialog.slint:1847
 msgid ""
 "When an unread message you open counts as read. With a delay, messages you "
 "only pass over stay unread. Never leaves them for you to mark."
@@ -9712,11 +9800,33 @@ msgstr ""
 "forbliver beskeder, du blot passerer, ulæst. Aldrig lader dem stå til, du "
 "selv markerer."
 
-#: ui/dialogs/settings-dialog.slint:1848 ui/read-receipts.slint:126
+#: ui/dialogs/settings-dialog.slint:1860
+#, fuzzy
+#| msgid "Show message source"
+msgid "Show messages as"
+msgstr "Vis beskedens kilde"
+
+#: ui/dialogs/settings-dialog.slint:1861
+msgid ""
+"How messages show when you open them. Each one can switch to plain text or "
+"back in its menu."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:1874
+msgid "Plain text in a fixed-width font"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:1875
+msgid ""
+"Plain-text messages keep the columns their senders lined up. Each device "
+"keeps its own choice."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:1887 ui/read-receipts.slint:126
 msgid "Read receipts"
 msgstr "Læsekvitteringer"
 
-#: ui/dialogs/settings-dialog.slint:1849
+#: ui/dialogs/settings-dialog.slint:1888
 msgid ""
 "When a sender asks to be notified that you read their message. Always send "
 "still asks when a request looks unusual."
@@ -9724,11 +9834,11 @@ msgstr ""
 "Når en afsender beder om at få besked om, at du har læst beskeden. Send "
 "altid spørger stadig, når en anmodning ser usædvanlig ud."
 
-#: ui/dialogs/settings-dialog.slint:1873
+#: ui/dialogs/settings-dialog.slint:1912
 msgid "Writing"
 msgstr "Skrivning"
 
-#: ui/dialogs/settings-dialog.slint:1877
+#: ui/dialogs/settings-dialog.slint:1916
 msgid ""
 "New messages, replies and forwards start in this font. Default names none, "
 "so each reader sees their own."
@@ -9736,17 +9846,17 @@ msgstr ""
 "Nye beskeder, svar og videresendelser starter med denne skrifttype. Standard "
 "angiver ingen, så hver læser ser sin egen."
 
-#: ui/dialogs/settings-dialog.slint:1888
+#: ui/dialogs/settings-dialog.slint:1927
 msgid "New messages, replies and forwards start at this size."
 msgstr "Nye beskeder, svar og videresendelser starter med denne størrelse."
 
-#: ui/dialogs/settings-dialog.slint:1899
+#: ui/dialogs/settings-dialog.slint:1938
 #, fuzzy
 #| msgid "Open in a new window"
 msgid "Write in a new window"
 msgstr "Åbn i et nyt vindue"
 
-#: ui/dialogs/settings-dialog.slint:1900
+#: ui/dialogs/settings-dialog.slint:1939
 #, fuzzy
 #| msgid ""
 #| "New messages, replies and forwards start in this font. Default names "
@@ -9758,112 +9868,112 @@ msgstr ""
 "Nye beskeder, svar og videresendelser starter med denne skrifttype. Standard "
 "angiver ingen, så hver læser ser sin egen."
 
-#: ui/dialogs/settings-dialog.slint:1940
+#: ui/dialogs/settings-dialog.slint:1979
 msgid "Sending"
 msgstr "Afsendelse"
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Undo send"
 msgstr "Fortryd afsendelse"
 
-#: ui/dialogs/settings-dialog.slint:1944
+#: ui/dialogs/settings-dialog.slint:1983
 msgid ""
 "How long a sent message waits before it leaves, so that you can take it back."
 msgstr ""
 "Hvor længe en sendt besked venter, før den afgår, så du kan tage den tilbage."
 
-#: ui/dialogs/settings-dialog.slint:1969
+#: ui/dialogs/settings-dialog.slint:2008
 msgid "Add invitations to my calendar"
 msgstr "Føj invitationer til min kalender"
 
-#: ui/dialogs/settings-dialog.slint:1970
+#: ui/dialogs/settings-dialog.slint:2009
 msgid "People you know are those you've emailed or saved as contacts."
 msgstr ""
 "Personer, du kender, er dem, du har sendt e-mail til eller gemt som "
 "kontakter."
 
-#: ui/dialogs/settings-dialog.slint:1971
+#: ui/dialogs/settings-dialog.slint:2010
 msgid "From everyone"
 msgstr "Fra alle"
 
-#: ui/dialogs/settings-dialog.slint:1971
+#: ui/dialogs/settings-dialog.slint:2010
 msgid "Only from people I know"
 msgstr "Kun fra personer, jeg kender"
 
-#: ui/dialogs/settings-dialog.slint:1971
+#: ui/dialogs/settings-dialog.slint:2010
 msgid "Only when I answer"
 msgstr "Kun når jeg svarer"
 
-#: ui/dialogs/settings-dialog.slint:1997
+#: ui/dialogs/settings-dialog.slint:2036
 msgid "Remote images"
 msgstr "Fjernbilleder"
 
-#: ui/dialogs/settings-dialog.slint:1998
+#: ui/dialogs/settings-dialog.slint:2037
 msgid "Load sender favicons and images embedded in message bodies."
 msgstr "Indlæs afsenderfavicons og billeder indlejret i beskedbrødtekster."
 
-#: ui/dialogs/settings-dialog.slint:1998
+#: ui/dialogs/settings-dialog.slint:2037
 msgid "Unavailable in this minimal build."
 msgstr "Ikke tilgængelig i denne minimale build."
 
-#: ui/dialogs/settings-dialog.slint:1999
+#: ui/dialogs/settings-dialog.slint:2038
 msgid "Off by default to block tracking pixels and minimize memory use."
 msgstr ""
 "Slået fra som standard for at blokere sporingspixels og minimere "
 "hukommelsesforbruget."
 
-#: ui/dialogs/settings-dialog.slint:2025
+#: ui/dialogs/settings-dialog.slint:2064
 msgid "Keep running in system tray"
 msgstr "Kør videre i systembakken"
 
-#: ui/dialogs/settings-dialog.slint:2025
+#: ui/dialogs/settings-dialog.slint:2064
 msgid "Keep running in the background"
 msgstr "Kør videre i baggrunden"
 
-#: ui/dialogs/settings-dialog.slint:2026
+#: ui/dialogs/settings-dialog.slint:2065
 msgid "Closing the window hides Flectar Mail while mail continues syncing."
 msgstr ""
 "Når vinduet lukkes, skjules Flectar Mail, mens e-mail fortsætter med at "
 "synkronisere."
 
-#: ui/dialogs/settings-dialog.slint:2027
+#: ui/dialogs/settings-dialog.slint:2066
 msgid "Disabled by default; Quit from the tray menu stops the app."
 msgstr "Deaktiveret som standard; Afslut i bakke-menuen stopper appen."
 
-#: ui/dialogs/settings-dialog.slint:2027
+#: ui/dialogs/settings-dialog.slint:2066
 msgid "Disabled by default; open Flectar Mail again to bring its window back."
 msgstr ""
 "Deaktiveret som standard; åbn Flectar Mail igen for at få vinduet frem."
 
-#: ui/dialogs/settings-dialog.slint:2053
+#: ui/dialogs/settings-dialog.slint:2092
 msgid "Start automatically"
 msgstr "Start automatisk"
 
-#: ui/dialogs/settings-dialog.slint:2054
+#: ui/dialogs/settings-dialog.slint:2093
 msgid "Opens Flectar Mail when you sign in."
 msgstr "Åbner Flectar Mail, når du logger ind."
 
-#: ui/dialogs/settings-dialog.slint:2054
+#: ui/dialogs/settings-dialog.slint:2093
 msgid "Starts Flectar Mail in the system tray when you sign in."
 msgstr "Starter Flectar Mail i systembakken, når du logger ind."
 
-#: ui/dialogs/settings-dialog.slint:2054
+#: ui/dialogs/settings-dialog.slint:2093
 msgid "Starts Flectar Mail in the background when you sign in."
 msgstr "Starter Flectar Mail i baggrunden, når du logger ind."
 
-#: ui/dialogs/settings-dialog.slint:2055
+#: ui/dialogs/settings-dialog.slint:2094
 msgid "Disabled by default; also listed in your system's startup apps."
 msgstr "Deaktiveret som standard; vises også i dit systems opstartsapps."
 
-#: ui/dialogs/settings-dialog.slint:2081
+#: ui/dialogs/settings-dialog.slint:2120
 msgid "Default email app"
 msgstr "Standard-e-mail-app"
 
-#: ui/dialogs/settings-dialog.slint:2084
+#: ui/dialogs/settings-dialog.slint:2123
 msgid "Email links in browsers and other apps open in Flectar Mail."
 msgstr "E-mail-links i browsere og andre apps åbnes i Flectar Mail."
 
-#: ui/dialogs/settings-dialog.slint:2085
+#: ui/dialogs/settings-dialog.slint:2124
 msgid ""
 "To open email links from browsers and other apps here, choose Flectar Mail "
 "for email in your system's default apps."
@@ -9871,7 +9981,7 @@ msgstr ""
 "For at åbne e-mail-links fra browsere og andre apps her skal du vælge "
 "Flectar Mail til e-mail i dit systems standardapps."
 
-#: ui/dialogs/settings-dialog.slint:2086
+#: ui/dialogs/settings-dialog.slint:2125
 msgid ""
 "Add Flectar Mail to your applications menu to open email links from browsers "
 "and other apps here."
@@ -9879,99 +9989,99 @@ msgstr ""
 "Føj Flectar Mail til din programmenu for at åbne e-mail-links fra browsere "
 "og andre apps her."
 
-#: ui/dialogs/settings-dialog.slint:2087
+#: ui/dialogs/settings-dialog.slint:2126
 msgid "Open email links from browsers and other apps in Flectar Mail."
 msgstr "Åbn e-mail-links fra browsere og andre apps i Flectar Mail."
 
-#: ui/dialogs/settings-dialog.slint:2094
+#: ui/dialogs/settings-dialog.slint:2133
 msgid "Opens Default apps in Windows Settings, where you choose Flectar Mail."
 msgstr ""
 "Åbner Standardapps i Windows-indstillinger, hvor du vælger Flectar Mail."
 
-#: ui/dialogs/settings-dialog.slint:2095
+#: ui/dialogs/settings-dialog.slint:2134
 msgid "macOS asks you to confirm the change."
 msgstr "macOS beder dig bekræfte ændringen."
 
-#: ui/dialogs/settings-dialog.slint:2096
+#: ui/dialogs/settings-dialog.slint:2135
 msgid ""
 "Run the AppImage with --integrate, or add it with your AppImage manager."
 msgstr ""
 "Kør AppImage med --integrate, eller tilføj den med din AppImage-manager."
 
-#: ui/dialogs/settings-dialog.slint:2097
+#: ui/dialogs/settings-dialog.slint:2136
 msgid ""
 "Links fill in a new message for you to review; files are never attached from "
 "them."
 msgstr ""
 "Links udfylder en ny besked, du kan gennemse; filer vedhæftes aldrig fra dem."
 
-#: ui/dialogs/settings-dialog.slint:2112
+#: ui/dialogs/settings-dialog.slint:2151
 msgid "Make default"
 msgstr "Gør til standard"
 
-#: ui/dialogs/settings-dialog.slint:2120
+#: ui/dialogs/settings-dialog.slint:2159
 msgid "Remove from Windows"
 msgstr "Fjern fra Windows"
 
-#: ui/dialogs/settings-dialog.slint:2144
+#: ui/dialogs/settings-dialog.slint:2183
 msgid "Sync and notifications"
 msgstr "Synkronisering og notifikationer"
 
-#: ui/dialogs/settings-dialog.slint:2148
+#: ui/dialogs/settings-dialog.slint:2187
 msgid "How often to refresh when an instant provider update is unavailable."
 msgstr ""
 "Hvor ofte der skal opdateres, når en øjeblikkelig udbyderopdatering ikke er "
 "tilgængelig."
 
-#: ui/dialogs/settings-dialog.slint:2159 ui/dialogs/settings-dialog.slint:3855
+#: ui/dialogs/settings-dialog.slint:2198 ui/dialogs/settings-dialog.slint:3894
 msgid "Choose which incoming messages can alert you."
 msgstr "Vælg, hvilke indkommende beskeder der kan give dig besked."
 
-#: ui/dialogs/settings-dialog.slint:2172
+#: ui/dialogs/settings-dialog.slint:2211
 msgid "Provider synchronization is ready."
 msgstr "Udbydersynkronisering er klar."
 
-#: ui/dialogs/settings-dialog.slint:2199
+#: ui/dialogs/settings-dialog.slint:2238
 msgid "Renderer"
 msgstr "Gengiver"
 
-#: ui/dialogs/settings-dialog.slint:2200
+#: ui/dialogs/settings-dialog.slint:2239
 msgid "Changes take effect after restarting Flectar Mail."
 msgstr "Ændringer træder i kraft, efter at Flectar Mail er genstartet."
 
-#: ui/dialogs/settings-dialog.slint:2200
+#: ui/dialogs/settings-dialog.slint:2239
 msgid "GPU mode is unavailable in this build."
 msgstr "GPU-tilstand er ikke tilgængelig i denne build."
 
-#: ui/dialogs/settings-dialog.slint:2201
+#: ui/dialogs/settings-dialog.slint:2240
 msgid "CPU — Low Memory"
 msgstr "CPU — Lav hukommelse"
 
-#: ui/dialogs/settings-dialog.slint:2201
+#: ui/dialogs/settings-dialog.slint:2240
 msgid "GPU — WGPU"
 msgstr "GPU — WGPU"
 
-#: ui/dialogs/settings-dialog.slint:2215
+#: ui/dialogs/settings-dialog.slint:2254
 msgid "GPU — WGPU could not start, so CPU — Low Memory is active."
 msgstr "GPU — WGPU kunne ikke starte, så CPU — Lav hukommelse er aktiv."
 
-#: ui/dialogs/settings-dialog.slint:2215
+#: ui/dialogs/settings-dialog.slint:2254
 msgid "Restart required. Your current renderer is still active."
 msgstr "Genstart er påkrævet. Din nuværende gengiver er stadig aktiv."
 
-#: ui/dialogs/settings-dialog.slint:2215
+#: ui/dialogs/settings-dialog.slint:2254
 msgid "Active: GPU — WGPU"
 msgstr "Aktiv: GPU — WGPU"
 
-#: ui/dialogs/settings-dialog.slint:2215
+#: ui/dialogs/settings-dialog.slint:2254
 msgid "Active: CPU — Low Memory"
 msgstr "Aktiv: CPU — Lav hukommelse"
 
-#: ui/dialogs/settings-dialog.slint:2241 ui/dialogs/settings-dialog.slint:2274
+#: ui/dialogs/settings-dialog.slint:2280 ui/dialogs/settings-dialog.slint:2313
 msgid "Download location"
 msgstr "Downloadplacering"
 
-#: ui/dialogs/settings-dialog.slint:2250 ui/dialogs/settings-dialog.slint:2283
+#: ui/dialogs/settings-dialog.slint:2289 ui/dialogs/settings-dialog.slint:2322
 msgid ""
 "Saving an attachment asks where to put it, starting in the folder your "
 "system suggests."
@@ -9979,18 +10089,18 @@ msgstr ""
 "Når du gemmer en vedhæftet fil, spørges der, hvor den skal ligge, med start "
 "i mappen, som dit system foreslår."
 
-#: ui/dialogs/settings-dialog.slint:2328
+#: ui/dialogs/settings-dialog.slint:2367
 msgid ""
 "Keep your address book clean while still making frequent recipients easy to "
 "find."
 msgstr ""
 "Hold din adressebog ren, samtidig med at hyppige modtagere er nemme at finde."
 
-#: ui/dialogs/settings-dialog.slint:2350
+#: ui/dialogs/settings-dialog.slint:2389
 msgid "Remember people I email"
 msgstr "Husk personer, jeg sender e-mail til"
 
-#: ui/dialogs/settings-dialog.slint:2351
+#: ui/dialogs/settings-dialog.slint:2390
 msgid ""
 "While enabled, remember To, Cc, and Bcc recipients from new sends and synced "
 "Sent mail."
@@ -9998,11 +10108,11 @@ msgstr ""
 "Når det er slået til, huskes Til-, Cc- og Bcc-modtagere fra nye afsendelser "
 "og synkroniseret Sendt-mail."
 
-#: ui/dialogs/settings-dialog.slint:2366
+#: ui/dialogs/settings-dialog.slint:2405
 msgid "Remember incoming senders"
 msgstr "Husk indkommende afsendere"
 
-#: ui/dialogs/settings-dialog.slint:2367
+#: ui/dialogs/settings-dialog.slint:2406
 msgid ""
 "Remember human senders from new mail. Automated, spam, trash, and existing "
 "mail are excluded."
@@ -10010,11 +10120,11 @@ msgstr ""
 "Husk menneskelige afsendere fra ny e-mail. Automatiske, spam, papirkurv og "
 "eksisterende e-mail er udelukket."
 
-#: ui/dialogs/settings-dialog.slint:2382
+#: ui/dialogs/settings-dialog.slint:2421
 msgid "Use suggestions from all accounts"
 msgstr "Brug forslag fra alle konti"
 
-#: ui/dialogs/settings-dialog.slint:2383
+#: ui/dialogs/settings-dialog.slint:2422
 msgid ""
 "Include people emailed from any connected account. Turn off to keep learned "
 "recipients account-specific."
@@ -10022,11 +10132,11 @@ msgstr ""
 "Medtag personer, der er sendt e-mail til fra en hvilken som helst tilknyttet "
 "konto. Slå fra for at holde lærte modtagere kontospecifikke."
 
-#: ui/dialogs/settings-dialog.slint:2398
+#: ui/dialogs/settings-dialog.slint:2437
 msgid "Use suggestions when composing"
 msgstr "Brug forslag ved skrivning"
 
-#: ui/dialogs/settings-dialog.slint:2399
+#: ui/dialogs/settings-dialog.slint:2438
 msgid ""
 "Include learned people in recipient autocomplete. Saved and CardDAV contacts "
 "are always available."
@@ -10034,11 +10144,11 @@ msgstr ""
 "Medtag lærte personer i autofuldførelse af modtagere. Gemte kontakter og "
 "CardDAV-kontakter er altid tilgængelige."
 
-#: ui/dialogs/settings-dialog.slint:2420
+#: ui/dialogs/settings-dialog.slint:2459
 msgid "Suggested people"
 msgstr "Foreslåede personer"
 
-#: ui/dialogs/settings-dialog.slint:2423
+#: ui/dialogs/settings-dialog.slint:2462
 msgid ""
 "People you email remain available as local suggestions and never sync to "
 "CardDAV. Clear them any time to restart learning."
@@ -10047,19 +10157,19 @@ msgstr ""
 "synkroniseres aldrig til CardDAV. Ryd dem når som helst for at starte "
 "læringen forfra."
 
-#: ui/dialogs/settings-dialog.slint:2441
+#: ui/dialogs/settings-dialog.slint:2480
 msgid "Clear now"
 msgstr "Ryd nu"
 
-#: ui/dialogs/settings-dialog.slint:2441
+#: ui/dialogs/settings-dialog.slint:2480
 msgid "Clear suggested people"
 msgstr "Ryd foreslåede personer"
 
-#: ui/dialogs/settings-dialog.slint:2464
+#: ui/dialogs/settings-dialog.slint:2503
 msgid "Blocked senders"
 msgstr "Blokerede afsendere"
 
-#: ui/dialogs/settings-dialog.slint:2467
+#: ui/dialogs/settings-dialog.slint:2506
 msgid ""
 "Their mail goes to Spam when Flectar Mail receives it. Block a sender from "
 "the menu of one of their messages."
@@ -10067,19 +10177,19 @@ msgstr ""
 "Deres e-mail sendes til Spam, når Flectar Mail modtager den. Blokér en "
 "afsender fra menuen på en af deres beskeder."
 
-#: ui/dialogs/settings-dialog.slint:2473
+#: ui/dialogs/settings-dialog.slint:2512
 msgid "No one is blocked."
 msgstr "Ingen er blokeret."
 
-#: ui/dialogs/settings-dialog.slint:2495
+#: ui/dialogs/settings-dialog.slint:2534
 msgid "Unblock"
 msgstr "Fjern blokering"
 
-#: ui/dialogs/settings-dialog.slint:2496
+#: ui/dialogs/settings-dialog.slint:2535
 msgid "Unblock {}"
 msgstr "Fjern blokering af {}"
 
-#: ui/dialogs/settings-dialog.slint:2586
+#: ui/dialogs/settings-dialog.slint:2625
 msgid ""
 "Rules sort new mail as it arrives in an Inbox, trying them from the top. "
 "Where the server can run a rule, it does, so the rule works while Flectar "
@@ -10089,7 +10199,7 @@ msgstr ""
 "først. Hvor serveren kan køre en regel, gør den det, så reglen virker, mens "
 "Flectar Mail er lukket. Andre regler kører, mens Flectar Mail er åben."
 
-#: ui/dialogs/settings-dialog.slint:2604
+#: ui/dialogs/settings-dialog.slint:2643
 msgid ""
 "The server for {} runs your filter script “{}”. Flectar Mail can run its "
 "rules there too, before that script, so they work while Flectar Mail is "
@@ -10098,7 +10208,7 @@ msgstr ""
 "Serveren for {} kører dit filter-script ”{}”. Flectar Mail kan også køre "
 "sine regler der, før det script, så de virker, mens Flectar Mail er lukket."
 
-#: ui/dialogs/settings-dialog.slint:2605
+#: ui/dialogs/settings-dialog.slint:2644
 msgid ""
 "The server for {} runs rules saved on another device, so the rules here run "
 "while Flectar Mail is open."
@@ -10106,11 +10216,11 @@ msgstr ""
 "Serveren for {} kører regler gemt på en anden enhed, så reglerne her kører, "
 "mens Flectar Mail er åben."
 
-#: ui/dialogs/settings-dialog.slint:2606
+#: ui/dialogs/settings-dialog.slint:2645
 msgid "The server for {} runs rules saved on another device."
 msgstr "Serveren for {} kører regler gemt på en anden enhed."
 
-#: ui/dialogs/settings-dialog.slint:2607
+#: ui/dialogs/settings-dialog.slint:2646
 msgid ""
 "The script Flectar Mail keeps on the server for {} was changed elsewhere, so "
 "the rules here run while Flectar Mail is open."
@@ -10118,73 +10228,73 @@ msgstr ""
 "Scriptet, som Flectar Mail opbevarer på serveren for {}, er blevet ændret et "
 "andet sted, så reglerne her kører, mens Flectar Mail er åben."
 
-#: ui/dialogs/settings-dialog.slint:2608
+#: ui/dialogs/settings-dialog.slint:2647
 msgid "The rules couldn't go to the server for {}. {}"
 msgstr "Reglerne kunne ikke overføres til serveren for {}. {}"
 
-#: ui/dialogs/settings-dialog.slint:2621
+#: ui/dialogs/settings-dialog.slint:2660
 msgid "Run rules there"
 msgstr "Kør regler der"
 
-#: ui/dialogs/settings-dialog.slint:2622
+#: ui/dialogs/settings-dialog.slint:2661
 msgid "Replace them"
 msgstr "Erstat dem"
 
-#: ui/dialogs/settings-dialog.slint:2623
+#: ui/dialogs/settings-dialog.slint:2662
 msgid "Remove them"
 msgstr "Fjern dem"
 
-#: ui/dialogs/settings-dialog.slint:2624
+#: ui/dialogs/settings-dialog.slint:2663
 msgid "Replace the changes"
 msgstr "Erstat ændringerne"
 
-#: ui/dialogs/settings-dialog.slint:2655
+#: ui/dialogs/settings-dialog.slint:2694
 msgid "No rules yet. New mail stays where it arrives."
 msgstr "Ingen regler endnu. Ny e-mail forbliver, hvor den ankommer."
 
-#: ui/dialogs/settings-dialog.slint:2690
+#: ui/dialogs/settings-dialog.slint:2729
 msgid "A folder or label it uses is gone. Edit the rule to choose another."
 msgstr ""
 "En mappe eller et label, den bruger, er væk. Redigér reglen for at vælge en "
 "anden."
 
-#: ui/dialogs/settings-dialog.slint:2692
+#: ui/dialogs/settings-dialog.slint:2731
 msgid "{} · On the server"
 msgstr "{} · På serveren"
 
-#: ui/dialogs/settings-dialog.slint:2693
+#: ui/dialogs/settings-dialog.slint:2732
 msgid "{} · On some servers"
 msgstr "{} · På nogle servere"
 
-#: ui/dialogs/settings-dialog.slint:2694
+#: ui/dialogs/settings-dialog.slint:2733
 msgid "{} · On this device"
 msgstr "{} · På denne enhed"
 
-#: ui/dialogs/settings-dialog.slint:2702
+#: ui/dialogs/settings-dialog.slint:2741
 msgid "On the server"
 msgstr "På serveren"
 
-#: ui/dialogs/settings-dialog.slint:2703
+#: ui/dialogs/settings-dialog.slint:2742
 msgid "On some servers"
 msgstr "På nogle servere"
 
-#: ui/dialogs/settings-dialog.slint:2718
+#: ui/dialogs/settings-dialog.slint:2757
 msgid "Move {} up"
 msgstr "Flyt {} op"
 
-#: ui/dialogs/settings-dialog.slint:2729
+#: ui/dialogs/settings-dialog.slint:2768
 msgid "Move {} down"
 msgstr "Flyt {} ned"
 
-#: ui/dialogs/settings-dialog.slint:2735 ui/dialogs/settings-dialog.slint:2746
+#: ui/dialogs/settings-dialog.slint:2774 ui/dialogs/settings-dialog.slint:2785
 msgid "Edit {}"
 msgstr "Redigér {}"
 
-#: ui/dialogs/settings-dialog.slint:2755
+#: ui/dialogs/settings-dialog.slint:2794
 msgid "Clean up"
 msgstr "Ryd op"
 
-#: ui/dialogs/settings-dialog.slint:2772
+#: ui/dialogs/settings-dialog.slint:2811
 msgid ""
 "Deletes mail for good once it has been in Trash this long. Starred mail "
 "stays."
@@ -10192,18 +10302,18 @@ msgstr ""
 "Sletter e-mail permanent, når den har ligget i Papirkurv så længe. E-mail "
 "med stjerne forbliver."
 
-#: ui/dialogs/settings-dialog.slint:2782
+#: ui/dialogs/settings-dialog.slint:2821
 msgid "Empty Junk"
 msgstr "Tøm spam"
 
-#: ui/dialogs/settings-dialog.slint:2783
+#: ui/dialogs/settings-dialog.slint:2822
 msgid ""
 "Deletes mail for good once it has been in Junk this long. Starred mail stays."
 msgstr ""
 "Sletter e-mail permanent, når den har ligget i spam så længe. E-mail med "
 "stjerne forbliver."
 
-#: ui/dialogs/settings-dialog.slint:2794
+#: ui/dialogs/settings-dialog.slint:2833
 msgid ""
 "Flectar Mail empties them while it's open, counting from when mail went into "
 "each folder. Gmail and Outlook.com empty both after 30 days themselves."
@@ -10211,7 +10321,7 @@ msgstr ""
 "Flectar Mail tømmer dem, mens den er åben, regnet fra, hvornår e-mail kom i "
 "hver mappe. Gmail og Outlook.com tømmer begge selv efter 30 dage."
 
-#: ui/dialogs/settings-dialog.slint:2815
+#: ui/dialogs/settings-dialog.slint:2854
 msgid ""
 "Manage connected mailboxes and add providers. Drag an account to change its "
 "order everywhere."
@@ -10219,22 +10329,22 @@ msgstr ""
 "Administrér tilknyttede postkasser og tilføj udbydere. Træk en konto for at "
 "ændre dens rækkefølge alle steder."
 
-#: ui/dialogs/settings-dialog.slint:2842
+#: ui/dialogs/settings-dialog.slint:2881
 msgid ""
 "Group accounts as Personal or Work and identify them by color in the mail "
 "list."
 msgstr ""
 "Gruppér konti som Privat eller Arbejde, og kend dem på farven i e-maillisten."
 
-#: ui/dialogs/settings-dialog.slint:2851 ui/dialogs/settings-dialog.slint:2881
+#: ui/dialogs/settings-dialog.slint:2890 ui/dialogs/settings-dialog.slint:2920
 msgid "Add profile"
 msgstr "Tilføj profil"
 
-#: ui/dialogs/settings-dialog.slint:2865 ui/dialogs/settings-dialog.slint:2873
+#: ui/dialogs/settings-dialog.slint:2904 ui/dialogs/settings-dialog.slint:2912
 msgid "Show account color at the left edge of each message"
 msgstr "Vis kontofarven i venstre kant af hver besked"
 
-#: ui/dialogs/settings-dialog.slint:2895
+#: ui/dialogs/settings-dialog.slint:2934
 msgid ""
 "No profiles yet. Accounts keep their individual or generated colors until "
 "you create one."
@@ -10242,100 +10352,100 @@ msgstr ""
 "Ingen profiler endnu. Konti beholder deres individuelle eller genererede "
 "farver, indtil du opretter en."
 
-#: ui/dialogs/settings-dialog.slint:2940 ui/dialogs/settings-dialog.slint:5052
+#: ui/dialogs/settings-dialog.slint:2979 ui/dialogs/settings-dialog.slint:5091
 msgid "Edit profile"
 msgstr "Redigér profil"
 
-#: ui/dialogs/settings-dialog.slint:2950 ui/dialogs/settings-dialog.slint:5405
+#: ui/dialogs/settings-dialog.slint:2989 ui/dialogs/settings-dialog.slint:5444
 msgid "Delete profile"
 msgstr "Slet profil"
 
-#: ui/dialogs/settings-dialog.slint:2966 ui/dialogs/settings-dialog.slint:3012
+#: ui/dialogs/settings-dialog.slint:3005 ui/dialogs/settings-dialog.slint:3051
 msgid "Add Gmail"
 msgstr "Tilføj Gmail"
 
-#: ui/dialogs/settings-dialog.slint:2979 ui/dialogs/settings-dialog.slint:3013
+#: ui/dialogs/settings-dialog.slint:3018 ui/dialogs/settings-dialog.slint:3052
 msgid "Add Outlook"
 msgstr "Tilføj Outlook"
 
-#: ui/dialogs/settings-dialog.slint:2992 ui/dialogs/settings-dialog.slint:3014
+#: ui/dialogs/settings-dialog.slint:3031 ui/dialogs/settings-dialog.slint:3053
 msgid "Add mail account"
 msgstr "Tilføj mailkonto"
 
-#: ui/dialogs/settings-dialog.slint:3005 ui/dialogs/settings-dialog.slint:3015
+#: ui/dialogs/settings-dialog.slint:3044 ui/dialogs/settings-dialog.slint:3054
 msgid "Cancel sign-in"
 msgstr "Annullér logind"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Couldn't check mail · Retrying automatically"
 msgstr "Kunne ikke tjekke e-mail · Forsøger automatisk igen"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · Gmail"
 msgstr "Forbundet · Gmail"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · JMAP"
 msgstr "Forbundet · JMAP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected without encryption · POP3"
 msgstr "Forbundet uden kryptering · POP3"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · POP3"
 msgstr "Forbundet · POP3"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected without encryption · POP3 + SMTP"
 msgstr "Forbundet uden kryptering · POP3 + SMTP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · POP3 + SMTP"
 msgstr "Forbundet · POP3 + SMTP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected without encryption · IMAP"
 msgstr "Forbundet uden kryptering · IMAP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · IMAP"
 msgstr "Forbundet · IMAP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected without encryption · IMAP + SMTP"
 msgstr "Forbundet uden kryptering · IMAP + SMTP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Connected · IMAP + SMTP"
 msgstr "Forbundet · IMAP + SMTP"
 
-#: ui/dialogs/settings-dialog.slint:3183
+#: ui/dialogs/settings-dialog.slint:3222
 msgid "Account status: {}"
 msgstr "Kontostatus: {}"
 
-#: ui/dialogs/settings-dialog.slint:3193 ui/dialogs/settings-dialog.slint:3247
-#: ui/dialogs/settings-dialog.slint:3603 ui/dialogs/settings-dialog.slint:4841
+#: ui/dialogs/settings-dialog.slint:3232 ui/dialogs/settings-dialog.slint:3286
+#: ui/dialogs/settings-dialog.slint:3642 ui/dialogs/settings-dialog.slint:4880
 msgid "Reconnect"
 msgstr "Forbind igen"
 
-#: ui/dialogs/settings-dialog.slint:3209
+#: ui/dialogs/settings-dialog.slint:3248
 msgid "Hide account settings"
 msgstr "Skjul kontoindstillinger"
 
-#: ui/dialogs/settings-dialog.slint:3209
+#: ui/dialogs/settings-dialog.slint:3248
 msgid "Show account settings"
 msgstr "Vis kontoindstillinger"
 
-#: ui/dialogs/settings-dialog.slint:3225
+#: ui/dialogs/settings-dialog.slint:3264
 msgid "Mail synchronization error: {}"
 msgstr "Fejl i e-mailsynkronisering: {}"
 
-#: ui/dialogs/settings-dialog.slint:3266
+#: ui/dialogs/settings-dialog.slint:3305
 msgid "Account name"
 msgstr "Kontonavn"
 
-#: ui/dialogs/settings-dialog.slint:3267
+#: ui/dialogs/settings-dialog.slint:3306
 msgid ""
 "Shown instead of the address in the sidebar and lists. People you email "
 "don't see it."
@@ -10343,28 +10453,28 @@ msgstr ""
 "Vises i stedet for adressen i sidebjælken og på lister. Folk, du sender e-"
 "mail til, kan ikke se den."
 
-#: ui/dialogs/settings-dialog.slint:3279
+#: ui/dialogs/settings-dialog.slint:3318
 msgid "Mail history"
 msgstr "E-mailhistorik"
 
-#: ui/dialogs/settings-dialog.slint:3282
+#: ui/dialogs/settings-dialog.slint:3321
 msgid ""
 "Download the full mailbox. Large accounts can take considerable time and "
 "storage."
 msgstr ""
 "Download hele postkassen. Store konti kan tage betydelig tid og lagerplads."
 
-#: ui/dialogs/settings-dialog.slint:3283
+#: ui/dialogs/settings-dialog.slint:3322
 msgid "How far back to download. Mail already stored on this device is kept."
 msgstr ""
 "Hvor langt tilbage, der skal downloades. E-mail, der allerede er gemt på "
 "denne enhed, beholdes."
 
-#: ui/dialogs/settings-dialog.slint:3298
+#: ui/dialogs/settings-dialog.slint:3337
 msgid "Messages download when you open them."
 msgstr "Beskeder downloades, når du åbner dem."
 
-#: ui/dialogs/settings-dialog.slint:3299
+#: ui/dialogs/settings-dialog.slint:3338
 msgid ""
 "Messages and their attachments up to 25 MB download ahead of time, to open "
 "them offline."
@@ -10372,47 +10482,47 @@ msgstr ""
 "Beskeder og deres vedhæftede filer op til 25 MB downloades på forhånd, så de "
 "kan åbnes offline."
 
-#: ui/dialogs/settings-dialog.slint:3300
+#: ui/dialogs/settings-dialog.slint:3339
 msgid "Messages download ahead of time, and attachments when you open them."
 msgstr "Beskeder downloades på forhånd, og vedhæftede filer, når du åbner dem."
 
-#: ui/dialogs/settings-dialog.slint:3315
+#: ui/dialogs/settings-dialog.slint:3354
 msgid "When the app starts, and when you check for new mail."
 msgstr "Når appen starter, og når du tjekker for ny e-mail."
 
-#: ui/dialogs/settings-dialog.slint:3316
+#: ui/dialogs/settings-dialog.slint:3355
 msgid "As often as set in General."
 msgstr "Så ofte som angivet under Generelt."
 
-#: ui/dialogs/settings-dialog.slint:3317
+#: ui/dialogs/settings-dialog.slint:3356
 msgid "How often this account checks its server."
 msgstr "Hvor ofte denne konto tjekker sin server."
 
-#: ui/dialogs/settings-dialog.slint:3330
+#: ui/dialogs/settings-dialog.slint:3369
 msgid "Instant updates"
 msgstr "Øjeblikkelige opdateringer"
 
-#: ui/dialogs/settings-dialog.slint:3333
+#: ui/dialogs/settings-dialog.slint:3372
 msgid "Off while the account checks only when you ask."
 msgstr "Slået fra, mens kontoen kun tjekker, når du beder om det."
 
-#: ui/dialogs/settings-dialog.slint:3334
+#: ui/dialogs/settings-dialog.slint:3373
 msgid "The server tells Flectar Mail of new mail as soon as it arrives."
 msgstr "Serveren fortæller Flectar Mail om ny e-mail, så snart den ankommer."
 
-#: ui/dialogs/settings-dialog.slint:3347
+#: ui/dialogs/settings-dialog.slint:3386
 msgid "Server timeout"
 msgstr "Servertimeout"
 
-#: ui/dialogs/settings-dialog.slint:3348
+#: ui/dialogs/settings-dialog.slint:3387
 msgid "How long to wait for a slow server before giving up."
 msgstr "Hvor længe der skal vente på en langsom server, før der opgives."
 
-#: ui/dialogs/settings-dialog.slint:3361
+#: ui/dialogs/settings-dialog.slint:3400
 msgid "Sent copies"
 msgstr "Sendt-kopier"
 
-#: ui/dialogs/settings-dialog.slint:3363
+#: ui/dialogs/settings-dialog.slint:3402
 msgid ""
 "Choose who saves sent mail. Use Flectar Mail if your server does not save a "
 "copy."
@@ -10420,23 +10530,23 @@ msgstr ""
 "Vælg, hvem der gemmer sendt e-mail. Brug Flectar Mail, hvis din server ikke "
 "gemmer en kopi."
 
-#: ui/dialogs/settings-dialog.slint:3364
+#: ui/dialogs/settings-dialog.slint:3403
 msgid "Provider default"
 msgstr "Udbyderstandard"
 
-#: ui/dialogs/settings-dialog.slint:3364
+#: ui/dialogs/settings-dialog.slint:3403
 msgid "Server saves a copy"
 msgstr "Serveren gemmer en kopi"
 
-#: ui/dialogs/settings-dialog.slint:3364
+#: ui/dialogs/settings-dialog.slint:3403
 msgid "Flectar Mail saves a copy"
 msgstr "Flectar Mail gemmer en kopi"
 
-#: ui/dialogs/settings-dialog.slint:3379
+#: ui/dialogs/settings-dialog.slint:3418
 msgid "Subscribed folders only"
 msgstr "Kun abonnerede mapper"
 
-#: ui/dialogs/settings-dialog.slint:3381
+#: ui/dialogs/settings-dialog.slint:3420
 msgid ""
 "Show and sync only the folders you subscribed to on the server, plus Inbox "
 "and the folders mail is filed into."
@@ -10444,41 +10554,41 @@ msgstr ""
 "Vis og synkronisér kun de mapper på serveren, du abonnerede på, samt "
 "Indbakke og de mapper, e-mail gemmes i."
 
-#: ui/dialogs/settings-dialog.slint:3397 ui/folder-roles.slint:132
+#: ui/dialogs/settings-dialog.slint:3436 ui/folder-roles.slint:132
 msgid "Special folders"
 msgstr "Særlige mapper"
 
-#: ui/dialogs/settings-dialog.slint:3406
+#: ui/dialogs/settings-dialog.slint:3445
 msgid "Sent, Drafts, Trash, Spam and Archive"
 msgstr "Sendt, Kladder, Papirkurv, Spam og Arkiv"
 
-#: ui/dialogs/settings-dialog.slint:3417 ui/dialogs/settings-dialog.slint:3494
+#: ui/dialogs/settings-dialog.slint:3456 ui/dialogs/settings-dialog.slint:3533
 msgid "Choose…"
 msgstr "Vælg…"
 
-#: ui/dialogs/settings-dialog.slint:3427
+#: ui/dialogs/settings-dialog.slint:3466
 msgid "Keep mail on the server"
 msgstr "Behold e-mail på serveren"
 
-#: ui/dialogs/settings-dialog.slint:3431
+#: ui/dialogs/settings-dialog.slint:3470
 msgid "Flectar Mail never removes mail from the server."
 msgstr "Flectar Mail fjerner aldrig e-mail fra serveren."
 
-#: ui/dialogs/settings-dialog.slint:3432
+#: ui/dialogs/settings-dialog.slint:3471
 msgid "Mail is removed after this time, or once deleted here."
 msgstr "E-mail fjernes efter dette tidspunkt, eller når den er slettet her."
 
-#: ui/dialogs/settings-dialog.slint:3447
+#: ui/dialogs/settings-dialog.slint:3486
 msgid "This server removes mail as soon as it's downloaded."
 msgstr "Denne server fjerner e-mail, så snart den er downloadet."
 
-#: ui/dialogs/settings-dialog.slint:3448
+#: ui/dialogs/settings-dialog.slint:3487
 msgid "This server removes downloaded mail after one day."
 msgid_plural "This server removes downloaded mail after {n} days."
 msgstr[0] "Denne server fjerner downloadet e-mail efter én dag."
 msgstr[1] "Denne server fjerner downloadet e-mail efter {n} dage."
 
-#: ui/dialogs/settings-dialog.slint:3459
+#: ui/dialogs/settings-dialog.slint:3498
 msgid ""
 "Mail removed from the server is kept only on this device. Database snapshots "
 "in Storage include it."
@@ -10486,76 +10596,76 @@ msgstr ""
 "E-mail, der fjernes fra serveren, beholdes kun på denne enhed. "
 "Databasesnapshots under Lagerplads inkluderer den."
 
-#: ui/dialogs/settings-dialog.slint:3483
+#: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar and sync"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3483
+#: ui/dialogs/settings-dialog.slint:3522
 msgid "Which folders show in the sidebar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3536
+#: ui/dialogs/settings-dialog.slint:3575
 msgid "Sync contacts with your Google account."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3537 ui/dialogs/settings-dialog.slint:4765
+#: ui/dialogs/settings-dialog.slint:3576 ui/dialogs/settings-dialog.slint:4804
 msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "Synkronisér kontakter med en standardkompatibel CardDAV-server."
 
-#: ui/dialogs/settings-dialog.slint:3541
+#: ui/dialogs/settings-dialog.slint:3580
 #, fuzzy
 #| msgid "Contacts"
 msgid "Google Contacts"
 msgstr "Kontakter"
 
-#: ui/dialogs/settings-dialog.slint:3565 ui/dialogs/settings-dialog.slint:3603
+#: ui/dialogs/settings-dialog.slint:3604 ui/dialogs/settings-dialog.slint:3642
 #, fuzzy
 #| msgid "Connect Google Calendar"
 msgid "Connect Google Contacts"
 msgstr "Forbind Google Kalender"
 
-#: ui/dialogs/settings-dialog.slint:3572 ui/dialogs/settings-dialog.slint:3609
+#: ui/dialogs/settings-dialog.slint:3611 ui/dialogs/settings-dialog.slint:3648
 msgid "Disconnect"
 msgstr "Afbryd"
 
-#: ui/dialogs/settings-dialog.slint:3578 ui/dialogs/settings-dialog.slint:3614
-#: ui/dialogs/settings-dialog.slint:4764
+#: ui/dialogs/settings-dialog.slint:3617 ui/dialogs/settings-dialog.slint:3653
+#: ui/dialogs/settings-dialog.slint:4803
 msgid "Connect CardDAV"
 msgstr "Forbind CardDAV"
 
-#: ui/dialogs/settings-dialog.slint:3580 ui/dialogs/settings-dialog.slint:3616
+#: ui/dialogs/settings-dialog.slint:3619 ui/dialogs/settings-dialog.slint:3655
 msgid "Fix CardDAV"
 msgstr "Ret CardDAV"
 
-#: ui/dialogs/settings-dialog.slint:3589
+#: ui/dialogs/settings-dialog.slint:3628
 #, fuzzy
 #| msgid "Calendar sync error: {}"
 msgid "Contacts sync error: {}"
 msgstr "Fejl i kalendersynkronisering: {}"
 
-#: ui/dialogs/settings-dialog.slint:3640
+#: ui/dialogs/settings-dialog.slint:3679
 msgid "Uses the {} color in the mail list"
 msgstr "Bruger {}-farven i e-maillisten"
 
-#: ui/dialogs/settings-dialog.slint:3642
+#: ui/dialogs/settings-dialog.slint:3681
 msgid "Uses a custom account color"
 msgstr "Bruger en brugerdefineret kontofarve"
 
-#: ui/dialogs/settings-dialog.slint:3643
+#: ui/dialogs/settings-dialog.slint:3682
 msgid "Uses a generated account color"
 msgstr "Bruger en genereret kontofarve"
 
-#: ui/dialogs/settings-dialog.slint:3689
+#: ui/dialogs/settings-dialog.slint:3728
 msgid "OAuth app credentials"
 msgstr "OAuth-appoplysninger"
 
-#: ui/dialogs/settings-dialog.slint:3689
+#: ui/dialogs/settings-dialog.slint:3728
 #, fuzzy
 #| msgid "New contacts are saved on this device."
 msgid "Your own app keys are set up on this device."
 msgstr "Nye kontakter gemmes på denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:3689
+#: ui/dialogs/settings-dialog.slint:3728
 #, fuzzy
 #| msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgid ""
@@ -10563,57 +10673,57 @@ msgid ""
 msgstr ""
 "Avanceret: brug din egen Gmail- eller Microsoft-skrivebordsapp-registrering."
 
-#: ui/dialogs/settings-dialog.slint:3689
+#: ui/dialogs/settings-dialog.slint:3728
 msgid "Custom desktop app credentials are configured."
 msgstr "Brugerdefinerede skrivebordsapp-oplysninger er konfigureret."
 
-#: ui/dialogs/settings-dialog.slint:3689
+#: ui/dialogs/settings-dialog.slint:3728
 msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgstr ""
 "Avanceret: brug din egen Gmail- eller Microsoft-skrivebordsapp-registrering."
 
-#: ui/dialogs/settings-dialog.slint:3690
+#: ui/dialogs/settings-dialog.slint:3729
 msgid "Hide"
 msgstr "Skjul"
 
-#: ui/dialogs/settings-dialog.slint:3690
+#: ui/dialogs/settings-dialog.slint:3729
 msgid "Configure"
 msgstr "Konfigurér"
 
-#: ui/dialogs/settings-dialog.slint:3693 ui/dialogs/settings-dialog.slint:3694
+#: ui/dialogs/settings-dialog.slint:3732 ui/dialogs/settings-dialog.slint:3733
 msgid "Gmail desktop client ID"
 msgstr "Gmail-skrivebordsklient-id"
 
-#: ui/dialogs/settings-dialog.slint:3693 ui/dialogs/settings-dialog.slint:3694
+#: ui/dialogs/settings-dialog.slint:3732 ui/dialogs/settings-dialog.slint:3733
 msgid "Gmail client secret (optional)"
 msgstr "Gmail-klienthemmelighed (valgfri)"
 
-#: ui/dialogs/settings-dialog.slint:3693
+#: ui/dialogs/settings-dialog.slint:3732
 msgid "Save Gmail"
 msgstr "Gem Gmail"
 
-#: ui/dialogs/settings-dialog.slint:3694
+#: ui/dialogs/settings-dialog.slint:3733
 msgid "Save Gmail settings"
 msgstr "Gem Gmail-indstillinger"
 
-#: ui/dialogs/settings-dialog.slint:3695
+#: ui/dialogs/settings-dialog.slint:3734
 msgid "Save Outlook"
 msgstr "Gem Outlook"
 
-#: ui/dialogs/settings-dialog.slint:3696
+#: ui/dialogs/settings-dialog.slint:3735
 msgid ""
 "Outlook public desktop clients use PKCE and do not need a client secret."
 msgstr ""
 "Offentlige Outlook-skrivebordsklienter bruger PKCE og behøver ikke en "
 "klienthemmelighed."
 
-#: ui/dialogs/settings-dialog.slint:3748
+#: ui/dialogs/settings-dialog.slint:3787
 msgid ""
 "See what Flectar Mail stores locally and manage the data on this device."
 msgstr ""
 "Se, hvad Flectar Mail gemmer lokalt, og administrér dataene på denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:3774
+#: ui/dialogs/settings-dialog.slint:3813
 msgid ""
 "Mail you imported. It is kept only here, so export it to keep a copy "
 "elsewhere."
@@ -10621,22 +10731,22 @@ msgstr ""
 "E-mail, du har importeret. Den bevares kun her, så eksportér den for at "
 "beholde en kopi et andet sted."
 
-#: ui/dialogs/settings-dialog.slint:3776 ui/dialogs/settings-dialog.slint:5354
+#: ui/dialogs/settings-dialog.slint:3815 ui/dialogs/settings-dialog.slint:5393
 msgid "One message"
 msgid_plural "{} messages"
 msgstr[0] "Én besked"
 msgstr[1] "{} beskeder"
 
-#: ui/dialogs/settings-dialog.slint:3784 ui/dialogs/settings-dialog.slint:5316
-#: ui/dialogs/settings-dialog.slint:5382
+#: ui/dialogs/settings-dialog.slint:3823 ui/dialogs/settings-dialog.slint:5355
+#: ui/dialogs/settings-dialog.slint:5421
 msgid "Export mail…"
 msgstr "Eksportér e-mail…"
 
-#: ui/dialogs/settings-dialog.slint:3793
+#: ui/dialogs/settings-dialog.slint:3832
 msgid "Database snapshot"
 msgstr "Databasesnapshot"
 
-#: ui/dialogs/settings-dialog.slint:3793
+#: ui/dialogs/settings-dialog.slint:3832
 msgid ""
 "Export verified copies of the mail and calendar databases with their schema "
 "versions."
@@ -10644,7 +10754,7 @@ msgstr ""
 "Eksportér verificerede kopier af e-mail- og kalenderdatabaserne med deres "
 "skemaversioner."
 
-#: ui/dialogs/settings-dialog.slint:3795
+#: ui/dialogs/settings-dialog.slint:3834
 msgid ""
 "The snapshot contains private local mail and settings, but not passwords or "
 "OAuth tokens. Store it securely."
@@ -10652,15 +10762,15 @@ msgstr ""
 "Snapshotet indeholder privat lokal e-mail og indstillinger, men ikke "
 "adgangskoder eller OAuth-tokens. Opbevar det sikkert."
 
-#: ui/dialogs/settings-dialog.slint:3796
+#: ui/dialogs/settings-dialog.slint:3835
 msgid "Export snapshot"
 msgstr "Eksportér snapshot"
 
-#: ui/dialogs/settings-dialog.slint:3803
+#: ui/dialogs/settings-dialog.slint:3842
 msgid "Transfer account setup"
 msgstr "Overfør kontoopsætning"
 
-#: ui/dialogs/settings-dialog.slint:3803
+#: ui/dialogs/settings-dialog.slint:3842
 msgid ""
 "Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a "
 "backup, or export one connected account and your preferences."
@@ -10674,7 +10784,7 @@ msgstr[1] ""
 "Importér konti og e-mail fra Thunderbird, K-9 Mail, mailfiler eller en "
 "sikkerhedskopi, eller eksportér {n} tilknyttede konti og dine præferencer."
 
-#: ui/dialogs/settings-dialog.slint:3805
+#: ui/dialogs/settings-dialog.slint:3844
 msgid ""
 "Passwords and OAuth tokens stay in the system keyring. A restored device "
 "asks you to sign in securely."
@@ -10682,15 +10792,15 @@ msgstr ""
 "Adgangskoder og OAuth-tokens forbliver i systemets nøglering. En gendannet "
 "enhed beder dig logge ind sikkert."
 
-#: ui/dialogs/settings-dialog.slint:3814
+#: ui/dialogs/settings-dialog.slint:3853
 msgid "Export"
 msgstr "Eksportér"
 
-#: ui/dialogs/settings-dialog.slint:3821
+#: ui/dialogs/settings-dialog.slint:3860
 msgid "Delete all local data"
 msgstr "Slet alle lokale data"
 
-#: ui/dialogs/settings-dialog.slint:3821
+#: ui/dialogs/settings-dialog.slint:3860
 msgid ""
 "Remove accounts, downloaded mail, calendars, contacts, preferences, and "
 "credentials from this device."
@@ -10698,7 +10808,7 @@ msgstr ""
 "Fjern konti, downloadet e-mail, kalendere, kontakter, præferencer og "
 "legitimationsoplysninger fra denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:3823
+#: ui/dialogs/settings-dialog.slint:3862
 msgid ""
 "Imported mail and the mail of any POP3 account are stored only on this "
 "device. Nothing is deleted from Gmail, Outlook, or IMAP servers."
@@ -10706,7 +10816,7 @@ msgstr ""
 "Importeret e-mail og e-mail fra enhver POP3-konto gemmes kun på denne enhed. "
 "Intet slettes fra Gmail, Outlook eller IMAP-servere."
 
-#: ui/dialogs/settings-dialog.slint:3823
+#: ui/dialogs/settings-dialog.slint:3862
 msgid ""
 "POP3 mail is stored only on this device. Nothing is deleted from Gmail, "
 "Outlook, or IMAP servers."
@@ -10714,47 +10824,47 @@ msgstr ""
 "POP3-e-mail gemmes kun på denne enhed. Intet slettes fra Gmail, Outlook "
 "eller IMAP-servere."
 
-#: ui/dialogs/settings-dialog.slint:3823
+#: ui/dialogs/settings-dialog.slint:3862
 msgid "This does not delete anything from Gmail, Outlook, or your IMAP server."
 msgstr "Dette sletter intet fra Gmail, Outlook eller din IMAP-server."
 
-#: ui/dialogs/settings-dialog.slint:3824 ui/dialogs/settings-dialog.slint:5320
+#: ui/dialogs/settings-dialog.slint:3863 ui/dialogs/settings-dialog.slint:5359
 msgid "Delete everything"
 msgstr "Slet alt"
 
-#: ui/dialogs/settings-dialog.slint:3838
+#: ui/dialogs/settings-dialog.slint:3877
 msgid "Choose how Flectar Mail gets your attention."
 msgstr "Vælg, hvordan Flectar Mail fanger din opmærksomhed."
 
-#: ui/dialogs/settings-dialog.slint:3882 ui/dialogs/settings-dialog.slint:3897
-#: ui/dialogs/settings-dialog.slint:3935
+#: ui/dialogs/settings-dialog.slint:3921 ui/dialogs/settings-dialog.slint:3936
+#: ui/dialogs/settings-dialog.slint:3974
 msgid "Open system settings"
 msgstr "Åbn systemindstillinger"
 
-#: ui/dialogs/settings-dialog.slint:3942
+#: ui/dialogs/settings-dialog.slint:3981
 msgid "Notification sounds"
 msgstr "Notifikationslyde"
 
-#: ui/dialogs/settings-dialog.slint:3944
+#: ui/dialogs/settings-dialog.slint:3983
 msgid "Your desktop decides whether notifications play a sound."
 msgstr "Dit skrivebord bestemmer, om notifikationer afspiller en lyd."
 
-#: ui/dialogs/settings-dialog.slint:3945
+#: ui/dialogs/settings-dialog.slint:3984
 msgid "Play a sound with new mail notifications."
 msgstr "Afspil en lyd ved notifikationer om ny e-mail."
 
-#: ui/dialogs/settings-dialog.slint:3958
+#: ui/dialogs/settings-dialog.slint:3997
 msgid "Unread count on the app icon"
 msgstr "Ulæst-antal på appikonet"
 
-#: ui/dialogs/settings-dialog.slint:3963
+#: ui/dialogs/settings-dialog.slint:4002
 msgid ""
 "Show how many unread messages are in your Inbox, on docks that show counts."
 msgstr ""
 "Vis, hvor mange ulæste beskeder der er i din Indbakke, på docks, der viser "
 "tal."
 
-#: ui/dialogs/settings-dialog.slint:3964
+#: ui/dialogs/settings-dialog.slint:4003
 msgid ""
 "Show how many unread Important messages are in your Inbox, on docks that "
 "show counts."
@@ -10762,117 +10872,117 @@ msgstr ""
 "Vis, hvor mange ulæste vigtige beskeder der er i din Indbakke, på docks, der "
 "viser tal."
 
-#: ui/dialogs/settings-dialog.slint:3966
+#: ui/dialogs/settings-dialog.slint:4005
 msgid "Show how many unread messages are in your Inbox."
 msgstr "Vis, hvor mange ulæste beskeder der er i din Indbakke."
 
-#: ui/dialogs/settings-dialog.slint:3967
+#: ui/dialogs/settings-dialog.slint:4006
 msgid "Show how many unread Important messages are in your Inbox."
 msgstr "Vis, hvor mange ulæste vigtige beskeder der er i din Indbakke."
 
-#: ui/dialogs/settings-dialog.slint:3988
+#: ui/dialogs/settings-dialog.slint:4027
 msgid "Keyboard shortcuts"
 msgstr "Tastaturgenveje"
 
-#: ui/dialogs/settings-dialog.slint:3989
+#: ui/dialogs/settings-dialog.slint:4028
 msgid "Move through mail without leaving the keyboard."
 msgstr "Navigér i e-mail uden at forlade tastaturet."
 
-#: ui/dialogs/settings-dialog.slint:3991
+#: ui/dialogs/settings-dialog.slint:4030
 msgid "Compose a new message"
 msgstr "Skriv en ny besked"
 
-#: ui/dialogs/settings-dialog.slint:3992
+#: ui/dialogs/settings-dialog.slint:4031
 msgid "Edit a message as new"
 msgstr "Redigér en besked som ny"
 
-#: ui/dialogs/settings-dialog.slint:3993
+#: ui/dialogs/settings-dialog.slint:4032
 msgid "Show a message's source"
 msgstr "Vis en beskeds kilde"
 
-#: ui/dialogs/settings-dialog.slint:3994
+#: ui/dialogs/settings-dialog.slint:4033
 msgid "Take back a message just sent"
 msgstr "Tag en netop sendt besked tilbage"
 
-#: ui/dialogs/settings-dialog.slint:3996
+#: ui/dialogs/settings-dialog.slint:4035
 msgid "Check every account for new mail"
 msgstr "Tjek alle konti for ny e-mail"
 
-#: ui/dialogs/settings-dialog.slint:3997 ui/views/mail-list-pane.slint:865
+#: ui/dialogs/settings-dialog.slint:4036 ui/views/mail-list-pane.slint:865
 msgid "Search mail"
 msgstr "Søg i e-mail"
 
-#: ui/dialogs/settings-dialog.slint:3999
+#: ui/dialogs/settings-dialog.slint:4038
 msgid "Move to a folder"
 msgstr "Flyt til en mappe"
 
-#: ui/dialogs/settings-dialog.slint:4000
+#: ui/dialogs/settings-dialog.slint:4039
 msgid "Copy to a folder"
 msgstr "Kopiér til en mappe"
 
-#: ui/dialogs/settings-dialog.slint:4004
+#: ui/dialogs/settings-dialog.slint:4043
 msgid "Navigation"
 msgstr "Navigation"
 
-#: ui/dialogs/settings-dialog.slint:4005
+#: ui/dialogs/settings-dialog.slint:4044
 msgid "Move between messages"
 msgstr "Flyt mellem beskeder"
 
-#: ui/dialogs/settings-dialog.slint:4006
+#: ui/dialogs/settings-dialog.slint:4045
 msgid "Open message"
 msgstr "Åbn besked"
 
-#: ui/dialogs/settings-dialog.slint:4007
+#: ui/dialogs/settings-dialog.slint:4046
 #, fuzzy
 #| msgid "Open in a new window"
 msgid "Open message in a new window"
 msgstr "Åbn i et nyt vindue"
 
-#: ui/dialogs/settings-dialog.slint:4008
+#: ui/dialogs/settings-dialog.slint:4047
 msgid "Select message"
 msgstr "Vælg besked"
 
-#: ui/dialogs/settings-dialog.slint:4009
+#: ui/dialogs/settings-dialog.slint:4048
 msgid "Switch between list and message"
 msgstr "Skift mellem liste og besked"
 
-#: ui/dialogs/settings-dialog.slint:4011
+#: ui/dialogs/settings-dialog.slint:4050
 msgid "Reading"
 msgstr "Læsning"
 
-#: ui/dialogs/settings-dialog.slint:4012 ui/views/mail-reading-pane.slint:1665
+#: ui/dialogs/settings-dialog.slint:4051 ui/views/mail-reading-pane.slint:1665
 msgid "Find in message"
 msgstr "Find i besked"
 
-#: ui/dialogs/settings-dialog.slint:4015
+#: ui/dialogs/settings-dialog.slint:4054
 msgid "Reset zoom"
 msgstr "Nulstil zoom"
 
-#: ui/dialogs/settings-dialog.slint:4016 ui/views/mail-reading-pane.slint:2101
+#: ui/dialogs/settings-dialog.slint:4055 ui/views/mail-reading-pane.slint:2100
 msgid "Caret browsing"
 msgstr "Tekstmarkørnavigation"
 
-#: ui/dialogs/settings-dialog.slint:4022
+#: ui/dialogs/settings-dialog.slint:4061
 msgid "Next tab"
 msgstr "Næste fane"
 
-#: ui/dialogs/settings-dialog.slint:4023
+#: ui/dialogs/settings-dialog.slint:4062
 msgid "Previous tab"
 msgstr "Forrige fane"
 
-#: ui/dialogs/settings-dialog.slint:4024
+#: ui/dialogs/settings-dialog.slint:4063
 msgid "Go to tab 1–8"
 msgstr "Gå til fane 1–8"
 
-#: ui/dialogs/settings-dialog.slint:4025
+#: ui/dialogs/settings-dialog.slint:4064
 msgid "Go to last tab"
 msgstr "Gå til sidste fane"
 
-#: ui/dialogs/settings-dialog.slint:4028
+#: ui/dialogs/settings-dialog.slint:4067
 msgid "Quit Flectar Mail"
 msgstr "Afslut Flectar Mail"
 
-#: ui/dialogs/settings-dialog.slint:4107
+#: ui/dialogs/settings-dialog.slint:4146
 msgid ""
 "Optional paid services from Flectar. Flectar Mail stays free and works "
 "without them."
@@ -10880,15 +10990,15 @@ msgstr ""
 "Valgfrie betalte tjenester fra Flectar. Flectar Mail forbliver gratis og "
 "fungerer uden dem."
 
-#: ui/dialogs/settings-dialog.slint:4112
+#: ui/dialogs/settings-dialog.slint:4151
 msgid "Flectar account"
 msgstr "Flectar-konto"
 
-#: ui/dialogs/settings-dialog.slint:4112
+#: ui/dialogs/settings-dialog.slint:4151
 msgid "Not signed in"
 msgstr "Ikke logget ind"
 
-#: ui/dialogs/settings-dialog.slint:4114
+#: ui/dialogs/settings-dialog.slint:4153
 msgid ""
 "A Flectar account is only needed for business email. Flectar Mail Sync works "
 "without one. Learn more at flectar.com/mail."
@@ -10896,19 +11006,19 @@ msgstr ""
 "En Flectar-konto er kun nødvendig til virksomhedse-mail. Flectar Mail Sync "
 "virker uden en. Få mere at vide på flectar.com/mail."
 
-#: ui/dialogs/settings-dialog.slint:4122
+#: ui/dialogs/settings-dialog.slint:4161
 msgid "Sign in with Flectar"
 msgstr "Log ind med Flectar"
 
-#: ui/dialogs/settings-dialog.slint:4122 ui/dialogs/settings-dialog.slint:4134
+#: ui/dialogs/settings-dialog.slint:4161 ui/dialogs/settings-dialog.slint:4173
 msgid "Sign-in coming soon"
 msgstr "Logind kommer snart"
 
-#: ui/dialogs/settings-dialog.slint:4148
+#: ui/dialogs/settings-dialog.slint:4187
 msgid "Your setup on every device"
 msgstr "Din opsætning på hver enhed"
 
-#: ui/dialogs/settings-dialog.slint:4149
+#: ui/dialogs/settings-dialog.slint:4188
 msgid ""
 "Connect your phone and computers once. Your accounts, preferences, "
 "templates, snoozes and reply reminders stay the same on all of them, and any "
@@ -10918,19 +11028,19 @@ msgstr ""
 "skabeloner, udskydelser og svarpåmindelser forbliver ens på alle, og enhver "
 "af dem sender dine planlagte e-mails."
 
-#: ui/dialogs/settings-dialog.slint:4152
+#: ui/dialogs/settings-dialog.slint:4191
 msgid "Snoozes, reply reminders and templates everywhere"
 msgstr "Udskydelser, svarpåmindelser og skabeloner alle steder"
 
-#: ui/dialogs/settings-dialog.slint:4153
+#: ui/dialogs/settings-dialog.slint:4192
 msgid "Mail accounts, profiles, signatures and preferences"
 msgstr "Mailkonti, profiler, signaturer og præferencer"
 
-#: ui/dialogs/settings-dialog.slint:4155
+#: ui/dialogs/settings-dialog.slint:4194
 msgid "No account needed: a recovery code restores it"
 msgstr "Ingen konto nødvendig: en gendannelseskode gendanner den"
 
-#: ui/dialogs/settings-dialog.slint:4157
+#: ui/dialogs/settings-dialog.slint:4196
 msgid ""
 "Your mail stays with your mail provider. Flectar Mail Sync carries your "
 "setup and sign-ins, and a scheduled message until it goes out."
@@ -10938,107 +11048,107 @@ msgstr ""
 "Din e-mail forbliver hos din mailudbyder. Flectar Mail Sync bærer din "
 "opsætning og dine logind og en planlagt besked, indtil den afgår."
 
-#: ui/dialogs/settings-dialog.slint:4172
+#: ui/dialogs/settings-dialog.slint:4211
 msgid "Business email"
 msgstr "Virksomhedse-mail"
 
-#: ui/dialogs/settings-dialog.slint:4173
+#: ui/dialogs/settings-dialog.slint:4212
 msgid "Mailboxes on your own domain"
 msgstr "Postkasser på dit eget domæne"
 
-#: ui/dialogs/settings-dialog.slint:4174
+#: ui/dialogs/settings-dialog.slint:4213
 msgid "Professional addresses such as you@yourcompany.com, hosted by Flectar."
 msgstr "Professionelle adresser som you@yourcompany.com, hostet af Flectar."
 
-#: ui/dialogs/settings-dialog.slint:4176
+#: ui/dialogs/settings-dialog.slint:4215
 msgid "Connect a domain you already own"
 msgstr "Forbind et domæne, du allerede ejer"
 
-#: ui/dialogs/settings-dialog.slint:4177
+#: ui/dialogs/settings-dialog.slint:4216
 msgid "Create and manage mailboxes for your team"
 msgstr "Opret og administrér postkasser til dit team"
 
-#: ui/dialogs/settings-dialog.slint:4178
+#: ui/dialogs/settings-dialog.slint:4217
 msgid "New mailboxes appear in Flectar Mail automatically"
 msgstr "Nye postkasser vises automatisk i Flectar Mail"
 
-#: ui/dialogs/settings-dialog.slint:4180
+#: ui/dialogs/settings-dialog.slint:4219
 msgid "Billed per mailbox."
 msgstr "Faktureret pr. postkasse."
 
-#: ui/dialogs/settings-dialog.slint:4192
+#: ui/dialogs/settings-dialog.slint:4231
 msgid "Plans and prices will be announced on flectar.com/mail."
 msgstr "Planer og priser bekendtgøres på flectar.com/mail."
 
-#: ui/dialogs/settings-dialog.slint:4211
+#: ui/dialogs/settings-dialog.slint:4250
 msgid "Flectar Mail, its makers, and its community."
 msgstr "Flectar Mail, dets udviklere og dets fællesskab."
 
-#: ui/dialogs/settings-dialog.slint:4227 ui/views/onboarding-view.slint:144
+#: ui/dialogs/settings-dialog.slint:4266 ui/views/onboarding-view.slint:144
 msgid "Flectar Mail logo"
 msgstr "Flectar Mail-logo"
 
-#: ui/dialogs/settings-dialog.slint:4247
+#: ui/dialogs/settings-dialog.slint:4286
 msgid "A native mail client for a calm, private inbox."
 msgstr "En native mailklient til en rolig, privat indbakke."
 
-#: ui/dialogs/settings-dialog.slint:4270
+#: ui/dialogs/settings-dialog.slint:4309
 msgid "Updates"
 msgstr "Opdateringer"
 
-#: ui/dialogs/settings-dialog.slint:4270
+#: ui/dialogs/settings-dialog.slint:4309
 msgid "Flectar Mail looks for new versions once a day."
 msgstr "Flectar Mail leder efter nye versioner én gang om dagen."
 
-#: ui/dialogs/settings-dialog.slint:4280
+#: ui/dialogs/settings-dialog.slint:4319
 msgid "Check for new versions"
 msgstr "Tjek for nye versioner"
 
-#: ui/dialogs/settings-dialog.slint:4281
+#: ui/dialogs/settings-dialog.slint:4320
 msgid "It asks GitHub, without any account or mail details."
 msgstr "Den spørger GitHub uden konto- eller e-mailoplysninger."
 
-#: ui/dialogs/settings-dialog.slint:4328 ui/dialogs/settings-dialog.slint:4359
+#: ui/dialogs/settings-dialog.slint:4367 ui/dialogs/settings-dialog.slint:4398
 msgid "Check now"
 msgstr "Tjek nu"
 
-#: ui/dialogs/settings-dialog.slint:4370
+#: ui/dialogs/settings-dialog.slint:4409
 msgid "Credits"
 msgstr "Krediteringer"
 
-#: ui/dialogs/settings-dialog.slint:4370
+#: ui/dialogs/settings-dialog.slint:4409
 msgid "Built by Flectar with help from the open-source community."
 msgstr "Udviklet af Flectar med hjælp fra open source-fællesskabet."
 
-#: ui/dialogs/settings-dialog.slint:4379
+#: ui/dialogs/settings-dialog.slint:4418
 msgid "Flectar"
 msgstr "Flectar"
 
-#: ui/dialogs/settings-dialog.slint:4380
+#: ui/dialogs/settings-dialog.slint:4419
 msgid "Company website"
 msgstr "Virksomhedswebsted"
 
-#: ui/dialogs/settings-dialog.slint:4390
+#: ui/dialogs/settings-dialog.slint:4429
 msgid "Open-source contributors"
 msgstr "Open source-bidragydere"
 
-#: ui/dialogs/settings-dialog.slint:4391
+#: ui/dialogs/settings-dialog.slint:4430
 msgid "Meet the people who have contributed on GitHub"
 msgstr "Mød folkene, der har bidraget på GitHub"
 
-#: ui/dialogs/settings-dialog.slint:4405
+#: ui/dialogs/settings-dialog.slint:4444
 msgid "Privacy"
 msgstr "Privatliv"
 
-#: ui/dialogs/settings-dialog.slint:4405
+#: ui/dialogs/settings-dialog.slint:4444
 msgid "How Flectar Mail handles your data."
 msgstr "Hvordan Flectar Mail håndterer dine data."
 
-#: ui/dialogs/settings-dialog.slint:4415
+#: ui/dialogs/settings-dialog.slint:4454
 msgid "Read it on flectar.com"
 msgstr "Læs den på flectar.com"
 
-#: ui/dialogs/settings-dialog.slint:4427
+#: ui/dialogs/settings-dialog.slint:4466
 msgid ""
 "You agreed to this policy when you started Flectar Mail. Withdrawing consent "
 "closes the app until you agree again."
@@ -11046,57 +11156,57 @@ msgstr ""
 "Du accepterede denne politik, da du startede Flectar Mail. Hvis du "
 "tilbagekalder samtykke, lukkes appen, indtil du accepterer igen."
 
-#: ui/dialogs/settings-dialog.slint:4435
+#: ui/dialogs/settings-dialog.slint:4474
 msgid "License"
 msgstr "Licens"
 
-#: ui/dialogs/settings-dialog.slint:4435
+#: ui/dialogs/settings-dialog.slint:4474
 msgid "AGPL-3.0-only."
 msgstr "AGPL-3.0-only."
 
-#: ui/dialogs/settings-dialog.slint:4435
+#: ui/dialogs/settings-dialog.slint:4474
 msgid ""
 "Flectar Mail is released under the GNU Affero General Public License v3.0 "
 "only."
 msgstr ""
 "Flectar Mail udgives under GNU Affero General Public License v3.0 only."
 
-#: ui/dialogs/settings-dialog.slint:4441
+#: ui/dialogs/settings-dialog.slint:4480
 msgid "Third-party components retain their own licenses and notices."
 msgstr "Tredjepartskomponenter beholder deres egne licenser og meddelelser."
 
-#: ui/dialogs/settings-dialog.slint:4474
+#: ui/dialogs/settings-dialog.slint:4513
 msgid "Settings sections"
 msgstr "Indstillingssektioner"
 
-#: ui/dialogs/settings-dialog.slint:4486
+#: ui/dialogs/settings-dialog.slint:4525
 msgid "Close settings"
 msgstr "Luk indstillinger"
 
-#: ui/dialogs/settings-dialog.slint:4508
+#: ui/dialogs/settings-dialog.slint:4547
 msgid "Close settings sections"
 msgstr "Luk indstillingssektioner"
 
-#: ui/dialogs/settings-dialog.slint:4562 ui/dialogs/settings-dialog.slint:4611
+#: ui/dialogs/settings-dialog.slint:4601 ui/dialogs/settings-dialog.slint:4650
 msgid "CalDAV settings"
 msgstr "CalDAV-indstillinger"
 
-#: ui/dialogs/settings-dialog.slint:4612
+#: ui/dialogs/settings-dialog.slint:4651
 msgid "Discover new calendars."
 msgstr "Find nye kalendere."
 
-#: ui/dialogs/settings-dialog.slint:4612
+#: ui/dialogs/settings-dialog.slint:4651
 msgid ""
 "Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV "
 "servers."
 msgstr ""
 "Virker med iCloud, Fastmail, Nextcloud og standardkompatible CalDAV-servere."
 
-#: ui/dialogs/settings-dialog.slint:4639
+#: ui/dialogs/settings-dialog.slint:4678
 msgid "https://calendar.example.com/"
 msgstr "https://calendar.example.com/"
 
-#: ui/dialogs/settings-dialog.slint:4648
+#: ui/dialogs/settings-dialog.slint:4687
 msgid ""
 "To sync one calendar, such as a shared mailbox's, enter that calendar's own "
 "address."
@@ -11104,127 +11214,127 @@ msgstr ""
 "For at synkronisere én kalender, f.eks. en delt postkasses, skal du indtaste "
 "kalenderens egen adresse."
 
-#: ui/dialogs/settings-dialog.slint:4656 ui/dialogs/settings-dialog.slint:4803
-#: ui/dialogs/settings-dialog.slint:4937
+#: ui/dialogs/settings-dialog.slint:4695 ui/dialogs/settings-dialog.slint:4842
+#: ui/dialogs/settings-dialog.slint:4976
 msgid "Username"
 msgstr "Brugernavn"
 
-#: ui/dialogs/settings-dialog.slint:4658 ui/dialogs/settings-dialog.slint:4805
-#: ui/dialogs/settings-dialog.slint:4937
+#: ui/dialogs/settings-dialog.slint:4697 ui/dialogs/settings-dialog.slint:4844
+#: ui/dialogs/settings-dialog.slint:4976
 msgid "Usually your email address"
 msgstr "Normalt din e-mailadresse"
 
-#: ui/dialogs/settings-dialog.slint:4664
+#: ui/dialogs/settings-dialog.slint:4703
 msgid "New app password · Optional"
 msgstr "Ny appadgangskode · Valgfri"
 
-#: ui/dialogs/settings-dialog.slint:4664 ui/dialogs/settings-dialog.slint:4811
+#: ui/dialogs/settings-dialog.slint:4703 ui/dialogs/settings-dialog.slint:4850
 #: ui/link-services.slint:197
 msgid "App password"
 msgstr "Appadgangskode"
 
-#: ui/dialogs/settings-dialog.slint:4666
+#: ui/dialogs/settings-dialog.slint:4705
 msgid "Leave blank to keep the current password"
 msgstr "Lad stå tomt for at beholde den nuværende adgangskode"
 
-#: ui/dialogs/settings-dialog.slint:4666 ui/dialogs/settings-dialog.slint:4813
+#: ui/dialogs/settings-dialog.slint:4705 ui/dialogs/settings-dialog.slint:4852
 msgid "Stored securely in your system keyring"
 msgstr "Opbevares sikkert i dit systems nøglering"
 
-#: ui/dialogs/settings-dialog.slint:4710 ui/dialogs/settings-dialog.slint:4764
+#: ui/dialogs/settings-dialog.slint:4749 ui/dialogs/settings-dialog.slint:4803
 msgid "CardDAV settings"
 msgstr "CardDAV-indstillinger"
 
-#: ui/dialogs/settings-dialog.slint:4793
+#: ui/dialogs/settings-dialog.slint:4832
 msgid "https://contacts.example.com/"
 msgstr "https://contacts.example.com/"
 
-#: ui/dialogs/settings-dialog.slint:4860
+#: ui/dialogs/settings-dialog.slint:4899
 msgid "Edit mail account"
 msgstr "Redigér mailkonto"
 
-#: ui/dialogs/settings-dialog.slint:4860 ui/dialogs/settings-dialog.slint:4908
+#: ui/dialogs/settings-dialog.slint:4899 ui/dialogs/settings-dialog.slint:4947
 msgid "Connect a mail account"
 msgstr "Forbind en mailkonto"
 
-#: ui/dialogs/settings-dialog.slint:4909
+#: ui/dialogs/settings-dialog.slint:4948
 msgid "Uses JMAP for mail sync and sending, with automatic discovery."
 msgstr ""
 "Bruger JMAP til mailsynkronisering og afsendelse med automatisk opdagelse."
 
-#: ui/dialogs/settings-dialog.slint:4909
+#: ui/dialogs/settings-dialog.slint:4948
 msgid ""
 "Downloads mail from a POP3 server to this device and sends through SMTP."
 msgstr ""
 "Downloader e-mail fra en POP3-server til denne enhed og sender via SMTP."
 
-#: ui/dialogs/settings-dialog.slint:4909
+#: ui/dialogs/settings-dialog.slint:4948
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
 msgstr ""
 "Bruger separate IMAP- og SMTP-servere til mailsynkronisering og afsendelse."
 
-#: ui/dialogs/settings-dialog.slint:4929 ui/dialogs/settings-dialog.slint:4936
+#: ui/dialogs/settings-dialog.slint:4968 ui/dialogs/settings-dialog.slint:4975
 msgid "name@example.com"
 msgstr "name@example.com"
 
-#: ui/dialogs/settings-dialog.slint:4940 ui/views/onboarding-view.slint:360
+#: ui/dialogs/settings-dialog.slint:4979 ui/views/onboarding-view.slint:360
 msgid "Password, app password, or API token"
 msgstr "Adgangskode, appadgangskode eller API-token"
 
-#: ui/dialogs/settings-dialog.slint:4940 ui/views/onboarding-view.slint:360
+#: ui/dialogs/settings-dialog.slint:4979 ui/views/onboarding-view.slint:360
 msgid "Password or app password"
 msgstr "Adgangskode eller appadgangskode"
 
-#: ui/dialogs/settings-dialog.slint:4947 ui/views/onboarding-view.slint:373
+#: ui/dialogs/settings-dialog.slint:4986 ui/views/onboarding-view.slint:373
 msgid "IMAP"
 msgstr "IMAP"
 
-#: ui/dialogs/settings-dialog.slint:4948 ui/views/onboarding-view.slint:381
+#: ui/dialogs/settings-dialog.slint:4987 ui/views/onboarding-view.slint:381
 msgid "POP3"
 msgstr "POP3"
 
-#: ui/dialogs/settings-dialog.slint:4949 ui/views/onboarding-view.slint:389
+#: ui/dialogs/settings-dialog.slint:4988 ui/views/onboarding-view.slint:389
 msgid "JMAP"
 msgstr "JMAP"
 
-#: ui/dialogs/settings-dialog.slint:4953
+#: ui/dialogs/settings-dialog.slint:4992
 msgid "Server address · Optional"
 msgstr "Serveradresse · Valgfri"
 
-#: ui/dialogs/settings-dialog.slint:4955
+#: ui/dialogs/settings-dialog.slint:4994
 msgid "Discovered from your email domain"
 msgstr "Opdaget ud fra dit e-maildomæne"
 
-#: ui/dialogs/settings-dialog.slint:4962 ui/views/onboarding-view.slint:413
+#: ui/dialogs/settings-dialog.slint:5001 ui/views/onboarding-view.slint:413
 msgid "POP3 server"
 msgstr "POP3-server"
 
-#: ui/dialogs/settings-dialog.slint:4962 ui/views/onboarding-view.slint:413
+#: ui/dialogs/settings-dialog.slint:5001 ui/views/onboarding-view.slint:413
 msgid "IMAP server"
 msgstr "IMAP-server"
 
-#: ui/dialogs/settings-dialog.slint:4962
+#: ui/dialogs/settings-dialog.slint:5001
 msgid "pop.example.com"
 msgstr "pop.example.com"
 
-#: ui/dialogs/settings-dialog.slint:4962
+#: ui/dialogs/settings-dialog.slint:5001
 msgid "imap.example.com"
 msgstr "imap.example.com"
 
-#: ui/dialogs/settings-dialog.slint:4963 ui/dialogs/settings-dialog.slint:4970
+#: ui/dialogs/settings-dialog.slint:5002 ui/dialogs/settings-dialog.slint:5009
 #: ui/network.slint:163 ui/views/onboarding-view.slint:421
 msgid "Port"
 msgstr "Port"
 
-#: ui/dialogs/settings-dialog.slint:4969 ui/views/onboarding-view.slint:435
+#: ui/dialogs/settings-dialog.slint:5008 ui/views/onboarding-view.slint:435
 msgid "SMTP server"
 msgstr "SMTP-server"
 
-#: ui/dialogs/settings-dialog.slint:4969
+#: ui/dialogs/settings-dialog.slint:5008
 msgid "smtp.example.com"
 msgstr "smtp.example.com"
 
-#: ui/dialogs/settings-dialog.slint:4973 ui/views/onboarding-view.slint:451
+#: ui/dialogs/settings-dialog.slint:5012 ui/views/onboarding-view.slint:451
 msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
@@ -11232,68 +11342,68 @@ msgstr ""
 "Proton Bridge: brug de lokale servere, porte og adgangskoden, der vises i "
 "Bridge, og match dens krypteringsindstillinger."
 
-#: ui/dialogs/settings-dialog.slint:5031
+#: ui/dialogs/settings-dialog.slint:5070
 msgid "Save account"
 msgstr "Gem konto"
 
-#: ui/dialogs/settings-dialog.slint:5031 ui/views/onboarding-view.slint:494
+#: ui/dialogs/settings-dialog.slint:5070 ui/views/onboarding-view.slint:494
 msgid "Connect account"
 msgstr "Forbind konto"
 
-#: ui/dialogs/settings-dialog.slint:5052 ui/dialogs/settings-dialog.slint:5108
+#: ui/dialogs/settings-dialog.slint:5091 ui/dialogs/settings-dialog.slint:5147
 msgid "Create profile"
 msgstr "Opret profil"
 
-#: ui/dialogs/settings-dialog.slint:5109
+#: ui/dialogs/settings-dialog.slint:5148
 msgid ""
 "Its color marks its accounts' mail, and choosing it shows only their mail."
 msgstr ""
 "Dens farve markerer dens kontis e-mail, og hvis du vælger den, vises kun "
 "deres e-mail."
 
-#: ui/dialogs/settings-dialog.slint:5114
+#: ui/dialogs/settings-dialog.slint:5153
 msgid "Profile name"
 msgstr "Profilnavn"
 
-#: ui/dialogs/settings-dialog.slint:5116
+#: ui/dialogs/settings-dialog.slint:5155
 msgid "Personal or Work"
 msgstr "Privat eller Arbejde"
 
-#: ui/dialogs/settings-dialog.slint:5122 ui/views/mail-reading-pane.slint:2599
+#: ui/dialogs/settings-dialog.slint:5161 ui/views/mail-reading-pane.slint:2598
 msgid "Color"
 msgstr "Farve"
 
-#: ui/dialogs/settings-dialog.slint:5131
+#: ui/dialogs/settings-dialog.slint:5170
 msgid "Profile color {}"
 msgstr "Profilfarve {}"
 
-#: ui/dialogs/settings-dialog.slint:5173
+#: ui/dialogs/settings-dialog.slint:5212
 msgid "Save profile"
 msgstr "Gem profil"
 
-#: ui/dialogs/settings-dialog.slint:5181
+#: ui/dialogs/settings-dialog.slint:5220
 msgid "Could not save this profile. Check the name and try again."
 msgstr "Kunne ikke gemme denne profil. Kontrollér navnet, og prøv igen."
 
-#: ui/dialogs/settings-dialog.slint:5219
+#: ui/dialogs/settings-dialog.slint:5258
 msgid "Choose a profile for {}"
 msgstr "Vælg en profil til {}"
 
-#: ui/dialogs/settings-dialog.slint:5270
+#: ui/dialogs/settings-dialog.slint:5309
 #, fuzzy
 #| msgid "Folder of action {}"
 msgid "Folders of {}"
 msgstr "Mappe for handling {}"
 
-#: ui/dialogs/settings-dialog.slint:5291
+#: ui/dialogs/settings-dialog.slint:5330
 msgid "Special folders of {}"
 msgstr "Særlige mapper for {}"
 
-#: ui/dialogs/settings-dialog.slint:5309
+#: ui/dialogs/settings-dialog.slint:5348
 msgid "Delete all local data?"
 msgstr "Slet alle lokale data?"
 
-#: ui/dialogs/settings-dialog.slint:5310
+#: ui/dialogs/settings-dialog.slint:5349
 msgid ""
 "This removes every account, downloaded message, calendar, contact, "
 "preference, and credential stored by Flectar Mail on this device."
@@ -11302,7 +11412,7 @@ msgstr ""
 "præferencer og legitimationsoplysninger, som Flectar Mail har gemt på denne "
 "enhed."
 
-#: ui/dialogs/settings-dialog.slint:5312
+#: ui/dialogs/settings-dialog.slint:5351
 msgid ""
 "Imported mail and the mail of any POP3 account are stored only on this "
 "device and will be deleted. Mail and events on Gmail, Outlook, and IMAP "
@@ -11312,7 +11422,7 @@ msgstr ""
 "og slettes. E-mail og begivenheder på Gmail, Outlook og IMAP-servere slettes "
 "ikke."
 
-#: ui/dialogs/settings-dialog.slint:5314
+#: ui/dialogs/settings-dialog.slint:5353
 msgid ""
 "POP3 mail is stored only on this device and will be deleted. Mail and events "
 "on Gmail, Outlook, and IMAP servers will not be deleted."
@@ -11320,24 +11430,24 @@ msgstr ""
 "POP3-e-mail gemmes kun på denne enhed og slettes. E-mail og begivenheder på "
 "Gmail, Outlook og IMAP-servere slettes ikke."
 
-#: ui/dialogs/settings-dialog.slint:5315
+#: ui/dialogs/settings-dialog.slint:5354
 msgid ""
 "Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr "E-mail og begivenheder på Gmail, Outlook og IMAP-servere slettes ikke."
 
-#: ui/dialogs/settings-dialog.slint:5316
+#: ui/dialogs/settings-dialog.slint:5355
 msgid "Export POP3 mail…"
 msgstr "Eksportér POP3-e-mail…"
 
-#: ui/dialogs/settings-dialog.slint:5321
+#: ui/dialogs/settings-dialog.slint:5360
 msgid "Keep my data"
 msgstr "Behold mine data"
 
-#: ui/dialogs/settings-dialog.slint:5335
+#: ui/dialogs/settings-dialog.slint:5374
 msgid "Withdraw privacy consent?"
 msgstr "Tilbagekald privatlivssamtykke?"
 
-#: ui/dialogs/settings-dialog.slint:5336
+#: ui/dialogs/settings-dialog.slint:5375
 msgid ""
 "Flectar Mail will stop and show the privacy consent screen the next time you "
 "open it."
@@ -11345,7 +11455,7 @@ msgstr ""
 "Flectar Mail stopper og viser privatlivssamtykke-skærmen, næste gang du "
 "åbner den."
 
-#: ui/dialogs/settings-dialog.slint:5337
+#: ui/dialogs/settings-dialog.slint:5376
 msgid ""
 "Your local mail and settings stay on this device. You can delete them on the "
 "Storage page in Settings."
@@ -11353,39 +11463,39 @@ msgstr ""
 "Din lokale e-mail og dine indstillinger forbliver på denne enhed. Du kan "
 "slette dem på siden Lagerplads under Indstillinger."
 
-#: ui/dialogs/settings-dialog.slint:5338
+#: ui/dialogs/settings-dialog.slint:5377
 msgid "Withdraw consent"
 msgstr "Tilbagekald samtykke"
 
-#: ui/dialogs/settings-dialog.slint:5353
+#: ui/dialogs/settings-dialog.slint:5392
 msgid "Delete mail on this device?"
 msgstr "Slet e-mail på denne enhed?"
 
-#: ui/dialogs/settings-dialog.slint:5355
+#: ui/dialogs/settings-dialog.slint:5394
 msgid "Delete the mail you imported and its folders from this device."
 msgstr "Slet den e-mail, du har importeret, og dens mapper fra denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:5356
+#: ui/dialogs/settings-dialog.slint:5395
 msgid "It exists only here. Export it first to keep a copy."
 msgstr "Den findes kun her. Eksportér den først for at beholde en kopi."
 
-#: ui/dialogs/settings-dialog.slint:5361
+#: ui/dialogs/settings-dialog.slint:5400
 msgid "Delete mail"
 msgstr "Slet e-mail"
 
-#: ui/dialogs/settings-dialog.slint:5362
+#: ui/dialogs/settings-dialog.slint:5401
 msgid "Keep mail"
 msgstr "Behold e-mail"
 
-#: ui/dialogs/settings-dialog.slint:5376
+#: ui/dialogs/settings-dialog.slint:5415
 msgid "Remove account?"
 msgstr "Fjern konto?"
 
-#: ui/dialogs/settings-dialog.slint:5378
+#: ui/dialogs/settings-dialog.slint:5417
 msgid "Remove this account and its downloaded mail from this device."
 msgstr "Fjern denne konto og dens downloadede e-mail fra denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:5380
+#: ui/dialogs/settings-dialog.slint:5419
 msgid ""
 "This account's mail is stored only on this device. Export it first to keep a "
 "copy."
@@ -11393,23 +11503,23 @@ msgstr ""
 "Denne kontos e-mail gemmes kun på denne enhed. Eksportér den først for at "
 "beholde en kopi."
 
-#: ui/dialogs/settings-dialog.slint:5381
+#: ui/dialogs/settings-dialog.slint:5420
 msgid "Messages on the mail server will not be deleted."
 msgstr "Beskeder på mailserveren slettes ikke."
 
-#: ui/dialogs/settings-dialog.slint:5386
+#: ui/dialogs/settings-dialog.slint:5425
 msgid "Remove account"
 msgstr "Fjern konto"
 
-#: ui/dialogs/settings-dialog.slint:5387
+#: ui/dialogs/settings-dialog.slint:5426
 msgid "Keep account"
 msgstr "Behold konto"
 
-#: ui/dialogs/settings-dialog.slint:5401
+#: ui/dialogs/settings-dialog.slint:5440
 msgid "Delete profile?"
 msgstr "Slet profil?"
 
-#: ui/dialogs/settings-dialog.slint:5403
+#: ui/dialogs/settings-dialog.slint:5442
 msgid ""
 "Accounts assigned to this profile will return to their individual or "
 "generated account colors."
@@ -11417,36 +11527,36 @@ msgstr ""
 "Konti, der er tildelt denne profil, vender tilbage til deres individuelle "
 "eller genererede kontofarver."
 
-#: ui/dialogs/settings-dialog.slint:5404
+#: ui/dialogs/settings-dialog.slint:5443
 msgid "Accounts and provider data are not changed."
 msgstr "Konti og udbyderdata ændres ikke."
 
-#: ui/dialogs/settings-dialog.slint:5406
+#: ui/dialogs/settings-dialog.slint:5445
 msgid "Keep profile"
 msgstr "Behold profil"
 
-#: ui/dialogs/settings-dialog.slint:5420
+#: ui/dialogs/settings-dialog.slint:5459
 msgid "Remove calendar?"
 msgstr "Fjern kalender?"
 
-#: ui/dialogs/settings-dialog.slint:5422
+#: ui/dialogs/settings-dialog.slint:5461
 msgid "Stop syncing it and remove its events from this device."
 msgstr ""
 "Stop synkronisering af den, og fjern dens begivenheder fra denne enhed."
 
-#: ui/dialogs/settings-dialog.slint:5423
+#: ui/dialogs/settings-dialog.slint:5462
 msgid "Events on the server will not be deleted."
 msgstr "Begivenheder på serveren slettes ikke."
 
-#: ui/dialogs/settings-dialog.slint:5425
+#: ui/dialogs/settings-dialog.slint:5464
 msgid "Keep calendar"
 msgstr "Behold kalender"
 
-#: ui/dialogs/settings-dialog.slint:5505
+#: ui/dialogs/settings-dialog.slint:5544
 msgid "Delete sync for every device?"
 msgstr "Slet synkronisering for alle enheder?"
 
-#: ui/dialogs/settings-dialog.slint:5506
+#: ui/dialogs/settings-dialog.slint:5545
 msgid ""
 "Removes your encrypted setup from the sync server and turns sync off on all "
 "your devices."
@@ -11454,7 +11564,7 @@ msgstr ""
 "Fjerner din krypterede opsætning fra synkroniseringsserveren og slår "
 "synkronisering fra på alle dine enheder."
 
-#: ui/dialogs/settings-dialog.slint:5507
+#: ui/dialogs/settings-dialog.slint:5546
 msgid ""
 "Each device keeps its own accounts and settings. Mail on your mail servers "
 "is not touched."
@@ -11462,33 +11572,33 @@ msgstr ""
 "Hver enhed beholder sine egne konti og indstillinger. E-mail på dine "
 "mailservers berøres ikke."
 
-#: ui/dialogs/settings-dialog.slint:5508
+#: ui/dialogs/settings-dialog.slint:5547
 msgid "Delete sync"
 msgstr "Slet synkronisering"
 
-#: ui/dialogs/settings-dialog.slint:5509
+#: ui/dialogs/settings-dialog.slint:5548
 msgid "Keep syncing"
 msgstr "Fortsæt synkronisering"
 
-#: ui/dialogs/settings-dialog.slint:5524
+#: ui/dialogs/settings-dialog.slint:5563
 #, fuzzy
 #| msgid "Remove image"
 msgid "Remove device?"
 msgstr "Fjern billede"
 
-#: ui/dialogs/settings-dialog.slint:5528
+#: ui/dialogs/settings-dialog.slint:5567
 msgid ""
 "It may still be signed in to {}. If it's lost or not yours, change those "
 "passwords, and remove Flectar Mail's access in each account's security "
 "settings."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5545
+#: ui/dialogs/settings-dialog.slint:5584
 msgid ""
 "Outlook needs your app key to sign in on this device. Save it to sign in."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:5546
+#: ui/dialogs/settings-dialog.slint:5585
 msgid ""
 "Gmail needs your app keys to sign in on this device. Save them to sign in."
 msgstr ""
@@ -11656,11 +11766,11 @@ msgstr ""
 "Flectar Mail gemmer e-mail i de mapper, din server markerer til hvert "
 "formål. Vælg andre, hvis de ikke er de rigtige."
 
-#: ui/folder-roles.slint:165 ui/folder-visibility.slint:151
+#: ui/folder-roles.slint:165 ui/folder-visibility.slint:152
 msgid "Reading the folders…"
 msgstr "Læser mapperne…"
 
-#: ui/folder-visibility.slint:143
+#: ui/folder-visibility.slint:144
 msgid ""
 "Choose which folders show in the sidebar and the Move to list, and which "
 "ones this device syncs. A hidden folder's mail still downloads, and the "
@@ -11668,13 +11778,13 @@ msgid ""
 "open it."
 msgstr ""
 
-#: ui/folder-visibility.slint:144
+#: ui/folder-visibility.slint:145
 msgid ""
 "Choose which folders show in the sidebar and the Move to list. A hidden "
 "folder's mail still downloads, and the folders in it are hidden too."
 msgstr ""
 
-#: ui/folder-visibility.slint:253
+#: ui/folder-visibility.slint:254
 #, fuzzy
 #| msgid "Showing {} of {} addresses. Type more to narrow them down."
 msgid "Showing {} of {} folders. Type more to narrow them down."
@@ -13298,13 +13408,12 @@ msgstr "Sender {}"
 msgid "Reminds you {}"
 msgstr "Påminde dig {}"
 
-#: ui/views/mail-reading-pane.slint:508 ui/views/mail-reading-pane.slint:2429
+#: ui/views/mail-reading-pane.slint:508 ui/views/mail-reading-pane.slint:2428
 msgid "Continue editing"
 msgstr "Fortsæt med at redigere"
 
-#: ui/views/mail-reading-pane.slint:510 ui/views/mail-reading-pane.slint:512
-#: ui/views/mail-reading-pane.slint:530 ui/views/mail-reading-pane.slint:559
-#: ui/views/mail-reading-pane.slint:590 ui/views/mail-reading-pane.slint:612
+#: ui/views/mail-reading-pane.slint:510 ui/views/mail-reading-pane.slint:528
+#: ui/views/mail-reading-pane.slint:588
 msgid "Show rendered message"
 msgstr "Vis gengivet besked"
 
@@ -13317,6 +13426,13 @@ msgstr "Vis HTML-kilde"
 #: ui/views/mail-reading-pane.slint:589
 msgid "Show message source"
 msgstr "Vis beskedens kilde"
+
+#: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
+#: ui/views/mail-reading-pane.slint:590
+#, fuzzy
+#| msgid "Show the quoted message"
+msgid "Show formatted message"
+msgstr "Vis den citerede besked"
 
 #: ui/views/mail-reading-pane.slint:512 ui/views/mail-reading-pane.slint:530
 #: ui/views/mail-reading-pane.slint:590
@@ -13414,7 +13530,7 @@ msgstr "Tilgængelige labels"
 msgid "Smart category"
 msgstr "Smart kategori"
 
-#: ui/views/mail-reading-pane.slint:1260 ui/views/mail-reading-pane.slint:2577
+#: ui/views/mail-reading-pane.slint:1260 ui/views/mail-reading-pane.slint:2576
 msgid "Edit label"
 msgstr "Redigér label"
 
@@ -13429,10 +13545,6 @@ msgstr "Opret label…"
 #: ui/views/mail-reading-pane.slint:1667
 msgid "Show original layout"
 msgstr "Vis oprindeligt layout"
-
-#: ui/views/mail-reading-pane.slint:1667
-msgid "Reader mode"
-msgstr "Læsetilstand"
 
 #: ui/views/mail-reading-pane.slint:1674
 msgid "Previous match"
@@ -13454,7 +13566,7 @@ msgstr "Denne besked er fra en postliste."
 msgid "Some images could not be loaded."
 msgstr "Nogle billeder kunne ikke indlæses."
 
-#: ui/views/mail-reading-pane.slint:1734 ui/views/mail-reading-pane.slint:2092
+#: ui/views/mail-reading-pane.slint:1734 ui/views/mail-reading-pane.slint:2091
 msgid "Retry images"
 msgstr "Prøv billeder igen"
 
@@ -13514,91 +13626,87 @@ msgstr "Beskeden som den ankom"
 msgid "Save…"
 msgstr "Gem…"
 
-#: ui/views/mail-reading-pane.slint:2091
-msgid "View original plain text"
-msgstr "Vis original almindelig tekst"
-
-#: ui/views/mail-reading-pane.slint:2093
+#: ui/views/mail-reading-pane.slint:2092
 msgid "Copy formatted selection"
 msgstr "Kopiér formateret markering"
 
-#: ui/views/mail-reading-pane.slint:2096
+#: ui/views/mail-reading-pane.slint:2095
 msgid "Ask AI"
 msgstr "Spørg AI"
 
-#: ui/views/mail-reading-pane.slint:2098
+#: ui/views/mail-reading-pane.slint:2097
 msgid "Explain"
 msgstr "Forklar"
 
-#: ui/views/mail-reading-pane.slint:2104
+#: ui/views/mail-reading-pane.slint:2103
 msgid "Copy selected text"
 msgstr "Kopiér markeret tekst"
 
-#: ui/views/mail-reading-pane.slint:2114
+#: ui/views/mail-reading-pane.slint:2113
 msgid "Copy all email text"
 msgstr "Kopiér al e-mailtekst"
 
-#: ui/views/mail-reading-pane.slint:2124
+#: ui/views/mail-reading-pane.slint:2123
 msgid "Select all email text"
 msgstr "Vælg al e-mailtekst"
 
-#: ui/views/mail-reading-pane.slint:2142
+#: ui/views/mail-reading-pane.slint:2141
 msgid "Link: {}"
 msgstr "Link: {}"
 
-#: ui/views/mail-reading-pane.slint:2353
+#: ui/views/mail-reading-pane.slint:2352
 msgid "Heading: {}"
 msgstr "Overskrift: {}"
 
-#: ui/views/mail-reading-pane.slint:2438
+#: ui/views/mail-reading-pane.slint:2437
 msgid "Send now"
 msgstr "Send nu"
 
-#: ui/views/mail-reading-pane.slint:2445
+#: ui/views/mail-reading-pane.slint:2444
 msgid "Change time"
 msgstr "Ændr tid"
 
-#: ui/views/mail-reading-pane.slint:2453
+#: ui/views/mail-reading-pane.slint:2452
 msgid "Cancel send"
 msgstr "Annullér afsendelse"
 
-#: ui/views/mail-reading-pane.slint:2470
+#: ui/views/mail-reading-pane.slint:2469
 msgid "Cancel reminder"
 msgstr "Annullér påmindelse"
 
-#: ui/views/mail-reading-pane.slint:2541
+#: ui/views/mail-reading-pane.slint:2540
 msgid "No message selected"
 msgstr "Ingen besked valgt"
 
-#: ui/views/mail-reading-pane.slint:2542
+#: ui/views/mail-reading-pane.slint:2541
 msgid "Choose an email to read it here."
 msgstr "Vælg en e-mail for at læse den her."
 
-#: ui/views/mail-reading-pane.slint:2586 ui/views/mail-reading-pane.slint:2591
+#: ui/views/mail-reading-pane.slint:2585 ui/views/mail-reading-pane.slint:2590
 msgid "Label name"
 msgstr "Labelnavn"
 
-#: ui/views/mail-reading-pane.slint:2611
+#: ui/views/mail-reading-pane.slint:2610
 msgid "Pink"
 msgstr "Pink"
 
-#: ui/views/mail-reading-pane.slint:2613
+#: ui/views/mail-reading-pane.slint:2612
 msgid "Amber"
 msgstr "Rav"
 
-#: ui/views/mail-reading-pane.slint:2616
+#: ui/views/mail-reading-pane.slint:2615
 msgid "Slate"
 msgstr "Skifer"
 
-#: ui/views/mail-reading-pane.slint:2621
+#: ui/views/mail-reading-pane.slint:2620
 msgid "Use across all accounts (local only)"
 msgstr "Brug på tværs af alle konti (kun lokalt)"
 
-#: ui/views/mail-view.slint:448
+#: ui/views/mail-view.slint:451
 msgid "Message list width"
 msgstr "Beskedlistens bredde"
 
-#: ui/views/mail-view.slint:722
+#: ui/views/mail-view.slint:726
 msgid "Close folders"
 msgstr "Luk mapper"
 
@@ -13676,6 +13784,9 @@ msgstr "Gendan"
 #: ui/window-chrome.slint:202 ui/window-chrome.slint:239
 msgid "Maximize"
 msgstr "Maksimér"
+
+#~ msgid "View original plain text"
+#~ msgstr "Vis original almindelig tekst"
 
 #~ msgid "QR code"
 #~ msgstr "QR-kode"
