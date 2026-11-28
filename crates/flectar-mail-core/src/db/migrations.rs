@@ -97,6 +97,9 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!(
         "migrations/078_flowed_bodies_to_read_again.sql"
     )),
+    Migration::Plain(include_str!(
+        "migrations/079_gmail_label_list_visibility.sql"
+    )),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

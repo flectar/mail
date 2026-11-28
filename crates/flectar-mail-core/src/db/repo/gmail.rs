@@ -177,6 +177,40 @@ pub fn provider_label_for_local(
         .optional()?)
 }
 
+/// The labels of a Gmail account with an edit made on this device that
+/// hasn't reached Gmail yet, by their Gmail ids (#253).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct PendingLabelEdits {
+    /// Renamed or recolored.
+    pub renamed: std::collections::HashSet<String>,
+    /// Shown or hidden in the label list.
+    pub list_visibility: std::collections::HashSet<String>,
+}
+
+pub fn pending_label_edits(conn: &Connection, account_id: i64) -> Result<PendingLabelEdits> {
+    let mut stmt = conn.prepare(
+        "SELECT kind, json_extract(payload, '$.providerId') FROM pending_actions
+          WHERE account_id = ?1 AND state IN ('pending', 'inflight')
+            AND kind IN ('gmail_label_update', 'gmail_label_list_visibility')",
+    )?;
+    let mut edits = PendingLabelEdits::default();
+    let rows = stmt.query_map(params![account_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    for row in rows {
+        let (kind, provider_id) = row?;
+        let Some(provider_id) = provider_id else {
+            continue;
+        };
+        if kind == "gmail_label_update" {
+            edits.renamed.insert(provider_id);
+        } else {
+            edits.list_visibility.insert(provider_id);
+        }
+    }
+    Ok(edits)
+}
+
 pub fn provider_label_for_folder(
     conn: &Connection,
     account_id: i64,
