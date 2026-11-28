@@ -5,6 +5,22 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::parse_addrs;
 
+/// SQL that holds for a message `m` in a folder this device syncs: one not in
+/// the JSON array of folder ids in the parameter `$skip` (#253). A JMAP
+/// message counts in each of its mailboxes.
+macro_rules! in_a_synced_folder {
+    ($skip:literal) => {
+        concat!(
+            "(m.folder_id NOT IN (SELECT value FROM json_each(",
+            $skip,
+            ")) OR EXISTS (SELECT 1 FROM message_folders mf WHERE mf.message_id = m.id
+               AND mf.folder_id NOT IN (SELECT value FROM json_each(",
+            $skip,
+            "))))"
+        )
+    };
+}
+
 /// Parsed header data ready for insertion (produced by the sync engine).
 #[derive(Debug, Clone)]
 pub struct NewMessage {
@@ -112,7 +128,7 @@ pub fn next_attachment_to_prefetch(
     skip: &[i64],
     skip_folders: &[i64],
 ) -> Result<Option<(i64, i64)>> {
-    let mut stmt = conn.prepare_cached(
+    let mut stmt = conn.prepare_cached(concat!(
         "SELECT a.id, COALESCE(m.internal_date, m.date) AS sent
          FROM attachments a JOIN messages m ON m.id = a.message_id
          WHERE m.account_id = ?1 AND m.is_draft = 0
@@ -121,10 +137,10 @@ pub fn next_attachment_to_prefetch(
                 OR a.provider_attachment_id IS NOT NULL)
            AND (a.size IS NULL OR a.size <= ?3)
            AND (?2 IS NULL OR COALESCE(m.internal_date, m.date) >= ?2)
-           AND m.folder_id NOT IN (SELECT value FROM json_each(?5))
-         ORDER BY sent DESC, a.id DESC
-         LIMIT ?4",
-    )?;
+           AND ",
+        in_a_synced_folder!("?5"),
+        " ORDER BY sent DESC, a.id DESC LIMIT ?4"
+    ))?;
     let limit = i64::try_from(skip.len().saturating_add(1)).unwrap_or(i64::MAX);
     let skip_folders = serde_json::to_string(skip_folders)?;
     let rows = stmt
@@ -298,6 +314,63 @@ pub fn jmap_leftovers(conn: &Connection, account_id: i64) -> Result<Vec<JmapLeft
     Ok(leftovers)
 }
 
+/// Which of `ids`, JMAP Email ids, this account has here.
+pub fn stored_jmap_ids(
+    conn: &Connection,
+    account_id: i64,
+    ids: &[String],
+) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT jmap_id FROM messages
+         WHERE account_id = ?1 AND jmap_id IN (SELECT value FROM json_each(?2))",
+    )?;
+    let ids = serde_json::to_string(ids)?;
+    let rows = stmt
+        .query_map(params![account_id, ids], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// The Email ids of the JMAP mail here in a folder, received from `since`
+/// on (#253).
+pub fn jmap_ids_in_folder(
+    conn: &Connection,
+    folder_id: i64,
+    since: Option<i64>,
+) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT m.jmap_id FROM messages m
+         WHERE m.jmap_id IS NOT NULL AND (?2 IS NULL OR m.date >= ?2)
+           AND (m.folder_id = ?1 OR EXISTS (SELECT 1 FROM message_folders mf
+                                             WHERE mf.message_id = m.id AND mf.folder_id = ?1))",
+    )?;
+    let rows = stmt
+        .query_map(params![folder_id, since], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// The account's messages that are only in the folders of `folder_ids`, which
+/// this device doesn't sync (#253).
+pub fn only_in_folders(
+    conn: &Connection,
+    account_id: i64,
+    folder_ids: &[i64],
+) -> Result<std::collections::HashSet<i64>> {
+    if folder_ids.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let mut stmt = conn.prepare(concat!(
+        "SELECT m.id FROM messages m WHERE m.account_id = ?1 AND m.folder_id IS NOT NULL AND NOT ",
+        in_a_synced_folder!("?2")
+    ))?;
+    let folder_ids = serde_json::to_string(folder_ids)?;
+    let rows = stmt
+        .query_map(params![account_id, folder_ids], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
 /// A JMAP message waiting in one of the background queues: for its
 /// attachments to be listed, or for its body (#253).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,22 +383,28 @@ pub struct JmapQueued {
 
 /// Repeats the WHERE terms of `idx_messages_jmap_attachments_pending`, so the
 /// queue is read from that index.
-const JMAP_ATTACHMENT_LISTING_QUEUE: &str =
-    "SELECT id, jmap_id, jmap_blob_id, COALESCE(size, 0) FROM messages
-     WHERE account_id = ?1 AND has_attachments = 1 AND body_state <> 'cached'
-       AND jmap_blob_id IS NOT NULL AND jmap_attachments_blob_id IS NOT jmap_blob_id
-       AND jmap_id IS NOT NULL
-     ORDER BY date DESC, id DESC LIMIT ?2";
+const JMAP_ATTACHMENT_LISTING_QUEUE: &str = concat!(
+    "SELECT m.id, m.jmap_id, m.jmap_blob_id, COALESCE(m.size, 0) FROM messages m
+     WHERE m.account_id = ?1 AND m.has_attachments = 1 AND m.body_state <> 'cached'
+       AND m.jmap_blob_id IS NOT NULL AND m.jmap_attachments_blob_id IS NOT m.jmap_blob_id
+       AND m.jmap_id IS NOT NULL AND ",
+    in_a_synced_folder!("?3"),
+    " ORDER BY m.date DESC, m.id DESC LIMIT ?2"
+);
 
-/// The newest messages of the account whose attachments still need listing.
+/// The newest messages of the account whose attachments still need listing,
+/// but those only in the folders in `skip_folders`, which this device
+/// doesn't sync (#253).
 pub fn jmap_attachment_listing_queue(
     conn: &Connection,
     account_id: i64,
     limit: i64,
+    skip_folders: &[i64],
 ) -> Result<Vec<JmapQueued>> {
     let mut stmt = conn.prepare_cached(JMAP_ATTACHMENT_LISTING_QUEUE)?;
+    let skip_folders = serde_json::to_string(skip_folders)?;
     let rows = stmt
-        .query_map(params![account_id, limit], |row| {
+        .query_map(params![account_id, limit, skip_folders], |row| {
             Ok(JmapQueued {
                 message_id: row.get(0)?,
                 remote_id: row.get(1)?,
@@ -339,33 +418,41 @@ pub fn jmap_attachment_listing_queue(
 
 /// Repeats the WHERE terms of `idx_messages_jmap_pending_body`, so the queue
 /// is read from that index. A body that failed waits as IMAP's do.
-const JMAP_BODY_DOWNLOAD_QUEUE: &str =
+const JMAP_BODY_DOWNLOAD_QUEUE: &str = concat!(
     "SELECT m.id, m.jmap_id, m.jmap_blob_id, COALESCE(m.size, 0) FROM messages m
      LEFT JOIN sync_failures sf ON sf.stage = 'content' AND sf.message_id = m.id
      WHERE m.account_id = ?1 AND m.jmap_blob_id IS NOT NULL AND m.body_state = 'none'
        AND m.jmap_id IS NOT NULL
        AND (sf.id IS NULL OR sf.next_retry_at IS NULL OR sf.next_retry_at <= ?3)
-       AND (?4 IS NULL OR COALESCE(m.internal_date, m.date) >= ?4)
-     ORDER BY m.date DESC, m.id DESC LIMIT ?2";
+       AND (?4 IS NULL OR COALESCE(m.internal_date, m.date) >= ?4) AND ",
+    in_a_synced_folder!("?5"),
+    " ORDER BY m.date DESC, m.id DESC LIMIT ?2"
+);
 
 /// The newest messages of a JMAP account, inside its mail history from
-/// `since`, whose bodies download ahead of time.
+/// `since`, whose bodies download ahead of time: not those only in the
+/// folders in `skip_folders`, which this device doesn't sync (#253).
 pub fn jmap_body_download_queue(
     conn: &Connection,
     account_id: i64,
     since: Option<i64>,
     limit: i64,
+    skip_folders: &[i64],
 ) -> Result<Vec<JmapQueued>> {
     let mut stmt = conn.prepare_cached(JMAP_BODY_DOWNLOAD_QUEUE)?;
+    let skip_folders = serde_json::to_string(skip_folders)?;
     let rows = stmt
-        .query_map(params![account_id, limit, now_ms(), since], |row| {
-            Ok(JmapQueued {
-                message_id: row.get(0)?,
-                remote_id: row.get(1)?,
-                blob_id: row.get(2)?,
-                size: row.get(3)?,
-            })
-        })?
+        .query_map(
+            params![account_id, limit, now_ms(), since, skip_folders],
+            |row| {
+                Ok(JmapQueued {
+                    message_id: row.get(0)?,
+                    remote_id: row.get(1)?,
+                    blob_id: row.get(2)?,
+                    size: row.get(3)?,
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -2177,6 +2264,65 @@ mod tests {
         );
     }
 
+    /// Mail only in folders this device leaves out of its sync waits until
+    /// it's opened, and mail in a synced folder too downloads (#253).
+    #[test]
+    fn jmap_bodies_of_left_out_folders_wait() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, jmap_id) VALUES (10, 1, 'Lists', 'lists')",
+            [],
+        )
+        .unwrap();
+        let message = |date: i64, folders: &[i64]| -> i64 {
+            conn.execute(
+                "INSERT INTO messages (account_id, folder_id, subject, from_addr, date, size,
+                                       jmap_id, jmap_blob_id, body_state)
+                 VALUES (1, ?2, 'Mail', 'a@example.com', ?1, 100, 'remote-' || ?1,
+                         'blob-' || ?1, 'none')",
+                params![date, folders[0]],
+            )
+            .unwrap();
+            let id = conn.last_insert_rowid();
+            for folder in folders {
+                conn.execute(
+                    "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
+                    params![id, folder],
+                )
+                .unwrap();
+            }
+            id
+        };
+        let inbox = message(1_000, &[1]);
+        let lists = message(2_000, &[10]);
+        // Listed first in Lists, as JMAP may.
+        let both = message(3_000, &[10, 1]);
+        let queue = |skip: &[i64]| -> Vec<i64> {
+            jmap_body_download_queue(&conn, 1, None, 10, skip)
+                .unwrap()
+                .into_iter()
+                .map(|body| body.message_id)
+                .collect()
+        };
+        assert_eq!(queue(&[]), [both, lists, inbox]);
+        assert_eq!(queue(&[10]), [both, inbox]);
+        assert_eq!(
+            only_in_folders(&conn, 1, &[10]).unwrap(),
+            std::collections::HashSet::from([lists])
+        );
+        assert!(only_in_folders(&conn, 1, &[]).unwrap().is_empty());
+        assert_eq!(
+            jmap_ids_in_folder(&conn, 10, None).unwrap().len(),
+            2,
+            "Lists holds its own mail and the mail it shares"
+        );
+        assert_eq!(
+            stored_jmap_ids(&conn, 1, &["remote-1000".into(), "elsewhere".into()]).unwrap(),
+            std::collections::HashSet::from(["remote-1000".to_owned()])
+        );
+    }
+
     /// A JMAP account's bodies download newest first, inside its history,
     /// and one that failed waits for its retry (#253).
     #[test]
@@ -2200,7 +2346,7 @@ mod tests {
         message(7_000, Some("blob-read"), "cached");
         message(8_000, None, "none");
         let queue = |since| -> Vec<i64> {
-            jmap_body_download_queue(&conn, 1, since, 10)
+            jmap_body_download_queue(&conn, 1, since, 10, &[])
                 .unwrap()
                 .into_iter()
                 .map(|body| body.message_id)
@@ -2209,7 +2355,7 @@ mod tests {
 
         assert_eq!(queue(None), [new, old]);
         assert_eq!(
-            jmap_body_download_queue(&conn, 1, None, 1).unwrap(),
+            jmap_body_download_queue(&conn, 1, None, 1, &[]).unwrap(),
             [JmapQueued {
                 message_id: new,
                 remote_id: "remote-5000".into(),
@@ -2926,7 +3072,7 @@ mod tests {
                 "EXPLAIN QUERY PLAN {JMAP_ATTACHMENT_LISTING_QUEUE}"
             ))
             .unwrap()
-            .query_map(params![1, 10], |row| row.get::<_, String>(3))
+            .query_map(params![1, 10, "[]"], |row| row.get::<_, String>(3))
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap()

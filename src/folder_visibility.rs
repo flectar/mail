@@ -1,6 +1,6 @@
 //! Folders (#253): which of an account's folders show in the sidebar and the
-//! Move to list, and for an IMAP account which ones this device syncs. A
-//! hidden folder takes the folders in it along, and its mail still
+//! Move to list, and for an IMAP or JMAP account which ones this device
+//! syncs. A hidden folder takes the folders in it along, and its mail still
 //! downloads. The Inbox and the folders with a role always show, and the
 //! Inbox, Sent and Drafts always sync.
 

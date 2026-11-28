@@ -11,8 +11,9 @@ use crate::models::{
     ServerSearchCursor, now_ms, roles,
 };
 use crate::sync::engine::{
-    PauseEnd, PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx, caught_up,
-    check_interval, note_limit, set_state, set_state_error, wait_for_turn, wait_out_pause,
+    FolderChecks, PauseEnd, PriorityFetchCmd, SERVER_SEARCH_PAGES, ServerHits, SyncCmd, SyncCtx,
+    caught_up, check_interval, note_limit, set_state, set_state_error, wait_for_turn,
+    wait_out_pause,
 };
 use crate::sync::pacing;
 use futures::{FutureExt, Stream, StreamExt};
@@ -60,16 +61,25 @@ const BODY_HEADERS: [&str; 5] = [
     "List-Id",
 ];
 
+/// `folder_checks` holds the folders left out of the account's sync that
+/// were opened, which its next pass checks (#253).
 pub(crate) fn spawn(
     ctx: SyncCtx,
     config: AccountConfig,
     rx: mpsc::Receiver<SyncCmd>,
     body_rx: mpsc::Receiver<PriorityFetchCmd>,
     settings_rx: watch::Receiver<crate::models::AccountSettings>,
+    folder_checks: FolderChecks,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     debug_assert_eq!(config.mail_protocol, MailProtocol::Jmap);
     vec![
-        crate::net::timeouts::spawn(actor(ctx.clone(), config.clone(), rx, settings_rx)),
+        crate::net::timeouts::spawn(actor(
+            ctx.clone(),
+            config.clone(),
+            rx,
+            settings_rx,
+            folder_checks,
+        )),
         crate::net::timeouts::spawn(body_actor(ctx, config, body_rx)),
     ]
 }
@@ -148,6 +158,7 @@ async fn actor(
     mut config: AccountConfig,
     mut rx: mpsc::Receiver<SyncCmd>,
     mut settings: watch::Receiver<crate::models::AccountSettings>,
+    folder_checks: FolderChecks,
 ) {
     let mut waiters = Vec::new();
     // Waits after failures other than the server asking to wait. Those the
@@ -179,8 +190,36 @@ async fn actor(
                 _ => {}
             }
         }
-        if settings.has_changed().unwrap_or(false) {
-            config.settings = settings.borrow_and_update().clone();
+        // The account's settings as they are now. A change that woke the
+        // worker is marked seen already, so `has_changed` can't tell of it.
+        let before = std::mem::replace(&mut config.settings, settings.borrow_and_update().clone());
+        // A folder synced again catches up on the mail it missed (#253).
+        let resynced = before
+            .unsynced_folders
+            .difference(&config.settings.unsynced_folders)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        if !resynced.is_empty() {
+            let account_id = config.id;
+            match ctx
+                .db
+                .read(move |conn| {
+                    Ok(repo::folders::list(conn, Some(account_id))?
+                        .into_iter()
+                        .filter(|folder| resynced.contains(&folder.path))
+                        .map(|folder| folder.id)
+                        .collect::<Vec<_>>())
+                })
+                .await
+            {
+                Ok(ids) => folder_checks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(ids),
+                Err(error) => {
+                    tracing::warn!(account_id, %error, "JMAP: a folder synced again couldn't be found")
+                }
+            }
         }
         let reused = session.take();
         let outcome = async {
@@ -217,6 +256,22 @@ async fn actor(
             set_state(&ctx, config.id, "syncing").await;
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected, live_since).await?;
+            // Folders left out that were opened, or synced again, since the
+            // last pass (#253). A pass that fails checks them in the next.
+            let checks = std::mem::take(
+                &mut *folder_checks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+            if !checks.is_empty()
+                && let Err(error) = check_left_out(&ctx, &config, &connected, &checks).await
+            {
+                folder_checks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(checks);
+                return Err(error);
+            }
             caught_up(&ctx, config.id, started).await;
             crate::sync::engine::settle_waiting_rules(&ctx, config.id).await;
             execute_actions(&ctx, &config, &connected).await?;
@@ -798,8 +853,16 @@ async fn full_sync_ids(
     config: &AccountConfig,
     c: &ConnectedClient,
 ) -> Result<Vec<String>> {
+    // Mail only in the folders this device leaves out isn't listed (#253).
+    let left_out = left_out(ctx, config)
+        .await?
+        .into_iter()
+        .filter_map(|folder| folder.jmap_id)
+        .collect::<Vec<_>>();
+    let outside = (!left_out.is_empty())
+        .then(|| jmap_client::email::query::Filter::in_mailbox_other_than(left_out));
     let Some(cutoff) = config.settings.mail_history.cutoff_ms_at(now_ms()) else {
-        return query_ids(c, None).await;
+        return query_ids(c, None, outside).await;
     };
     let account_id = config.id;
     let oldest_leftover = ctx
@@ -815,7 +878,26 @@ async fn full_sync_ids(
     let received_after = oldest_leftover.map_or(cutoff, |oldest| {
         cutoff.min(oldest.saturating_sub(24 * 60 * 60 * 1000))
     });
-    query_ids(c, Some(received_after)).await
+    query_ids(c, Some(received_after), outside).await
+}
+
+/// The ids of the folders of the account this device leaves out of its sync
+/// (#253).
+async fn left_out_ids(ctx: &SyncCtx, config: &AccountConfig) -> Result<Vec<i64>> {
+    Ok(left_out(ctx, config)
+        .await?
+        .into_iter()
+        .map(|folder| folder.id)
+        .collect())
+}
+
+/// The folders of the account this device leaves out of its sync (#253).
+async fn left_out(ctx: &SyncCtx, config: &AccountConfig) -> Result<Vec<repo::folders::Folder>> {
+    let account_id = config.id;
+    let unsynced = config.settings.unsynced_folders.clone();
+    ctx.db
+        .read(move |conn| repo::folders::left_out(conn, account_id, &unsynced))
+        .await
 }
 
 /// The Email state an unfinished full sync started from.
@@ -887,22 +969,40 @@ async fn saved_email_state(ctx: &SyncCtx, id: i64) -> Result<Option<String>> {
         .await
 }
 
-/// Every Email received after `received_after` (ms), newest first.
-async fn query_ids(c: &ConnectedClient, received_after: Option<i64>) -> Result<Vec<String>> {
-    let cutoff = received_after.map(|v| v / 1000);
-    query_all("Email/query", |position| async move {
-        let mut request = c.request();
-        let query = request
-            .query_email()
-            .account_id(&c.account_id)
-            .position(position)
-            .limit(PAGE)
-            .calculate_total(true)
-            .sort([jmap_client::email::query::Comparator::received_at().descending()]);
-        if let Some(cutoff) = cutoff {
-            query.filter(jmap_client::email::query::Filter::after(cutoff));
+/// Every Email received after `received_after` (ms) that `also` matches,
+/// newest first.
+async fn query_ids(
+    c: &ConnectedClient,
+    received_after: Option<i64>,
+    also: Option<jmap_client::email::query::Filter>,
+) -> Result<Vec<String>> {
+    let conditions = received_after
+        .map(|value| jmap_client::email::query::Filter::after(value / 1000))
+        .into_iter()
+        .chain(also)
+        .collect::<Vec<_>>();
+    query_all("Email/query", |position| {
+        let conditions = conditions.clone();
+        async move {
+            let mut request = c.request();
+            let query = request
+                .query_email()
+                .account_id(&c.account_id)
+                .position(position)
+                .limit(PAGE)
+                .calculate_total(true)
+                .sort([jmap_client::email::query::Comparator::received_at().descending()]);
+            match <[_; 1]>::try_from(conditions) {
+                Ok([condition]) => {
+                    query.filter(condition);
+                }
+                Err(conditions) if !conditions.is_empty() => {
+                    query.filter(jmap_client::core::query::Filter::and(conditions));
+                }
+                Err(_) => {}
+            }
+            c.send_single::<QueryResponse>(request).await
         }
-        c.send_single::<QueryResponse>(request).await
     })
     .await
 }
@@ -1187,6 +1287,13 @@ async fn sync_emails(
                 }
             },
         };
+    // New mail only in the folders this device leaves out doesn't download
+    // (#253). A full sync's query already leaves it out.
+    let ids = if full {
+        ids
+    } else {
+        without_left_out_mail(ctx, config, c, ids).await?
+    };
     // A full sync downloads the account's mail history. Older mail it lists
     // only replaces what an earlier server left here.
     let insert_after = if full {
@@ -1247,6 +1354,149 @@ async fn sync_emails(
     destroyed.sort();
     destroyed.dedup();
     finish_email_sync(ctx, config, remote_ids, destroyed, checkpoint_state, full).await
+}
+
+/// `ids` from Email/changes, but those of mail that isn't here yet and is only
+/// in the mailboxes this device leaves out (#253), as their `mailboxIds`
+/// tell. Mail here keeps up with every change, wherever it is now.
+async fn without_left_out_mail(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    ids: Vec<String>,
+) -> Result<Vec<String>> {
+    let left_out = left_out(ctx, config)
+        .await?
+        .into_iter()
+        .filter_map(|folder| folder.jmap_id)
+        .collect::<HashSet<_>>();
+    if left_out.is_empty() || ids.is_empty() {
+        return Ok(ids);
+    }
+    let account_id = config.id;
+    let asked = ids.clone();
+    let here = ctx
+        .db
+        .read(move |conn| repo::messages::stored_jmap_ids(conn, account_id, &asked))
+        .await?;
+    let new = ids
+        .iter()
+        .filter(|id| !here.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut wanted = HashSet::new();
+    for page in new.chunks(max_objects_in_get(c)) {
+        let mut request = c.request();
+        request
+            .get_email()
+            .account_id(&c.account_id)
+            .ids(page.iter().cloned())
+            .properties([EmailProperty::MailboxIds]);
+        let mut response: EmailGetResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        // Mail no longer there needs nothing.
+        for email in response.take_list() {
+            if email
+                .mailbox_ids()
+                .iter()
+                .any(|mailbox| !left_out.contains(*mailbox))
+                && let Some(id) = email.id()
+            {
+                wanted.insert(id.to_owned());
+            }
+        }
+    }
+    Ok(ids
+        .into_iter()
+        .filter(|id| here.contains(id) || wanted.contains(id))
+        .collect())
+}
+
+/// Checks the folders in `checks` that this device leaves out of its sync,
+/// as they're opened, or catches up those synced again (#253): the mail in
+/// each inside the account's mail history that isn't here yet downloads, and
+/// mail here that the folder no longer lists is read again, which moves it
+/// or finds it gone.
+async fn check_left_out(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    checks: &HashSet<i64>,
+) -> Result<()> {
+    let account_id = config.id;
+    let wanted = checks.iter().copied().collect::<Vec<_>>();
+    let mailboxes = ctx
+        .db
+        .read(move |conn| {
+            let mut mailboxes = Vec::new();
+            for folder_id in wanted {
+                if let Some(folder) = repo::folders::get(conn, folder_id)?
+                    && folder.account_id == account_id
+                    && let Some(mailbox) = folder.jmap_id
+                {
+                    mailboxes.push((folder.id, mailbox));
+                }
+            }
+            Ok(mailboxes)
+        })
+        .await?;
+    let cutoff = config.settings.mail_history.cutoff_ms_at(now_ms());
+    for (folder_id, mailbox) in mailboxes {
+        let listed = query_ids(
+            c,
+            cutoff,
+            Some(jmap_client::email::query::Filter::in_mailbox(mailbox)),
+        )
+        .await?;
+        let here = ctx
+            .db
+            .read(move |conn| repo::messages::jmap_ids_in_folder(conn, folder_id, cutoff))
+            .await?;
+        let listed_set = listed.iter().collect::<HashSet<_>>();
+        let here_set = here.iter().collect::<HashSet<_>>();
+        let read = listed
+            .iter()
+            .filter(|id| !here_set.contains(id))
+            .chain(here.iter().filter(|id| !listed_set.contains(id)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut pages = HeaderPages {
+            ids: &read,
+            position: 0,
+            size: max_objects_in_get(c),
+            rule_headers: &[],
+        };
+        let mut gone = Vec::new();
+        while let Some((emails, not_found)) = pages.next(c).await? {
+            gone.extend(not_found);
+            // What a check finds is never new mail: no rules, no notices.
+            persist_emails(ctx, config, emails, false, cutoff, i64::MAX, None).await?;
+        }
+        if !gone.is_empty() {
+            let (thread_ids, stale_paths) = ctx
+                .db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    let mut changed_threads = HashSet::new();
+                    let mut stale_paths = Vec::new();
+                    delete_destroyed(
+                        &tx,
+                        account_id,
+                        gone,
+                        &mut changed_threads,
+                        &mut stale_paths,
+                    )?;
+                    for thread_id in &changed_threads {
+                        repo::threads::recompute(&tx, *thread_id)?;
+                    }
+                    tx.commit()?;
+                    Ok((changed_threads.into_iter().collect::<Vec<_>>(), stale_paths))
+                })
+                .await?;
+            publish_changes(ctx, thread_ids, stale_paths).await;
+        }
+    }
+    Ok(())
 }
 
 /// The header pages of one sync run, newest first.
@@ -1802,26 +2052,28 @@ async fn finish_email_sync(
 ) -> Result<()> {
     let account_id = config.id;
     let cutoff = config.settings.mail_history.cutoff_ms_at(now_ms());
+    let unsynced = config.settings.unsynced_folders.clone();
     let (thread_ids, stale_paths) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             let mut changed_threads = HashSet::new();
             let mut stale_paths = Vec::new();
-            for remote_id in destroyed {
-                if let Some(row) = repo::messages::by_jmap_id(&tx, account_id, &remote_id)?
-                    && !repo::actions::has_pending_remote_creation(&tx, row.id)?
-                {
-                    if let Some(thread_id) = row.thread_id {
-                        changed_threads.insert(thread_id);
-                    }
-                    if let Some(path) = row.raw_path {
-                        stale_paths.push(path);
-                    }
-                    repo::messages::delete(&tx, row.id)?;
-                }
-            }
+            delete_destroyed(
+                &tx,
+                account_id,
+                destroyed,
+                &mut changed_threads,
+                &mut stale_paths,
+            )?;
             if full {
+                // Mail only in the folders this device leaves out keeps what
+                // it has, as the full sync didn't list it (#253).
+                let left_out = repo::folders::left_out(&tx, account_id, &unsynced)?
+                    .into_iter()
+                    .map(|folder| folder.id)
+                    .collect::<Vec<_>>();
+                let kept = repo::messages::only_in_folders(&tx, account_id, &left_out)?;
                 let mut stmt = tx.prepare(
                     "SELECT id,thread_id,raw_path,jmap_id,date FROM messages
                      WHERE account_id=?1 AND jmap_id IS NOT NULL",
@@ -1841,6 +2093,7 @@ async fn finish_email_sync(
                 for (id, thread_id, path, remote_id, date) in rows {
                     if !remote_ids.contains(&remote_id)
                         && cutoff.is_none_or(|cutoff| date >= cutoff)
+                        && !kept.contains(&id)
                         && !repo::actions::has_pending_remote_creation(&tx, id)?
                     {
                         if let Some(thread_id) = thread_id {
@@ -1897,6 +2150,31 @@ async fn finish_email_sync(
     Ok(())
 }
 
+/// Removes the messages of `destroyed`, by their Email ids, which the server
+/// no longer has, but those still waiting to be created there.
+fn delete_destroyed(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: i64,
+    destroyed: Vec<String>,
+    changed_threads: &mut HashSet<i64>,
+    stale_paths: &mut Vec<String>,
+) -> Result<()> {
+    for remote_id in destroyed {
+        if let Some(row) = repo::messages::by_jmap_id(tx, account_id, &remote_id)?
+            && !repo::actions::has_pending_remote_creation(tx, row.id)?
+        {
+            if let Some(thread_id) = row.thread_id {
+                changed_threads.insert(thread_id);
+            }
+            if let Some(path) = row.raw_path {
+                stale_paths.push(path);
+            }
+            repo::messages::delete(tx, row.id)?;
+        }
+    }
+    Ok(())
+}
+
 async fn publish_changes(ctx: &SyncCtx, thread_ids: Vec<i64>, stale_paths: Vec<String>) {
     for path in stale_paths {
         let _ = tokio::fs::remove_file(path).await;
@@ -1923,10 +2201,12 @@ async fn list_attachments(
 ) -> Result<bool> {
     let account_id = config.id;
     let limit = max_objects_in_get(c).min(ATTACHMENT_LISTING_EMAILS);
+    // Nor for mail only in folders this device leaves out (#253).
+    let skip = left_out_ids(ctx, config).await?;
     let queue = ctx
         .db
         .read(move |conn| {
-            repo::messages::jmap_attachment_listing_queue(conn, account_id, limit as i64)
+            repo::messages::jmap_attachment_listing_queue(conn, account_id, limit as i64, &skip)
         })
         .await?;
     let mut count = queue.len();
@@ -2152,10 +2432,12 @@ async fn download_bodies(
     let account_id = config.id;
     let since = config.settings.mail_history.cutoff_ms_at(now_ms());
     let limit = max_objects_in_get(c).min(BODY_DOWNLOAD_EMAILS);
+    // Nor for mail only in folders this device leaves out (#253).
+    let skip = left_out_ids(ctx, config).await?;
     let queue = ctx
         .db
         .read(move |conn| {
-            repo::messages::jmap_body_download_queue(conn, account_id, since, limit as i64)
+            repo::messages::jmap_body_download_queue(conn, account_id, since, limit as i64, &skip)
         })
         .await?;
     let mut count = queue.len();

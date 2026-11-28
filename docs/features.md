@@ -355,11 +355,12 @@ has unread mail waits there while it has none. **Hide label** and **Show label**
 in a label's menu change it in Gmail too, so Gmail on the web and your other
 devices follow.
 
-An IMAP account can also leave folders out of what this device syncs, such as a
-large archive. Turn off a folder's **Sync** switch in **Folders**, and its mail
-stops downloading in the background, while the mail already here stays. Opening
-the folder checks it then. The Inbox, Sent and Drafts always sync, and each
-device keeps its own choice.
+An IMAP or JMAP account can also leave folders out of what this device syncs,
+such as a large archive. Turn off a folder's **Sync** switch in **Folders**, and
+its mail stops downloading in the background, while the mail already here
+stays. Opening the folder checks it then. Mail that's in a synced folder too
+keeps syncing. The Inbox, Sent and Drafts always sync, and each device keeps its
+own choice.
 
 ## Sender addresses
 
