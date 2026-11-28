@@ -296,7 +296,8 @@ export component EmailComposer inherits Rectangle {
         let anchor = body-input.has-focus ? body-input.anchor-position-byte-offset : root.selection-start;
         let cursor = body-input.has-focus ? body-input.cursor-position-byte-offset : root.selection-end;
         if (kind == "link") {
-            if (anchor == cursor) {
+            // A layout block keeps the links it was written with.
+            if (anchor == cursor || root.active-layout) {
                 return;
             }
             root.link-selection-start = anchor;
@@ -579,7 +580,7 @@ export component EmailComposer inherits Rectangle {
             active-family: root.active-family;
             active-align: root.active-align;
             link-active: root.active-link-url != "";
-            can-link: root.selection-start != root.selection-end;
+            can-link: root.selection-start != root.selection-end && !root.active-layout;
             apply-format(kind) => { root.apply-format(kind); }
             insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
