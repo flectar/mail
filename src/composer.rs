@@ -5192,6 +5192,54 @@ mod tests {
         assert_eq!(open_windows(), 3);
     }
 
+    /// A message taken back with Undo, or one that couldn't be sent, stays in Drafts as it was
+    /// sent, its plain-text part as recipients read it. It reopens as it was written, with its
+    /// formatting and links rather than that plain text.
+    #[test]
+    fn a_message_kept_as_it_was_sent_reopens_as_it_was_written() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        let text = "See the plan.";
+        let mut written = crate::rich_compose::RichComposeDocument::default();
+        written.load(text, 0, 0);
+        let plan = text.find("plan").unwrap() as i32;
+        written.set_link("https://example.org/plan", text, plan, plan + 4);
+        written.format("bold", text, 0, 3);
+        let sent = crate::rich_compose::with_plain_text_quotes(&written.plain_text());
+        assert_eq!(sent, "See the plan <https://example.org/plan>.");
+        composers.show_draft(
+            &app,
+            SaveDraftArgs {
+                draft_id: Some(7),
+                account_id: 1,
+                from: None,
+                to: vec![Address {
+                    name: None,
+                    email: "ana@example.test".into(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Plan".into(),
+                body_text: sent,
+                body_html: written.body_html(),
+                mode: "new".into(),
+                in_reply_to_message_id: None,
+                in_reply_to_header: None,
+                attachments: Vec::new(),
+                request_read_receipt: false,
+                importance: Default::default(),
+            },
+        );
+        let session = composers.holding_draft(7).unwrap();
+        let document = session.document.borrow();
+        assert_eq!(document.text(), text);
+        assert_eq!(document.body_html(), written.body_html());
+    }
+
     #[test]
     fn message_windows_follow_the_text_size_and_reduced_motion() {
         let Setup {
