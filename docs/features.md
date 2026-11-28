@@ -367,12 +367,12 @@ own choice.
 An account can send from more addresses than the one it signs in with. Gmail's
 send-as addresses and a JMAP server's identities come from the provider, and for
 other servers you add the aliases they let you send from on the **Signatures**
-tab of the account's card in Settings → Accounts, which also chooses the one
-new messages start from. In the composer, the **From** menu lists your accounts and
+tab of the account's card in Settings → Accounts, which also chooses the one new
+messages start from. In the composer, the **From** menu lists your accounts and
 then the chosen account's addresses. An account keeps up to 1,000. Past ten, the
-menu's **Choose another address…** and Settings' **Default sender identity** open
-a picker that finds an address by its name or address as you type, and Settings
-lists 50 at a time with a search for the others.
+menu's **Choose another address…** and Settings' **Default sender identity**
+open a picker that finds an address by its name or address as you type, and
+Settings lists 50 at a time with a search for the others.
 
 ## Automatic Cc and Bcc
 
@@ -592,14 +592,14 @@ S/MIME and mobile OpenPGP are not currently supported.
 ## Automatic replies
 
 The **Automatic replies** tab of an account's card in Settings → Accounts sets
-the replies a Gmail or Microsoft account's server sends while you're away: a message, an optional first and
-last day, and whether only your contacts or, in a work account, only your
-organization get one. Gmail replies have a subject of their own, and Gmail
-answers each sender once, and again after four days, never answering mailing
-lists or spam. Outlook answers each sender once while replies are on, and
-replies that start on a first day need a last day too. The first save asks
-Google or Microsoft to let Flectar Mail change those settings, and signing in
-again keeps that.
+the replies a Gmail or Microsoft account's server sends while you're away: a
+message, an optional first and last day, and whether only your contacts or, in a
+work account, only your organization get one. Gmail replies have a subject of
+their own, and Gmail answers each sender once, and again after four days, never
+answering mailing lists or spam. Outlook answers each sender once while replies
+are on, and replies that start on a first day need a last day too. The first
+save asks Google or Microsoft to let Flectar Mail change those settings, and
+signing in again keeps that.
 
 The replies are kept on the server, so they go out while Flectar Mail is
 closed. Syncing reads them back, so replies set on the web show too, and a
