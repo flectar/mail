@@ -1858,13 +1858,20 @@ impl RichComposeDocument {
     }
 
     /// Reopens `text`, a saved message's plain text, with the formatting the
-    /// HTML `body_html` wrote for it. Returns `None`, leaving the document
-    /// untouched, when the HTML holds other text: markup the composer could
-    /// not have written, or HTML from versions that kept neither list
-    /// numbers nor spacing. Callers then load the plain text.
+    /// HTML `body_html` wrote for it. A message kept as it was sent, taken
+    /// back with Undo or not sent, reopens as its HTML wrote it. Returns
+    /// `None`, leaving the document untouched, when the HTML holds other
+    /// text: markup the composer could not have written, or HTML from
+    /// versions that kept neither list numbers nor spacing. Callers then load
+    /// the plain text.
     pub fn load_html(&mut self, html: &str, text: &str) -> Option<ComposeSelection> {
-        let (_, styles) = saved_styles(html, text, true)?;
-        let (text, styles) = with_whole_quote_markers(text, styles);
+        let (text, styles) = match saved_styles(html, text, true) {
+            Some((_, styles)) => with_whole_quote_markers(text, styles),
+            None => {
+                let (written, styles, _) = sent_document(html, text, true)?;
+                (written, styles)
+            }
+        };
         Some(self.reopen(text, styles))
     }
 
@@ -1882,9 +1889,13 @@ impl RichComposeDocument {
     /// how much of `text` that is, or `None`, leaving the document
     /// untouched, when the HTML holds other text.
     pub fn load_html_start(&mut self, html: &str, text: &str) -> Option<usize> {
-        let (end, styles) = saved_styles(html, text, false)?;
-        let (start, styles) = with_whole_quote_markers(&text[..end], styles);
-        self.reopen(start, styles);
+        if let Some((end, styles)) = saved_styles(html, text, false) {
+            let (start, styles) = with_whole_quote_markers(&text[..end], styles);
+            self.reopen(start, styles);
+            return Some(end);
+        }
+        let (written, styles, end) = sent_document(html, text, false)?;
+        self.reopen(written, styles);
         Some(end)
     }
 
@@ -3758,6 +3769,34 @@ fn typed_urls(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
         }
         None
     })
+}
+
+/// What `html` holds, its text and formatting, when `text` is the plain-text
+/// part sending writes for it, all of it when `whole` or else a start of it
+/// that ends at a line break, and where in `text` that ends. A message taken
+/// back with Undo, or one that couldn't be sent, stays a draft as it was
+/// sent: its plain text writes out each link's address, names each picture,
+/// reads a layout block as its text and turns quote blocks into plain-text
+/// quotes, so it isn't the text its HTML imports as. When it is what sending
+/// writes from that HTML, word for word, the two hold the same message, and
+/// the HTML reopens as it is. The same differences match as in
+/// [`saved_styles`].
+fn sent_document(
+    html: &str,
+    text: &str,
+    whole: bool,
+) -> Option<(String, Vec<ComposeStyleRun>, usize)> {
+    let (written, styles) = import_body_html(html)?;
+    let sent = with_plain_text_quotes(&plain_text_of(&written, &styles, true, 0).0);
+    let (sent, _) = text_as_html_reads_it(&sent);
+    let (expected, offsets) = text_as_html_reads_it(text);
+    let (sent_kept, _, _) = without_line_end_spaces(&sent);
+    let (expected_kept, _, expected_from) = without_line_end_spaces(&expected);
+    let rest = expected_kept.strip_prefix(sent_kept.as_str())?;
+    if !(rest.is_empty() || !whole && rest.starts_with('\n')) {
+        return None;
+    }
+    Some((written, styles, offsets[expected_from[sent_kept.len()]]))
 }
 
 /// The formatting `html` gives `text`, when the HTML holds that text, all
@@ -6338,6 +6377,67 @@ mod tests {
         editor.load_signature_html("<div>Pat Lee<br><i>Support</i></div>");
         assert_eq!(editor.text(), "Pat Lee\nSupport");
         assert!(editor.layouts().next().is_none());
+    }
+
+    #[test]
+    fn a_message_kept_as_it_was_sent_reopens_with_its_formatting() {
+        // A message taken back with Undo, or one that couldn't be sent, stays in Drafts as it
+        // was sent: its plain-text part writes out each link's address, names each picture,
+        // reads its signature's layout as text and turns its quote blocks into plain-text
+        // quotes, while its HTML holds what was written.
+        let text = "Hi team,\nThe plan is ready.\n│ Can we ship Friday?\nThanks";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let team = text.find("team").unwrap() as i32;
+        document.format("bold", text, team, team + 4);
+        let plan = text.find("plan").unwrap() as i32;
+        document.set_link("https://example.org/plan", text, plan, plan + 4);
+        let ready = text.find("ready").unwrap() as i32;
+        document.update_selection(ready, ready);
+        document.insert_image(InlineImage::from_file_bytes(png(40, 20), "Q3 chart").unwrap());
+        let mut signature = RichComposeDocument::default();
+        signature.load("", 0, 0);
+        signature
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let end = document.text().len();
+        document.replace_signature(None, end, Some(&signature.body_html().unwrap()), false);
+
+        let html = document.body_html().unwrap();
+        let sent = with_plain_text_quotes(&document.plain_text());
+        for written_out in [
+            "plan <https://example.org/plan>",
+            "[image: Q3 chart]ready",
+            "\n> Can we ship Friday?\n",
+            "\n-- \n[image: Logo]\tZoë Ortiz\nHead of design",
+        ] {
+            assert!(sent.contains(written_out), "{written_out:?} in {sent:?}");
+        }
+        let mut reopened = RichComposeDocument::default();
+        let caret = reopened
+            .load_html(&html, &sent)
+            .expect("the message as it was sent");
+        assert_eq!(reopened.text(), document.text());
+        assert_eq!(reopened.body_html(), document.body_html());
+        let end = reopened.text().len() as i32;
+        assert_eq!(caret, ComposeSelection { start: end, end });
+        assert_eq!(reopened.history("undo"), None);
+
+        // A server's copy comes back as format=flowed, without the spaces that end its lines,
+        // the signature separator's included.
+        let flowed = sent.replace(" \n", "\n");
+        assert_ne!(flowed, sent);
+        let mut reopened = RichComposeDocument::default();
+        assert!(reopened.load_html(&html, &flowed).is_some());
+        assert_eq!(reopened.text(), document.text());
+
+        // A plain-text part that says something else still opens as that text.
+        let changed = sent.replace("Thanks", "Cheers");
+        assert!(
+            RichComposeDocument::default()
+                .load_html(&html, &changed)
+                .is_none()
+        );
     }
 
     #[test]
