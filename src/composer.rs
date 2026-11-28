@@ -4,7 +4,7 @@
 //! main window free to read mail or start another message.
 
 use super::*;
-use crate::rich_compose::{EditMark, EditState};
+use crate::rich_compose::{EditMark, EditState, PastedLayout};
 use flectar_mail_core::models::{
     Address, AttachmentMeta, AutomaticCopies, CancelledSend, Importance, SaveDraftArgs,
     SenderIdentity, Settings, Signature,
@@ -112,6 +112,9 @@ pub(super) struct ComposeSession {
     signatures: RefCell<Vec<Signature>>,
     /// The signature this composer writes, in place of a message.
     signature_target: RefCell<Option<SignatureTarget>>,
+    /// The pictures of the layout block whose HTML is being edited by hand, which the HTML
+    /// refers to as `cid:pictureN` (#549).
+    layout_pictures: RefCell<Vec<String>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
     /// The copies mail from each of the sending account's identities starts
@@ -527,7 +530,8 @@ pub(super) fn save_open_messages() {
 }
 
 /// The message colors changed, with the theme or the reader's choice: an
-/// original already drawn below a composer takes them on too.
+/// original already drawn below a composer takes them on too, as do layout
+/// blocks in the text.
 pub(super) fn message_colors_changed(app: &AppWindow) {
     let colors = crate::message_appearance::EmailAppearance::from_app(app);
     with_composers(|composers| {
@@ -538,11 +542,32 @@ pub(super) fn message_colors_changed(app: &AppWindow) {
                 .borrow_mut()
                 .as_mut()
                 .is_some_and(|renderer| renderer.set_appearance(colors));
-            if changed && let Some(host) = session.host() {
+            let Some(host) = session.host() else {
+                continue;
+            };
+            if changed {
                 session.render_quote(&host);
+            }
+            let document = session.document.borrow();
+            if document.layouts().next().is_some() {
+                apply_compose_editor_surface(
+                    &host.view(),
+                    &document,
+                    document.selection(),
+                    &mut session.editor.borrow_mut(),
+                );
             }
         }
     });
+}
+
+/// The colors messages show in, as the main window has them: layout blocks in the text are
+/// drawn in them, as the original below a reply is.
+pub(super) fn message_colors() -> crate::message_appearance::EmailAppearance {
+    with_composers(|composers| composers.app.upgrade())
+        .flatten()
+        .map(|app| crate::message_appearance::EmailAppearance::from_app(&app))
+        .unwrap_or_default()
 }
 
 /// The main window stops or resumes painting. Its own composer lets go of
@@ -671,6 +696,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_active_image_alt(from.get_active_image_alt());
     to.set_active_image_width(from.get_active_image_width());
     to.set_active_image_shown_width(from.get_active_image_shown_width());
+    to.set_active_layout(from.get_active_layout());
     to.set_quote(from.get_quote());
     to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());
@@ -814,6 +840,7 @@ impl Composers {
             signature: RefCell::default(),
             signatures: RefCell::default(),
             signature_target: RefCell::default(),
+            layout_pictures: RefCell::default(),
             preferences_generation: Cell::new(0),
             copies: RefCell::default(),
             added_copies: RefCell::default(),
@@ -1406,7 +1433,7 @@ impl Composers {
                 // Images the HTML no longer holds leave no mark in the text.
                 let text = draft
                     .body_text
-                    .replace(crate::rich_compose::IMAGE_PLACEHOLDER, "");
+                    .replace(crate::rich_compose::OBJECT_PLACEHOLDER, "");
                 let cursor = i32::try_from(text.len()).unwrap_or(i32::MAX);
                 document.load(&text, cursor, cursor);
             }
@@ -2270,8 +2297,18 @@ impl ComposeSession {
             if let Some(session) = weak.upgrade()
                 && !session.plain_text.get()
             {
-                session.edit(|document| document.format(&kind, &body, anchor, cursor));
+                match kind.strip_prefix("layout-html:") {
+                    Some(html) => session.save_layout_html(&body, anchor, cursor, html),
+                    None => session.edit(|document| document.format(&kind, &body, anchor, cursor)),
+                }
             }
+        });
+        let weak = self.reference();
+        ui.on_layout_html(move || {
+            weak.upgrade()
+                .map(|session| session.layout_html_to_edit())
+                .unwrap_or_default()
+                .into()
         });
         let weak = self.reference();
         ui.on_plain_text_chosen(move |plain| {
@@ -2671,8 +2708,158 @@ impl ComposeSession {
     }
 
     /// Pastes `html` over the selection, unless it holds no text, or images that would take the
-    /// message's images and attachments past what a message carries. Returns whether it went in.
+    /// message's images and attachments past what a message carries. A signature keeps a layout
+    /// its text's lines can't hold, such as a table with a logo beside the text (#549), and a
+    /// message takes the text in its own formatting. Returns whether it went in.
     fn paste_html(&self, host: &HostRef, html: &str) -> bool {
+        let layout = if self.signature_target.borrow().is_some() {
+            PastedLayout::Keep
+        } else {
+            PastedLayout::Merge
+        };
+        // A signature keeps the pictures it links from the web, which go in once they're
+        // downloaded.
+        #[cfg(feature = "remote-content")]
+        if layout == PastedLayout::Keep && self.download_pictures_then(html, Self::paste_kept) {
+            return true;
+        }
+        self.paste_html_now(host, html, layout)
+    }
+
+    /// Pastes `html` over the selection of a signature, keeping a layout of its own.
+    #[cfg(feature = "remote-content")]
+    fn paste_kept(&self, host: &HostRef, html: &str) {
+        self.paste_html_now(host, html, PastedLayout::Keep);
+    }
+
+    /// Downloads the pictures `html` links from the web for a signature, then puts it in with
+    /// `apply` over the selection, wherever that has moved by then (#549). False, doing
+    /// nothing, when it links none.
+    #[cfg(feature = "remote-content")]
+    fn download_pictures_then(&self, html: &str, apply: fn(&Self, &HostRef, &str)) -> bool {
+        if crate::compose_paste::linked_pictures(html).is_empty() {
+            return false;
+        }
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return false;
+        };
+        let (revision, range) = {
+            let document = self.document.borrow();
+            let selection = document.selection();
+            let start = usize::try_from(selection.start.min(selection.end)).unwrap_or_default();
+            let end = usize::try_from(selection.start.max(selection.end)).unwrap_or_default();
+            (document.revision(), start..end)
+        };
+        host.ui().set_notice(
+            UiMessage::plain("Downloading the signature's pictures…"),
+            false,
+        );
+        let download =
+            crate::signature_pictures::embed(html.to_owned(), crate::remote::load_picture);
+        let task = composers.runtime.spawn(download);
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        let spawned = slint::spawn_local(async move {
+            let Ok(embedded) = task.await else {
+                return;
+            };
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            let Some(host) = session.host() else {
+                return;
+            };
+            let followed = session.document.borrow().follow(revision, range);
+            let (crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range)) = followed
+            else {
+                host.ui().set_notice(
+                    UiMessage::plain(
+                        "The signature changed while its pictures were downloading, so nothing was added.",
+                    ),
+                    true,
+                );
+                return;
+            };
+            session.document.borrow_mut().update_selection(
+                i32::try_from(range.start).unwrap_or(i32::MAX),
+                i32::try_from(range.end).unwrap_or(i32::MAX),
+            );
+            apply(&session, &host, &embedded.html);
+            if embedded.missing > 0 {
+                host.ui().set_notice(
+                    UiMessage::detail(
+                        "Couldn't download {} pictures for the signature.",
+                        embedded.missing,
+                    ),
+                    true,
+                );
+            } else {
+                host.ui().set_notice(UiMessage::EMPTY, false);
+            }
+        });
+        if spawned.is_err() {
+            abort.abort();
+            return false;
+        }
+        true
+    }
+
+    /// The HTML of the selected layout block, to edit by hand: its pictures, which the session
+    /// keeps until it's saved, as `cid:pictureN` references (#549).
+    fn layout_html_to_edit(&self) -> String {
+        let document = self.document.borrow();
+        let Some(block) = document.selected_layout() else {
+            return String::new();
+        };
+        let (html, pictures) = block.html_to_edit();
+        *self.layout_pictures.borrow_mut() = pictures;
+        html
+    }
+
+    /// Puts what was written by hand for the selected layout block in its place, with its
+    /// pictures back in it and those it links from the web downloaded first (#549).
+    fn save_layout_html(&self, body: &str, anchor: i32, cursor: i32, html: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+        }
+        let pictures = std::mem::take(&mut *self.layout_pictures.borrow_mut());
+        let html = crate::rich_compose::with_pictures_restored(html, &pictures);
+        #[cfg(feature = "remote-content")]
+        if self.download_pictures_then(&html, Self::replace_layout) {
+            return;
+        }
+        self.replace_layout(&host, &html);
+    }
+
+    /// Puts the layout `html` lays out in place of the selected layout block.
+    fn replace_layout(&self, host: &HostRef, html: &str) {
+        let mut replaced = false;
+        self.edit(|document| match document.replace_selected_layout(html) {
+            Some(selection) => {
+                replaced = true;
+                selection
+            }
+            None => document.selection(),
+        });
+        if !replaced {
+            host.ui()
+                .set_notice(UiMessage::plain("Nothing in that HTML shows."), true);
+        }
+    }
+
+    /// Pastes `html` over the selection now, unless it holds no text, or images that would take
+    /// the message's images and attachments past what a message carries. Returns whether it
+    /// went in.
+    fn paste_html_now(&self, host: &HostRef, html: &str, layout: PastedLayout) -> bool {
         {
             let files = self
                 .files
@@ -2685,7 +2872,7 @@ impl ComposeSession {
                 files.saturating_add(self.photos.image_bytes(document))
             };
             let before = carried(&document);
-            let Some(mut selection) = document.paste_html(html) else {
+            let Some(mut selection) = document.paste_html(html, layout) else {
                 return false;
             };
             if carried(&document) > before.max(MAX_COMPOSE_ATTACHMENT_BYTES) {

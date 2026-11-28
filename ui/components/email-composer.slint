@@ -3,11 +3,12 @@ import { SenderPicker } from "sender-picker.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LinkEditor, TranslateEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LayoutBar, LayoutHtmlEditor, LinkEditor, TranslateEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton } from "controls.slint";
+import { LayoutMetrics } from "../design-system.slint";
 
 
 // cosmic-text owns visible layout, selection, hit-testing, and caret geometry.
@@ -67,11 +68,11 @@ export component EmailComposer inherits Rectangle {
     in property <float> editor-caret-x: 0;
     in property <float> editor-caret-y: 0;
     in property <float> editor-caret-height: 18;
-    in property <bool> editor-image-shown: false;
-    in property <float> editor-image-x: 0;
-    in property <float> editor-image-y: 0;
-    in property <float> editor-image-width: 0;
-    in property <float> editor-image-height: 0;
+    in property <bool> editor-object-shown: false;
+    in property <float> editor-object-x: 0;
+    in property <float> editor-object-y: 0;
+    in property <float> editor-object-width: 0;
+    in property <float> editor-object-height: 0;
     in property <bool> bold-active: false;
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
@@ -87,6 +88,8 @@ export component EmailComposer inherits Rectangle {
     in property <string> active-image-alt: "";
     in property <int> active-image-width: 0;
     in property <int> active-image-shown-width: 0;
+    // Whether the selection is one layout block, kept in the layout it was pasted with.
+    in property <bool> active-layout: false;
     in property <bool> can-pop-out: false;
     // When the message reminds the user unless someone replies, as shown,
     // or empty.
@@ -157,6 +160,8 @@ export component EmailComposer inherits Rectangle {
     callback plain-text-chosen(bool);
     callback format-requested(string, string, int, int);
     callback paste-requested(string, int, int) -> bool;
+    // The selected layout block's HTML, to edit by hand.
+    callback layout-html-requested() -> string;
     callback copy-requested(bool, string, int, int) -> bool;
     callback link-requested(string, string, int, int);
     // Translating the message (#240): a service is set up, the languages to
@@ -213,6 +218,10 @@ export component EmailComposer inherits Rectangle {
     private property <int> link-selection-start: 0;
     private property <int> link-selection-end: 0;
     private property <bool> image-alt-open: false;
+    private property <bool> layout-html-open: false;
+    private property <string> layout-html: "";
+    private property <int> layout-selection-start: 0;
+    private property <int> layout-selection-end: 0;
     private property <string> image-alt: "";
     private property <int> image-selection-start: 0;
     private property <int> image-selection-end: 0;
@@ -288,7 +297,8 @@ export component EmailComposer inherits Rectangle {
         let anchor = body-input.has-focus ? body-input.anchor-position-byte-offset : root.selection-start;
         let cursor = body-input.has-focus ? body-input.cursor-position-byte-offset : root.selection-end;
         if (kind == "link") {
-            if (anchor == cursor) {
+            // A layout block keeps the links it was written with.
+            if (anchor == cursor || root.active-layout) {
                 return;
             }
             root.link-selection-start = anchor;
@@ -303,6 +313,13 @@ export component EmailComposer inherits Rectangle {
     }
 
     // Asks for the selected image's alt text.
+    function edit-layout-html() {
+        root.layout-selection-start = root.selection-start;
+        root.layout-selection-end = root.selection-end;
+        root.layout-html = root.layout-html-requested();
+        root.layout-html-open = true;
+    }
+
     function edit-image-alt() {
         root.image-selection-start = root.selection-start;
         root.image-selection-end = root.selection-end;
@@ -564,7 +581,7 @@ export component EmailComposer inherits Rectangle {
             active-family: root.active-family;
             active-align: root.active-align;
             link-active: root.active-link-url != "";
-            can-link: root.selection-start != root.selection-end;
+            can-link: root.selection-start != root.selection-end && !root.active-layout;
             apply-format(kind) => { root.apply-format(kind); }
             insert-image => { root.insert-images(); }
             open-templates => { root.templates-open = true; }
@@ -1053,14 +1070,14 @@ export component EmailComposer inherits Rectangle {
 
                 // Corner handles where a pointer drags them. Phones scroll the message by
                 // dragging, so there a selected image's size menu sizes it.
-                if root.editor-image-shown && root.active-image-size != "" && !root.sending && !root.compact : ImageResizeFrame {
-                    x: 18px + root.editor-image-x * 1px;
-                    y: 14px + root.editor-image-y * 1px;
-                    image-width: root.editor-image-width * 1px;
-                    image-height: root.editor-image-height * 1px;
+                if root.editor-object-shown && root.active-image-size != "" && !root.sending && !root.compact : ImageResizeFrame {
+                    x: 18px + root.editor-object-x * 1px;
+                    y: 14px + root.editor-object-y * 1px;
+                    image-width: root.editor-object-width * 1px;
+                    image-height: root.editor-object-height * 1px;
                     shown-css-width: root.active-image-shown-width;
                     natural-width: root.active-image-width;
-                    room: root.editor-width - root.editor-image-x * 1px;
+                    room: root.editor-width - root.editor-object-x * 1px;
                     accent-color: root.accent-color;
                     handle-color: root.background-color;
                     resized(width) => { root.apply-format("image-width:" + width); }
@@ -1068,15 +1085,15 @@ export component EmailComposer inherits Rectangle {
 
                 // Over a selected image's lower left corner, or under an image too small to
                 // hold it, and moved up to stay in view.
-                if root.editor-image-shown && root.active-image-size != "" && !root.sending : ImageBar {
-                    private property <bool> inside: root.editor-image-width * 1px >= self.width + 16px
-                        && root.editor-image-height * 1px >= self.height + 16px;
-                    x: self.inside ? 18px + root.editor-image-x * 1px + 8px
-                        : max(18px, min(18px + root.editor-image-x * 1px, 18px + root.editor-width - self.width));
+                if root.editor-object-shown && root.active-image-size != "" && !root.sending : ImageBar {
+                    private property <bool> inside: root.editor-object-width * 1px >= self.width + 16px
+                        && root.editor-object-height * 1px >= self.height + 16px;
+                    x: self.inside ? 18px + root.editor-object-x * 1px + 8px
+                        : max(18px, min(18px + root.editor-object-x * 1px, 18px + root.editor-width - self.width));
                     y: max(
-                        14px + root.editor-image-y * 1px + (self.inside ? 8px : 0px),
+                        14px + root.editor-object-y * 1px + (self.inside ? 8px : 0px),
                         min(
-                            14px + (root.editor-image-y + root.editor-image-height) * 1px
+                            14px + (root.editor-object-y + root.editor-object-height) * 1px
                                 + (self.inside ? -self.height - 8px : 6px),
                             body-scroll.visible-height - body-scroll.content-y - self.height - 8px,
                             body-scroll.content-height - self.height - 4px,
@@ -1091,6 +1108,36 @@ export component EmailComposer inherits Rectangle {
                     subtle-border-color: root.subtle-border-color;
                     apply-format(kind) => { root.apply-format(kind); }
                     edit-alt => { root.edit-image-alt(); }
+                }
+
+                // A selected layout block's outline, and its controls under its lower left corner,
+                // moved up to stay in view.
+                if root.editor-object-shown && root.active-layout && !root.sending : Rectangle {
+                    x: 18px + root.editor-object-x * 1px - 2px;
+                    y: 14px + root.editor-object-y * 1px - 2px;
+                    width: root.editor-object-width * 1px + 4px;
+                    height: root.editor-object-height * 1px + 4px;
+                    border-radius: LayoutMetrics.small-radius;
+                    border-width: 2px;
+                    border-color: root.accent-color;
+                }
+                if root.editor-object-shown && root.active-layout && !root.sending : LayoutBar {
+                    x: 18px + root.editor-object-x * 1px;
+                    y: max(
+                        14px + root.editor-object-y * 1px,
+                        min(
+                            14px + (root.editor-object-y + root.editor-object-height) * 1px + 6px,
+                            body-scroll.visible-height - body-scroll.content-y - self.height - 8px,
+                            body-scroll.content-height - self.height - 4px,
+                        ),
+                    );
+                    body-color: root.body-color;
+                    control-hover-color: root.control-hover-color;
+                    raised-color: root.raised-color;
+                    secondary-color: root.secondary-color;
+                    subtle-border-color: root.subtle-border-color;
+                    apply-format(kind) => { root.apply-format(kind); }
+                    edit-html => { root.edit-layout-html(); }
                 }
             }
         }
@@ -1275,6 +1322,34 @@ export component EmailComposer inherits Rectangle {
                 horizontal-alignment: center;
                 wrap: word-wrap;
             }
+        }
+    }
+
+    LayoutHtmlEditor {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        compact: root.compact;
+        open: root.layout-html-open;
+        html <=> root.layout-html;
+        background-color: root.background-color;
+        body-color: root.body-color;
+        frame-border-color: root.frame-border-color;
+        muted-color: root.muted-color;
+        title-color: root.title-color;
+        cancel => {
+            root.layout-html-open = false;
+            root.layout-html = "";
+            body-input.set-selection-offsets(root.layout-selection-start, root.layout-selection-end);
+            body-input.focus();
+        }
+        apply(html) => {
+            root.layout-html-open = false;
+            root.format-requested("layout-html:" + html, root.body, root.layout-selection-start, root.layout-selection-end);
+            root.layout-html = "";
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+            body-input.focus();
         }
     }
 

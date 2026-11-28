@@ -5,6 +5,8 @@ use crate::{
     error::{CoreError, Result},
     models::{Signature, SignatureDefaults},
 };
+use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer};
+use std::{cell::RefCell, collections::HashSet};
 
 /// A signature's HTML, pictures included, can be this large.
 pub const MAX_SIGNATURE_BYTES: usize = 256 * 1024;
@@ -47,15 +49,122 @@ pub fn text_html(text: &str) -> String {
     html
 }
 
-/// The formatting the composer writes, and pictures the signature holds itself: no active
-/// HTML, pictures from the web or other remote requests in signature settings.
-pub(crate) fn sanitize_html(html: &str) -> String {
+/// The class of a block that keeps the layout it came with, such as a signature's table with a
+/// logo beside its text, which the composer shows as it is rather than as text to edit.
+pub const LAYOUT_CLASS: &str = "flectar-layout";
+
+/// The CSS properties signatures keep, for their type, colors and the boxes of their layout.
+/// None of them takes a picture or another address, so nothing in a signature's CSS loads
+/// from the web.
+const STYLE_PROPERTIES: &[&str] = &[
+    "color",
+    "background-color",
+    "font",
+    "font-family",
+    "font-size",
+    "font-stretch",
+    "font-style",
+    "font-variant",
+    "font-weight",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+    "text-align",
+    "text-decoration",
+    "text-decoration-color",
+    "text-decoration-line",
+    "text-decoration-style",
+    "text-indent",
+    "text-transform",
+    "white-space",
+    "word-break",
+    "word-wrap",
+    "overflow-wrap",
+    "vertical-align",
+    "direction",
+    "display",
+    "width",
+    "min-width",
+    "max-width",
+    "height",
+    "min-height",
+    "max-height",
+    "box-sizing",
+    "overflow",
+    "float",
+    "clear",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-width",
+    "border-style",
+    "border-color",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-top-style",
+    "border-right-style",
+    "border-bottom-style",
+    "border-left-style",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "border-radius",
+    "border-collapse",
+    "border-spacing",
+    "table-layout",
+    "list-style-type",
+    "list-style-position",
+];
+
+/// The formatting the composer writes, the layout of signatures made elsewhere, such as a table
+/// with a logo beside the text, and pictures the signature holds itself: no active HTML,
+/// pictures from the web or other remote requests in signature settings. The composer cleans
+/// each layout it keeps the same way.
+pub fn sanitize_html(html: &str) -> String {
     static SANITIZER: std::sync::LazyLock<ammonia::Builder<'static>> =
         std::sync::LazyLock::new(|| {
             let mut builder = ammonia::Builder::default();
             builder
-                .add_generic_attributes(["style", "align", "dir"])
+                // Signatures written in older mail apps set their type with `<font>`.
+                .add_tags(["font", "tfoot"])
+                .add_generic_attributes([
+                    "style",
+                    "align",
+                    "dir",
+                    // The attributes signatures lay their tables out with, which mail apps
+                    // render and other mail clients' sanitizers keep.
+                    "valign",
+                    "width",
+                    "height",
+                    "border",
+                    "cellpadding",
+                    "cellspacing",
+                    "bgcolor",
+                    // Tells screen readers a table only lays the signature out.
+                    "role",
+                ])
+                .add_tag_attributes("font", ["color", "face", "size"])
+                .add_tag_attributes("hr", ["color", "noshade"])
+                .add_tag_attributes("td", ["nowrap"])
+                .add_tag_attributes("th", ["nowrap"])
+                .add_allowed_classes("div", [LAYOUT_CLASS])
                 .add_url_schemes(["data"])
+                .filter_style_properties(STYLE_PROPERTIES.iter().copied().collect())
                 .attribute_filter(|element, attribute, value| match (element, attribute) {
                     ("img", "src") => is_embedded_picture(value).then(|| value.into()),
                     (_, "href") if has_data_scheme(value) => None,
@@ -64,7 +173,131 @@ pub(crate) fn sanitize_html(html: &str) -> String {
                 .link_rel(Some("noopener noreferrer"));
             builder
         });
-    without_unsourced_pictures(SANITIZER.clean(html).to_string())
+    with_layout_tables_marked(without_unsourced_pictures(
+        SANITIZER.clean(html).to_string(),
+    ))
+}
+
+/// A tag or a text of HTML ammonia wrote, read back.
+enum Piece {
+    Start {
+        name: String,
+        attributes: Vec<(String, String)>,
+    },
+    End(String),
+    Text(String),
+}
+
+struct Pieces(RefCell<Vec<Piece>>);
+
+impl TokenSink for Pieces {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+        let piece = match token {
+            Token::TagToken(tag) if tag.kind == TagKind::EndTag => Piece::End(tag.name.to_string()),
+            Token::TagToken(tag) => Piece::Start {
+                name: tag.name.to_string(),
+                attributes: tag
+                    .attrs
+                    .iter()
+                    .map(|attribute| {
+                        (
+                            attribute.name.local.to_string(),
+                            attribute.value.to_string(),
+                        )
+                    })
+                    .collect(),
+            },
+            Token::CharacterTokens(text) => Piece::Text(text.to_string()),
+            _ => return TokenSinkResult::Continue,
+        };
+        self.0.borrow_mut().push(piece);
+        TokenSinkResult::Continue
+    }
+}
+
+/// `html`, as ammonia writes it, with each table that only lays the signature out marked so for
+/// screen readers, as the W3C and the Email Markup Consortium advise for mail: one without a
+/// role, header cells, a caption or a summary of its own. Everything else is written as it was.
+fn with_layout_tables_marked(html: String) -> String {
+    if !html.contains("<table") {
+        return html;
+    }
+    let tokenizer = Tokenizer::new(Pieces(RefCell::default()), Default::default());
+    let input = BufferQueue::default();
+    input.push_back(html.as_str().into());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    let pieces = tokenizer.sink.0.into_inner();
+    // The start tags of the layout tables, by their place among the pieces. A header cell or a
+    // caption belongs to the innermost table open.
+    let mut layout = HashSet::new();
+    let mut open: Vec<(usize, bool)> = Vec::new();
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece {
+            Piece::Start { name, attributes } if name == "table" => {
+                let described = attributes.iter().any(|(attribute, value)| {
+                    attribute == "role" || (attribute == "summary" && !value.trim().is_empty())
+                });
+                open.push((index, !described));
+            }
+            Piece::Start { name, .. } if name == "th" || name == "caption" => {
+                if let Some(table) = open.last_mut() {
+                    table.1 = false;
+                }
+            }
+            Piece::End(name) if name == "table" => {
+                if let Some((index, true)) = open.pop() {
+                    layout.insert(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    if layout.is_empty() {
+        return html;
+    }
+    // Written back the way ammonia's serializer escapes, so only the roles change.
+    let escape = |output: &mut String, text: &str, attribute: bool| {
+        for character in text.chars() {
+            match character {
+                '&' => output.push_str("&amp;"),
+                '\u{a0}' => output.push_str("&nbsp;"),
+                '"' if attribute => output.push_str("&quot;"),
+                '<' if !attribute => output.push_str("&lt;"),
+                '>' if !attribute => output.push_str("&gt;"),
+                character => output.push(character),
+            }
+        }
+    };
+    let mut marked = String::with_capacity(html.len() + layout.len() * 20);
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece {
+            Piece::Start { name, attributes } => {
+                marked.push('<');
+                marked.push_str(name);
+                for (attribute, value) in attributes {
+                    marked.push(' ');
+                    marked.push_str(attribute);
+                    marked.push_str("=\"");
+                    escape(&mut marked, value, true);
+                    marked.push('"');
+                }
+                if layout.contains(&index) {
+                    marked.push_str(" role=\"presentation\"");
+                }
+                marked.push('>');
+            }
+            Piece::End(name) => {
+                marked.push_str("</");
+                marked.push_str(name);
+                marked.push('>');
+            }
+            Piece::Text(text) => escape(&mut marked, text, false),
+        }
+    }
+    marked
 }
 
 /// `html` as ammonia writes it, without the pictures whose address it took out: some mail apps
@@ -358,5 +591,90 @@ mod tests {
                 "<p>a &lt;img&gt; bc<img alt=\"Logo &quot;Zoë&quot; &gt;\" src=\"{logo}\">d</p>"
             )
         );
+    }
+
+    #[test]
+    fn signatures_made_elsewhere_keep_their_table_layout() {
+        let logo = "data:image/png;base64,iVBORw0KGgo=";
+        let html = format!(
+            "<div class=\"{LAYOUT_CLASS} brand\"><table role=\"presentation\" cellpadding=\"0\" \
+             cellspacing=\"0\" border=\"0\" width=\"480\" style=\"border-collapse:collapse\">\
+             <tbody><tr><td valign=\"top\" width=\"96\" bgcolor=\"#ffffff\" nowrap \
+             style=\"padding:0 12px 0 0;border-right:2px solid #0a66c2\"><img src=\"{logo}\" \
+             width=\"80\" height=\"80\" border=\"0\" alt=\"Logo\" style=\"display:block\"></td>\
+             <td valign=\"top\"><font face=\"Arial\" color=\"#1f2328\" size=\"2\"><b>Zoë</b>\
+             </font><hr color=\"#d0d7de\" size=\"1\" noshade style=\"border:0;border-top:1px \
+             solid #d0d7de\"><a href=\"https://example.org\">example.org</a></td></tr></tbody>\
+             </table></div>"
+        );
+        let clean = sanitize_html(&html);
+        for kept in [
+            "<div class=\"flectar-layout\">",
+            "role=\"presentation\"",
+            "cellpadding=\"0\"",
+            "cellspacing=\"0\"",
+            "border=\"0\"",
+            "width=\"480\"",
+            "style=\"border-collapse:collapse\"",
+            "valign=\"top\"",
+            "width=\"96\"",
+            "bgcolor=\"#ffffff\"",
+            "nowrap",
+            "style=\"padding:0 12px 0 0;border-right:2px solid #0a66c2\"",
+            "src=\"data:image/png;base64,iVBORw0KGgo=\"",
+            "style=\"display:block\"",
+            "<font face=\"Arial\" color=\"#1f2328\" size=\"2\">",
+            "<hr color=\"#d0d7de\" size=\"1\" noshade=\"\" style=\"border:0;border-top:1px solid #d0d7de\">",
+            "href=\"https://example.org\"",
+        ] {
+            assert!(clean.contains(kept), "{kept} in {clean}");
+        }
+        // Classes of its own, which nothing styles here, go.
+        assert!(!clean.contains("brand"), "{clean}");
+    }
+
+    #[test]
+    fn layout_tables_are_marked_for_screen_readers() {
+        let clean = sanitize_html(
+            "<p>Fish &amp; chips\u{a0}&lt;3 \"x\"</p><table cellpadding=\"0\"><tr><td><table><tr>\
+             <td title=\"A &amp; B\">nested</td></tr></table></td></tr></table>\
+             <table><tr><th>Day</th></tr></table>\
+             <table><caption>Hours</caption><tr><td>9</td></tr></table>\
+             <table summary=\"Opening hours\"><tr><td>9</td></tr></table>\
+             <table role=\"grid\"><tr><td>9</td></tr></table>",
+        );
+        assert_eq!(
+            clean,
+            "<p>Fish &amp; chips&nbsp;&lt;3 \"x\"</p><table cellpadding=\"0\" role=\"presentation\">\
+             <tbody><tr><td><table role=\"presentation\"><tbody><tr><td title=\"A &amp; B\">nested\
+             </td></tr></tbody></table></td></tr></tbody></table>\
+             <table><tbody><tr><th>Day</th></tr></tbody></table>\
+             <table><caption>Hours</caption><tbody><tr><td>9</td></tr></tbody></table>\
+             <table summary=\"Opening hours\"><tbody><tr><td>9</td></tr></tbody></table>\
+             <table role=\"grid\"><tbody><tr><td>9</td></tr></tbody></table>"
+        );
+        // Cleaning it again changes nothing.
+        assert_eq!(sanitize_html(&clean), clean);
+    }
+
+    #[test]
+    fn signature_css_loads_nothing_from_the_web() {
+        let clean = sanitize_html(
+            "<span style=\"color:#333;background-image:url(https://tracker.example/a.png);\
+             padding:4px\">a</span><div style=\"background:url('https://tracker.example/b.png') \
+             #fff;list-style-image:url(https://tracker.example/c.png);border-image:\
+             url(https://tracker.example/d.png) 30;content:url(https://tracker.example/e.png);\
+             cursor:url(https://tracker.example/f.cur),auto;text-align:center\">b</div>",
+        );
+        assert!(!clean.contains("tracker.example"), "{clean}");
+        assert!(clean.contains("style=\"text-align:center\""), "{clean}");
+        // The text and the rest of its formatting stay.
+        let clean = sanitize_html(
+            "<span style=\"background-image:url(https://tracker.example/a.png);color:#333;\
+             font-family:Times New Roman, Times, serif\">c</span>",
+        );
+        assert!(!clean.contains("tracker.example"), "{clean}");
+        assert!(clean.contains("color:#333"), "{clean}");
+        assert!(clean.contains("font-family:Times New Roman"), "{clean}");
     }
 }

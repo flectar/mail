@@ -466,12 +466,12 @@ pub(super) fn apply_rendered_compose_editor(ui: &ComposerUi<'_>, rendered: Rende
     ui.set_editor_caret_x(rendered.caret_x);
     ui.set_editor_caret_y(rendered.caret_y);
     ui.set_editor_caret_height(rendered.caret_height);
-    let [x, y, width, height] = rendered.image_box.unwrap_or_default();
-    ui.set_editor_image_shown(rendered.image_box.is_some());
-    ui.set_editor_image_x(x);
-    ui.set_editor_image_y(y);
-    ui.set_editor_image_width(width);
-    ui.set_editor_image_height(height);
+    let [x, y, width, height] = rendered.object_box.unwrap_or_default();
+    ui.set_editor_object_shown(rendered.object_box.is_some());
+    ui.set_editor_object_x(x);
+    ui.set_editor_object_y(y);
+    ui.set_editor_object_width(width);
+    ui.set_editor_object_height(height);
     if let Some(started) = started {
         eprintln!(
             "compose Slint model update: {:.2}ms tiles={tile_count} replaced_model={replaced_model}",
@@ -495,6 +495,7 @@ pub(super) fn compose_editor_style(ui: &ComposerUi<'_>) -> ComposeEditorStyle {
         misspelling: ui.get_editor_misspelling_color(),
         // Plain text is written in the font it's read in (#544).
         fixed_width: ui.get_plain_text() && crate::plain_text_view::look().fixed_width,
+        layout_colors: crate::composer::message_colors(),
     }
 }
 
@@ -531,6 +532,7 @@ pub(super) fn apply_rich_compose_state(
     ui.set_active_image_shown_width(
         image.map_or(0, |image| image.shown_size().0.min(i32::MAX as u32) as i32),
     );
+    ui.set_active_layout(document.selected_layout().is_some());
 }
 
 /// A color the selection shares as the toolbar shows it: `#rrggbb`, `none` when it has none,

@@ -587,6 +587,21 @@ into a message under a `-- ` line, its pictures as parts of the message, and
 its plain text takes the message's own font and size. It holds pictures of
 its own, never ones from the web, and up to 256 KB in all.
 
+A signature pasted with a layout of its own, such as a table with the logo
+beside the name and details, keeps that layout, as does one imported from
+another mail app. The composer shows the layout as it goes out and keeps it
+in one piece, and the plain-text part of a message gets its text. Selecting
+it offers **Edit HTML**, which changes what it says and keeps the layout, and
+**Edit as text**, which turns it into text to edit and leaves the layout
+behind. Its tables are marked for screen readers as tables that only lay the
+signature out.
+
+Pictures that a pasted or imported signature links from the web, as signature
+generators link logos, are downloaded once and kept in it, at most twice as
+wide as they show. Nothing is loaded from the web when the signature is shown
+or sent, and CSS that would load something from the web, such as a background
+picture, is left out.
+
 S/MIME and mobile OpenPGP are not currently supported.
 
 ## Automatic replies

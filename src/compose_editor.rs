@@ -1,6 +1,9 @@
+use crate::message_appearance::EmailAppearance;
+use crate::renderer::LayoutPicture;
 use crate::rich_compose::{
-    Alignment, BOLD, CODE, CharacterStyle, ComposeSelection, Followed, FontFamily,
-    IMAGE_PLACEHOLDER, ITALIC, InlineImage, Rgb, RichComposeDocument, STRIKE, TextSize, UNDERLINE,
+    Alignment, BOLD, CODE, CharacterStyle, ComposeSelection, Embed, Followed, FontFamily, ITALIC,
+    InlineImage, LayoutBlock, OBJECT_PLACEHOLDER, Rgb, RichComposeDocument, STRIKE, TextSize,
+    UNDERLINE,
 };
 use cosmic_text::{
     Action, Align, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor,
@@ -34,11 +37,11 @@ const MULTI_CLICK_DISTANCE: f32 = 5.0;
 // with a zero-width, transparent character. This is renderer-only and never
 // enters the editable document or its byte-offset mapping.
 const TRAILING_LINE_SENTINEL: &str = "\u{200b}";
-/// What an image's place holds in the layout: a zero-width space as wide and tall as the image,
-/// which then wraps, lines up and takes the caret as text does. It's as long as the image
-/// placeholder, so places in the text stay the same.
-const IMAGE_SPACE: &str = "\u{200b}";
-const _: () = assert!(IMAGE_SPACE.len() == IMAGE_PLACEHOLDER.len_utf8());
+/// What an object's place holds in the layout: a zero-width space as wide and tall as the image
+/// or layout block, which then wraps, lines up and takes the caret as text does. It's as long as
+/// the object placeholder, so places in the text stay the same.
+const OBJECT_SPACE: &str = "\u{200b}";
+const _: () = assert!(OBJECT_SPACE.len() == OBJECT_PLACEHOLDER.len_utf8());
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ComposeEditorStyle {
@@ -51,6 +54,8 @@ pub struct ComposeEditorStyle {
     /// All text in the fixed-width font, as plain text shows when that's
     /// chosen in Settings (#544), whatever font its formatting names.
     pub fixed_width: bool,
+    /// The colors layout blocks show in, as messages do (#549).
+    pub(crate) layout_colors: EmailAppearance,
 }
 
 #[derive(Clone)]
@@ -66,12 +71,12 @@ pub struct RenderedComposeEditor {
     pub caret_x: f32,
     pub caret_y: f32,
     pub caret_height: f32,
-    /// Where the selected image shows, when the selection is one image: its left, top,
-    /// width and height.
-    pub image_box: Option<[f32; 4]>,
+    /// Where the selected image or layout block shows, when the selection is one of those: its
+    /// left, top, width and height.
+    pub object_box: Option<[f32; 4]>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct LayoutKey {
     revision: u64,
     physical_width: u32,
@@ -81,6 +86,7 @@ struct LayoutKey {
     /// How an empty last line lines up, which follows the caret.
     last_line_align: Alignment,
     fixed_width: bool,
+    layout_colors: EmailAppearance,
 }
 
 /// Retained cosmic-text layout and raster cache for the composer body.
@@ -113,11 +119,21 @@ pub struct CosmicComposeEditor {
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     click_count: u8,
-    /// The images the layout shows, by the slot their space's metadata names.
-    layout_images: Vec<Arc<InlineImage>>,
+    /// The images and layout blocks the layout shows, by the slot their space's metadata names.
+    layout_objects: Vec<LaidOutObject>,
     /// Images decoded at the size they're shown, premultiplied RGBA, by image and size: only
     /// the size each shows at now.
     image_pixels: HashMap<(u64, u32, u32), Arc<[u8]>>,
+    /// Layout blocks painted at the width the text lays out in, by block, width, scale and
+    /// alignment, in `layout_picture_colors`: only those the layout shows.
+    layout_pictures: HashMap<(u64, u32, u32, Alignment), Arc<LayoutPicture>>,
+    layout_picture_colors: Option<EmailAppearance>,
+}
+
+/// What an object's space in the layout shows.
+enum LaidOutObject {
+    Image(Arc<InlineImage>),
+    Layout(Arc<LayoutPicture>),
 }
 
 /// Construct the font database only when a composer action needs its surface.
@@ -200,8 +216,10 @@ impl Default for CosmicComposeEditor {
             pointer_down: false,
             last_pointer_down: None,
             click_count: 0,
-            layout_images: Vec::new(),
+            layout_objects: Vec::new(),
             image_pixels: HashMap::new(),
+            layout_pictures: HashMap::new(),
+            layout_picture_colors: None,
         }
     }
 }
@@ -222,6 +240,9 @@ impl CosmicComposeEditor {
         self.pointer_down = false;
         self.last_pointer_down = None;
         self.click_count = 0;
+        // Layout blocks' pictures are as large as the window is wide.
+        self.layout_objects.clear();
+        self.layout_pictures.clear();
     }
 
     /// Underline `ranges`, the misspelled words of the document as it was at `revision`.
@@ -451,16 +472,17 @@ impl CosmicComposeEditor {
             );
         }
 
-        let image_box = document
-            .selected_image()
-            .and_then(|_| self.image_box(selection, scale_factor));
+        let object_box = (document.selected_image().is_some()
+            || document.selected_layout().is_some())
+        .then(|| self.object_box(selection, scale_factor))
+        .flatten();
         let rendered = RenderedComposeEditor {
             tiles: self.tiles.values().cloned().collect(),
             content_height: self.content_height_physical / scale_factor,
             caret_x,
             caret_y,
             caret_height,
-            image_box,
+            object_box,
         };
         if let Some(timing_start) = timing_start {
             let tile_bytes = self
@@ -654,9 +676,13 @@ impl CosmicComposeEditor {
         let last_line_align = if valid_offset(text, selection.end) == text.len() {
             document.typing_style().align
         } else {
-            text.len()
-                .checked_sub(1)
-                .map_or_else(Alignment::default, |end| document.paragraph_alignment(end))
+            // That of the last character, which can take several bytes: an accented letter, an
+            // emoji or a picture.
+            text.char_indices()
+                .next_back()
+                .map_or_else(Alignment::default, |(last, _)| {
+                    document.paragraph_alignment(last)
+                })
         };
         let key = LayoutKey {
             revision: document.revision(),
@@ -666,6 +692,7 @@ impl CosmicComposeEditor {
             link_color: style.link.as_argb_encoded(),
             last_line_align,
             fixed_width: style.fixed_width,
+            layout_colors: style.layout_colors,
         };
         let preedit_offset = valid_offset(text, selection.end);
         if self.layout_key == Some(key)
@@ -692,15 +719,36 @@ impl CosmicComposeEditor {
             width: physical_width as f32,
             fixed_width: style.fixed_width,
         };
-        let mut images = Vec::new();
+        if self.layout_picture_colors != Some(style.layout_colors) {
+            self.layout_pictures.clear();
+            self.layout_picture_colors = Some(style.layout_colors);
+        }
+        let mut objects = Vec::new();
+        let mut shown = Vec::new();
+        let pictures = &mut self.layout_pictures;
+        let mut picture = |block: &LayoutBlock, align: Alignment| {
+            let key = (block.id, physical_width, scale_factor.to_bits(), align);
+            shown.push(key);
+            Arc::clone(pictures.entry(key).or_insert_with(|| {
+                layout_picture(
+                    block,
+                    align,
+                    logical_width,
+                    scale_factor,
+                    style.layout_colors,
+                )
+            }))
+        };
         let mut spans = rich_spans(
             document,
             preedit_offset,
             preedit_text,
             &default_attrs,
             look,
-            &mut images,
+            &mut objects,
+            &mut picture,
         );
+        self.layout_pictures.retain(|key, _| shown.contains(key));
         self.visual_text.clear();
         self.visual_text
             .push_str(&document.text()[..preedit_offset]);
@@ -761,9 +809,12 @@ impl CosmicComposeEditor {
                 .fold(metrics.line_height, f32::max)
         });
         self.layout_key = Some(key);
-        self.image_pixels
-            .retain(|(id, _, _), _| images.iter().any(|image| image.id == *id));
-        self.layout_images = images;
+        self.image_pixels.retain(|(id, _, _), _| {
+            objects
+                .iter()
+                .any(|object| matches!(object, LaidOutObject::Image(image) if image.id == *id))
+        });
+        self.layout_objects = objects;
         self.layout_preedit_text.clear();
         self.layout_preedit_text.push_str(preedit_text);
         self.layout_preedit_offset = preedit_offset;
@@ -1039,7 +1090,7 @@ impl CosmicComposeEditor {
                         continue;
                     }
                     for glyph in run.glyphs.iter() {
-                        if glyph.metadata & IMAGE != 0 {
+                        if glyph.metadata & OBJECT != 0 {
                             images.push((
                                 glyph.metadata & 0xff_ff_ff,
                                 glyph.x,
@@ -1063,8 +1114,20 @@ impl CosmicComposeEditor {
                 }
             });
             for (slot, x, width, bottom) in images {
-                let Some(image) = self.layout_images.get(slot) else {
-                    continue;
+                let image = match self.layout_objects.get(slot) {
+                    Some(LaidOutObject::Image(image)) => image,
+                    // A layout block fills its line, from the line's start.
+                    Some(LaidOutObject::Layout(picture)) => {
+                        canvas.image(
+                            x.round() as i32,
+                            (bottom - picture.height as f32).round() as i32,
+                            picture.width,
+                            picture.height,
+                            &picture.pixels,
+                        );
+                        continue;
+                    }
+                    None => continue,
                 };
                 // Bottom up on its line, as images sit on the text's line in a message.
                 let width = width.round().max(1.0) as u32;
@@ -1118,9 +1181,9 @@ impl CosmicComposeEditor {
         Image::from_rgba8_premultiplied(pixels)
     }
 
-    /// Where the image that starts the selection shows, in logical pixels, as the tiles paint
-    /// it: on the bottom of its line.
-    fn image_box(&self, selection: ComposeSelection, scale_factor: f32) -> Option<[f32; 4]> {
+    /// Where the image or layout block that starts the selection shows, in logical pixels, as
+    /// the tiles paint it: on the bottom of its line.
+    fn object_box(&self, selection: ComposeSelection, scale_factor: f32) -> Option<[f32; 4]> {
         if !self.layout_preedit_text.is_empty() {
             return None;
         }
@@ -1130,15 +1193,23 @@ impl CosmicComposeEditor {
                 .layout_runs()
                 .filter(|run| run.line_i == cursor.line)
                 .find_map(|run| {
-                    let glyph = run
-                        .glyphs
-                        .iter()
-                        .find(|glyph| glyph.metadata & IMAGE != 0 && glyph.start == cursor.index)?;
-                    let image = self.layout_images.get(glyph.metadata & 0xff_ff_ff)?;
-                    let width = glyph.w.round().max(1.0);
-                    let height = (width * image.height as f32 / image.width.max(1) as f32)
-                        .round()
-                        .max(1.0);
+                    let glyph = run.glyphs.iter().find(|glyph| {
+                        glyph.metadata & OBJECT != 0 && glyph.start == cursor.index
+                    })?;
+                    let (width, height) =
+                        match self.layout_objects.get(glyph.metadata & 0xff_ff_ff)? {
+                            LaidOutObject::Image(image) => {
+                                let width = glyph.w.round().max(1.0);
+                                let height = (width * image.height as f32
+                                    / image.width.max(1) as f32)
+                                    .round()
+                                    .max(1.0);
+                                (width, height)
+                            }
+                            LaidOutObject::Layout(picture) => {
+                                (picture.width as f32, picture.height as f32)
+                            }
+                        };
                     let top = (run.line_top + run.line_height - height).round();
                     Some([
                         glyph.x.round() / scale_factor,
@@ -1161,7 +1232,7 @@ impl CosmicComposeEditor {
                     run.glyphs
                         .iter()
                         .find(|glyph| {
-                            glyph.metadata & IMAGE != 0 && x >= glyph.x && x < glyph.x + glyph.w
+                            glyph.metadata & OBJECT != 0 && x >= glyph.x && x < glyph.x + glyph.w
                         })
                         .map(|glyph| (run.line_i, glyph.start..glyph.end))
                 })
@@ -1235,7 +1306,8 @@ fn rich_spans<'a>(
     preedit_text: &'a str,
     default_attrs: &Attrs<'static>,
     look: TextLook,
-    images: &mut Vec<Arc<InlineImage>>,
+    objects: &mut Vec<LaidOutObject>,
+    picture: &mut dyn FnMut(&LayoutBlock, Alignment) -> Arc<LayoutPicture>,
 ) -> Vec<(&'a str, Attrs<'static>)> {
     let runs = document.style_runs();
     let mut spans = Vec::with_capacity(runs.len().saturating_add(2).max(1));
@@ -1244,17 +1316,27 @@ fn rich_spans<'a>(
         .underline(UnderlineStyle::Single);
 
     for run in runs {
-        if let Some(image) = &run.style.image {
-            // Each placeholder becomes the image's space. The IME composes between them.
-            let slot = images.len();
-            images.push(image.clone());
-            let attrs = image_attrs(default_attrs, image, look, slot);
+        if let Some(embed) = &run.style.embed {
+            // Each placeholder becomes the object's space. The IME composes between them.
+            let slot = objects.len();
+            let attrs = match embed {
+                Embed::Image(image) => {
+                    objects.push(LaidOutObject::Image(image.clone()));
+                    image_attrs(default_attrs, image, look, slot)
+                }
+                Embed::Layout(block) => {
+                    let picture = picture(block.as_ref(), run.style.align);
+                    let attrs = layout_attrs(default_attrs, &picture, look, slot);
+                    objects.push(LaidOutObject::Layout(picture));
+                    attrs
+                }
+            };
             for (offset, _) in document.text()[run.range.clone()].char_indices() {
                 if !inserted_preedit && preedit_offset <= run.range.start + offset {
                     push_span(&mut spans, preedit_text, preedit_attrs.clone());
                     inserted_preedit = true;
                 }
-                push_span(&mut spans, IMAGE_SPACE, attrs.clone());
+                push_span(&mut spans, OBJECT_SPACE, attrs.clone());
             }
             continue;
         }
@@ -1398,9 +1480,9 @@ struct TextLook {
 
 /// Marks a glyph's metadata as highlighted, with the highlight's color in its low bits.
 const HIGHLIGHTED: usize = 1 << 24;
-/// Marks a glyph's metadata as an image's space, with its slot in the layout's images in its low
-/// bits.
-const IMAGE: usize = 1 << 25;
+/// Marks a glyph's metadata as an object's space, with its slot in the layout's objects in its
+/// low bits.
+const OBJECT: usize = 1 << 25;
 
 /// An image's size in the layout, in physical pixels: as shown in the message, and no wider
 /// than the text.
@@ -1430,7 +1512,54 @@ fn image_attrs(
         .color(CosmicColor::rgba(0, 0, 0, 0))
         .letter_spacing(width / look.metrics.font_size)
         .metrics(Metrics::new(look.metrics.font_size, height))
-        .metadata(IMAGE | slot)
+        .metadata(OBJECT | slot)
+}
+
+/// The attributes of a layout block's space: transparent, as wide as the text, as the block
+/// goes out on lines of its own whatever is written beside it, and with a line as tall as its
+/// picture.
+fn layout_attrs(
+    default_attrs: &Attrs<'static>,
+    picture: &LayoutPicture,
+    look: TextLook,
+    slot: usize,
+) -> Attrs<'static> {
+    let width = look.width.floor().max(1.0);
+    default_attrs
+        .clone()
+        .color(CosmicColor::rgba(0, 0, 0, 0))
+        .letter_spacing(width / look.metrics.font_size)
+        .metrics(Metrics::new(
+            look.metrics.font_size,
+            (picture.height as f32).max(1.0),
+        ))
+        .metadata(OBJECT | slot)
+}
+
+/// `block` painted `width` logical pixels wide at `scale`, lined up as `align` says, in
+/// `colors`. One that can't be painted shows as a gray box, as an image that can't be decoded
+/// does.
+fn layout_picture(
+    block: &LayoutBlock,
+    align: Alignment,
+    width: f32,
+    scale: f32,
+    colors: EmailAppearance,
+) -> Arc<LayoutPicture> {
+    let painted =
+        crate::renderer::paint_layout_block(&block.html, align.name(), width, scale, colors);
+    Arc::new(painted.unwrap_or_else(|error| {
+        tracing::warn!(%error, "layout block shown as a box");
+        let width = (width * scale).ceil().max(1.0) as u32;
+        let height = (LINE_HEIGHT_LOGICAL * 2.0 * scale).ceil() as u32;
+        LayoutPicture {
+            width,
+            height,
+            pixels: [0x60, 0x60, 0x60, 0x60]
+                .repeat(width as usize * height as usize)
+                .into(),
+        }
+    }))
 }
 
 fn character_attrs(
@@ -1993,6 +2122,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut surface = CosmicComposeEditor::default();
@@ -2085,6 +2215,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(255, 0, 0),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         for scale in [1.0, 2.0] {
             let render = |surface: &mut CosmicComposeEditor| {
@@ -2154,6 +2285,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         let mut document = RichComposeDocument::default();
         document.synchronize("abc def\nsecond line", 0, 0);
@@ -2203,6 +2335,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2340,6 +2473,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2409,6 +2543,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         for scale in [1.0, 1.5, 2.0] {
             let mut document = RichComposeDocument::default();
@@ -2464,13 +2599,26 @@ mod tests {
         }
     }
 
+    /// The picture of a layout block, for text that has none.
+    fn no_layout(_: &LayoutBlock, _: Alignment) -> Arc<LayoutPicture> {
+        unreachable!("the text has no layout block")
+    }
+
     #[test]
     fn layout_spans_borrow_long_unicode_text_and_preedit() {
         let mut document = RichComposeDocument::default();
         document.synchronize(&"é".repeat(512 * 1024), 2, 2);
         let preedit = String::from("世界");
         let attrs = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
-        let spans = rich_spans(&document, 2, &preedit, &attrs, test_look(), &mut Vec::new());
+        let spans = rich_spans(
+            &document,
+            2,
+            &preedit,
+            &attrs,
+            test_look(),
+            &mut Vec::new(),
+            &mut no_layout,
+        );
 
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].0, "é");
@@ -2506,6 +2654,7 @@ mod tests {
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
                 fixed_width: false,
+                layout_colors: EmailAppearance::default(),
             },
             "",
         );
@@ -2525,6 +2674,7 @@ mod tests {
             &default_attrs,
             test_look(),
             &mut Vec::new(),
+            &mut no_layout,
         );
         assert_eq!(spans[0].1.text_decoration.underline, UnderlineStyle::Single);
         assert!(spans[0].1.text_decoration.strikethrough);
@@ -2549,6 +2699,7 @@ mod tests {
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
                 fixed_width: false,
+                layout_colors: EmailAppearance::default(),
             },
             "世界",
         );
@@ -2571,6 +2722,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
 
         for text in ["\n", "first\n", "\nsecond", "first\nsecond"] {
@@ -2631,6 +2783,7 @@ mod tests {
                 selected_text: Color::from_rgb_u8(255, 255, 255),
                 misspelling: Color::from_rgb_u8(183, 55, 49),
                 fixed_width: false,
+                layout_colors: EmailAppearance::default(),
             },
             "",
         );
@@ -2734,6 +2887,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(183, 55, 49),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         };
         let quote = (0..40)
             .map(|line| format!("> Row {line}: café العربية 👩‍💻 quoted text that wraps\n"))
@@ -2800,6 +2954,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn text_ending_in_a_wide_character_lays_out_with_the_caret_elsewhere() {
+        let mut ending_in_a_picture = RichComposeDocument::default();
+        ending_in_a_picture.load("Logo\n", 5, 5);
+        ending_in_a_picture.insert_image(InlineImage::from_file_bytes(red_png(8, 8), "").unwrap());
+        let mut documents = ["Café", "Thanks 👋"].map(|text| {
+            let mut document = RichComposeDocument::default();
+            document.load(text, 0, 0);
+            document
+        });
+        for document in documents.iter_mut().chain([&mut ending_in_a_picture]) {
+            document.update_selection(0, 0);
+            let mut surface = CosmicComposeEditor::default();
+            let rendered = surface.render(
+                document,
+                document.selection(),
+                320.0,
+                120.0,
+                0.0,
+                1.0,
+                spelling_style(),
+                "",
+            );
+            assert!(rendered.content_height > 0.0, "{:?}", document.text());
+        }
+    }
+
     fn spelling_style() -> ComposeEditorStyle {
         ComposeEditorStyle {
             text: Color::from_rgb_u8(30, 30, 30),
@@ -2808,6 +2989,7 @@ mod tests {
             selected_text: Color::from_rgb_u8(255, 255, 255),
             misspelling: Color::from_rgb_u8(255, 0, 0),
             fixed_width: false,
+            layout_colors: EmailAppearance::default(),
         }
     }
 
@@ -3262,7 +3444,7 @@ mod tests {
             buffer
                 .layout_runs()
                 .flat_map(|run| run.glyphs.iter())
-                .find(|glyph| glyph.metadata & IMAGE != 0)
+                .find(|glyph| glyph.metadata & OBJECT != 0)
                 .map(|glyph| (glyph.x, glyph.w))
                 .expect("an image in the layout")
         })
