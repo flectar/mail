@@ -62,7 +62,13 @@ export global FilesUi {
     in-out property <string> path: @tr("Email attachments");
     in-out property <string> query;
     in-out property <string> status;
+    // A note about the storage, such as working offline.
     in-out property <string> quota;
+    // How full the storage is, from 0 to 1, or -1 when the server doesn't
+    // say; and its bytes in use and its size, written for the language.
+    in-out property <float> quota-fraction: -1;
+    in-out property <string> quota-used;
+    in-out property <string> quota-total;
     in-out property <int> selected: -1;
     in-out property <string> preview-text;
     in-out property <bool> pdf-supported: true;
@@ -177,7 +183,7 @@ component FilesNavigation inherits Rectangle {
                         }
                     }
                 }
-                // The storage's note and activity, at the foot.
+                // The storage's activity, then how full it is, at the foot.
                 if !FilesUi.attachments : VerticalBox {
                     // Its wrapping note would otherwise let it take half the sidebar.
                     vertical-stretch: 0;
@@ -201,7 +207,32 @@ component FilesNavigation inherits Rectangle {
                         interactive: !FilesUi.busy;
                         clicked(scope) => { root.navigate("transfers", "", ""); }
                     }
-                    if FilesUi.quota != "" : Text {
+                    if FilesUi.quota-fraction >= 0 : VerticalBox {
+                        padding: 0px; padding-top: 10px; padding-bottom: 4px; spacing: 6px;
+                        Rectangle {
+                            height: 6px;
+                            border-radius: self.height / 2;
+                            background: AppTheme.muted-control-bg;
+                            accessible-role: progress-indicator;
+                            accessible-label: @tr("Storage used");
+                            accessible-value: @tr("{} of {} used", FilesUi.quota-used, FilesUi.quota-total);
+                            Rectangle {
+                                x: 0px;
+                                width: parent.width * clamp(FilesUi.quota-fraction, 0, 1);
+                                height: parent.height;
+                                border-radius: self.height / 2;
+                                // Nearly full, it warns.
+                                background: FilesUi.quota-fraction >= 0.9 ? AppTheme.destructive : AppTheme.accent;
+                            }
+                        }
+                        Text {
+                            text: @tr("{} of {} used", FilesUi.quota-used, FilesUi.quota-total);
+                            color: AppTheme.secondary;
+                            font-size: TypeScale.caption;
+                            wrap: word-wrap;
+                        }
+                    }
+                    if FilesUi.quota-fraction < 0 && FilesUi.quota != "" : Text {
                         text: FilesUi.quota; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption;
                     }
                 }

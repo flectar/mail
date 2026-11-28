@@ -13,7 +13,7 @@ use chrono::{
 use flectar_mail_core::models::{
     Account, Address, Calendar, CalendarConnectionKind, CalendarEvent, EventAttendee,
 };
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     rc::Rc,

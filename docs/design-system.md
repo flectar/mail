@@ -130,7 +130,8 @@ measures in `SidebarStyle`. Every sidebar has the same background.
   12 px margin, so its scroll bar, which Slint draws over a list's edge, sits
   there instead of over the rows' counts.
 - Actions that aren't places, such as Files' Sharing activity and Transfers,
-  sit in a foot under a divider.
+  sit in a foot under a divider. A storage shows how full it is there, with a
+  bar and its sizes.
 
 ## On phones
 
