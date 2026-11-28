@@ -931,10 +931,14 @@ fn callback_on_back_invoked<'local>(
                 adaptor.window.dispatch_event_with_result(WindowEvent::KeyReleased { text });
             let handled = matches!(pressed, Ok(WindowEventDispatchResult::Accepted))
                 || matches!(released, Ok(WindowEventDispatchResult::Accepted));
-            if !handled {
-                if let Err(e) = adaptor.java_helper.finish_activity() {
-                    i_slint_core::debug_log!("finish_activity failed: {e:#?}");
-                }
+            // Back that no element took goes to the app as a close request,
+            // as before Slint 1.18, so it can step back through its own
+            // screens and keep the window.
+            if !handled
+                && i_slint_core::window::WindowInner::from_pub(&adaptor.window).request_close()
+                && let Err(e) = adaptor.java_helper.finish_activity()
+            {
+                i_slint_core::debug_log!("finish_activity failed: {e:#?}");
             }
         }
     });
