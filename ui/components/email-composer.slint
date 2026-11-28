@@ -8,6 +8,7 @@ import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { IconButton } from "controls.slint";
+import { LayoutMetrics } from "../design-system.slint";
 
 
 // cosmic-text owns visible layout, selection, hit-testing, and caret geometry.
@@ -1116,7 +1117,7 @@ export component EmailComposer inherits Rectangle {
                     y: 14px + root.editor-object-y * 1px - 2px;
                     width: root.editor-object-width * 1px + 4px;
                     height: root.editor-object-height * 1px + 4px;
-                    border-radius: 4px;
+                    border-radius: LayoutMetrics.small-radius;
                     border-width: 2px;
                     border-color: root.accent-color;
                 }
