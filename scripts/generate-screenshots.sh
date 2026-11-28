@@ -7,7 +7,12 @@ ui="$repo_dir/ui/app.slint"
 output_dir="$repo_dir/resources/screenshots"
 temporary_dir="$(mktemp -d)"
 temporary_ui=""
-trap 'rm -rf "$temporary_dir"; test -z "$temporary_ui" || rm -f "$temporary_ui"' EXIT
+# The open message's tiles are the reader global's default (#254), so each
+# render compiles them into reader-ui.slint and puts the original back.
+reader_ui="$repo_dir/ui/reader-ui.slint"
+reader_ui_original="$temporary_dir/reader-ui.slint"
+cp "$reader_ui" "$reader_ui_original"
+trap 'cp "$reader_ui_original" "$reader_ui"; rm -rf "$temporary_dir"; test -z "$temporary_ui" || rm -f "$temporary_ui"' EXIT
 
 command -v slint-viewer >/dev/null 2>&1 || {
   echo "slint-viewer 1.19+ is required" >&2
@@ -116,7 +121,7 @@ render() {
   # Compile the body images into the preview. Runtime image properties can
   # still be empty when the headless viewer takes its first snapshot.
   email_tiles="$(jq -r '
-    [.email_tiles[] | "{image: @image-url(" + (.image | tojson)
+    [(.["ReaderUi.email_tiles"] // [])[] | "{image: @image-url(" + (.image | tojson)
       + "), y: " + (.y | tostring) + ", height: " + (.height | tostring) + "}"]
     | "[" + join(", ") + "]"
   ' "$data_file")"
@@ -125,12 +130,13 @@ render() {
   local platform=""
   [[ "$output_name" == desktop-* ]] || platform="android"
   jq --arg platform "$platform" \
-    'del(.email_tiles) | if $platform == "" then . else .["AppIcon.platform"] = $platform end' \
+    'del(.["ReaderUi.email_tiles"]) | if $platform == "" then . else .["AppIcon.platform"] = $platform end' \
     "$data_file" > "$data_file.tmp"
   mv "$data_file.tmp" "$data_file"
 
+  sed "s|in property <\[EmailTile\]> email_tiles: \[\];|in property <[EmailTile]> email_tiles: ${email_tiles};|" \
+    "$reader_ui_original" > "$reader_ui"
   sed \
-    -e "s|in property <\[EmailTile\]> email_tiles: \[\];|in property <[EmailTile]> email_tiles: ${email_tiles};|" \
     -e "s/preferred-width: 1320px/preferred-width: ${width}px/" \
     -e "s/preferred-height: 800px/preferred-height: ${height}px/" \
     -e "s/in-out property <string> theme_mode: \"system\";/in-out property <string> theme_mode: \"${theme}\";\n    in-out property <string> screenshot_theme_preset: \"${theme_preset}\";/" \
@@ -146,6 +152,7 @@ render() {
     --screenshot "$output_dir/$output_name.png" \
     "$temporary_ui"
   [[ "$output_name" != desktop-* ]] || macos_screenshots+=("$output_dir/$output_name.png")
+  cp "$reader_ui_original" "$reader_ui"
   rm -f "$temporary_ui"
   temporary_ui=""
 }

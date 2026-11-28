@@ -1,0 +1,233 @@
+// The app's controls side by side, as docs/design-system.md describes them.
+// Open it with `slint-viewer docs/design-system/gallery.slint`; set `dark`
+// to see the dark theme. It renders the real components from ui/.
+
+import "../../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf";
+import { Palette } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../../ui/design-system.slint";
+import { TypeScale } from "../../ui/typography.slint";
+import { Button } from "../../ui/components/button.slint";
+import { CheckBox, IconButton, LineEdit, RadioButton, SelectionCheckBox, Switch, TextEdit } from "../../ui/components/controls.slint";
+import { Select } from "../../ui/components/select.slint";
+import { Tabs } from "../../ui/components/tabs.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "../../ui/components/settings-components.slint";
+
+component Section inherits Rectangle {
+    in property <string> title;
+    in property <string> note;
+    background: AppTheme.surface;
+    border-radius: LayoutMetrics.container-radius;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        Text { text: root.title; color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+        if root.note != "" : Text { text: root.note; color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; }
+        @children
+    }
+}
+
+component Caption inherits Text {
+    color: AppTheme.faint;
+    font-size: TypeScale.caption;
+}
+
+component Swatch inherits VerticalLayout {
+    in property <color> color;
+    in property <string> name;
+    spacing: 4px;
+    Rectangle {
+        width: 96px;
+        height: 36px;
+        border-radius: LayoutMetrics.corner-radius;
+        border-width: 1px;
+        border-color: AppTheme.border-subtle;
+        background: root.color;
+    }
+    Caption { text: root.name; }
+}
+
+export component Gallery inherits Window {
+    in property <bool> dark: false;
+    in property <bool> show-select-list: false;
+    // The base of every corner, as the Corners setting will choose it.
+    in property <length> corner-base: 10px;
+    preferred-width: 1120px;
+    default-font-family: "Google Sans Flex";
+    default-font-size: 12px;
+    background: AppTheme.page-bg;
+    changed dark => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    // Opens the select below as the window shows, to show its list.
+    init => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+        LayoutMetrics.corner-base = root.corner-base;
+        // A control the keyboard reached shows the focus ring.
+        focused.focus();
+        if root.show-select-list {
+            open-select.show-list();
+        }
+    }
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+        alignment: start;
+
+        Text { text: "Flectar Mail controls"; color: AppTheme.title; font-size: TypeScale.title; font-weight: 700; }
+        Text { text: "One system: every control is 36 px tall unless a dense row calls for 32 px, has 8 px corners and the input border, rests on a faint shadow in light mode, and shows the same focus ring."; color: AppTheme.secondary; wrap: word-wrap; }
+
+        Section {
+            title: "Buttons";
+            note: "Primary for the main action of a view, outline for the others, destructive to remove something. A toggle that is on looks pressed in, and the keyboard's focus shows as a soft ring.";
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Button { min-width: max(64px, self.content-width); text: "New email"; primary: true; has-icon: true; icon: @image-url("../../ui/icons/lucide/filled/compose.svg"); }
+                Button { min-width: max(64px, self.content-width); text: "Today"; }
+                Button { min-width: max(64px, self.content-width); text: "Choose…"; }
+                Button { min-width: max(64px, self.content-width); text: "Delete"; destructive: true; }
+                Button { min-width: max(64px, self.content-width); text: "Bold"; selected: true; checkable: true; }
+                Button { min-width: max(64px, self.content-width); text: "Disabled"; enabled: false; }
+                Button { min-width: max(64px, self.content-width); text: "Save"; primary: true; enabled: false; }
+                focused := Button { min-width: max(64px, self.content-width); text: "Focused"; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Button { min-width: max(64px, self.content-width); text: "Small"; height: LayoutMetrics.small-control-height; }
+                Button { min-width: max(64px, self.content-width); text: "Medium"; }
+                Button { min-width: max(64px, self.content-width); text: "Large"; height: LayoutMetrics.control-height; }
+                Button { min-width: max(64px, self.content-width); text: "Touch"; height: LayoutMetrics.touch-target; }
+                Caption { text: "32, 36, 40 and 44 px"; vertical-alignment: center; }
+            }
+        }
+
+        Section {
+            title: "Icon buttons";
+            note: "Ghost by default, filled for a primary action such as the floating New email button.";
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                IconButton { icon: @image-url("../../ui/icons/lucide/outline/chevron-left.svg"); icon-color: AppTheme.secondary; hover-background: AppTheme.control-bg; tooltip-text: "Previous"; }
+                IconButton { icon: @image-url("../../ui/icons/lucide/outline/chevron-right.svg"); icon-color: AppTheme.secondary; hover-background: AppTheme.control-bg; tooltip-text: "Next"; }
+                IconButton { icon: @image-url("../../ui/icons/lucide/outline/search.svg"); icon-color: AppTheme.secondary; idle-background: AppTheme.control-bg; tooltip-text: "Search"; }
+                IconButton { icon: @image-url("../../ui/icons/lucide/filled/calendar-add.svg"); primary: true; tooltip-text: "New event"; }
+            }
+        }
+
+        Section {
+            title: "Tabs";
+            note: "Switch between views or sections. The chosen tab is raised on a muted track, and the tabs stack when their labels don't fit side by side.";
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Tabs { labels: ["Week", "Month", "Agenda"]; current: 0; stack-when-narrow: false; }
+                Button { min-width: max(64px, self.content-width); text: "Today"; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                Tabs { labels: ["General", "Signatures", "Composing", "OpenPGP", "Automatic replies"]; current: 2; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                Tabs { width: 260px; labels: ["General", "Signatures", "Composing", "OpenPGP", "Automatic replies"]; current: 1; }
+            }
+        }
+
+        Section {
+            title: "Fields and selects";
+            note: "A select looks like a field with a chevron, and its list looks like the app's menus.";
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 6px;
+                    width: 240px;
+                    Caption { text: "Text field"; }
+                    LineEdit { text: "alex@flectar.com"; input-label: "Address"; }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    width: 240px;
+                    Caption { text: "Placeholder"; }
+                    LineEdit { placeholder-text: "Name shown to recipients"; input-label: "Name"; }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    width: 240px;
+                    Caption { text: "Select"; }
+                    open-select := Select { model: ["Formatted text", "Plain text"]; current-index: 0; }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    width: 240px;
+                    Caption { text: "Select, disabled"; }
+                    Select { model: ["6 months · Recommended"]; current-index: 0; enabled: false; }
+                }
+            }
+            Rectangle { height: 64px; }
+            VerticalLayout {
+                spacing: 6px;
+                Caption { text: "Text area"; }
+                TextEdit { height: 90px; text: "I'm away until Monday and will answer when I'm back."; }
+            }
+        }
+
+        Section {
+            title: "Choices";
+            note: "Switches for settings that apply at once, checkboxes and radio buttons inside forms and lists.";
+            HorizontalLayout {
+                spacing: 24px;
+                alignment: start;
+                Switch { checked: true; control-label: "On"; }
+                Switch { checked: false; control-label: "Off"; }
+                Switch { checked: true; enabled: false; control-label: "Disabled"; }
+                CheckBox { text: "Descending order"; checked: true; }
+                CheckBox { text: "Compare names without case"; checked: false; }
+                SelectionCheckBox { checked: true; }
+                RadioButton { text: "Formatted"; checked: true; }
+                RadioButton { text: "Plain text"; checked: false; }
+            }
+        }
+
+        Section {
+            title: "Settings rows";
+            note: "The settings' rows put their control on the title's line, the description under it.";
+            SettingsSelectRow {
+                title: "Message format";
+                description: "How new messages start. Each message can change it.";
+                choices: ["Formatted text", "Plain text"];
+                selected-index: 0;
+                title-color: AppTheme.body;
+                description-color: AppTheme.faint;
+            }
+            SettingsSwitchRow {
+                title: "Start replies below the quote";
+                description: "The message you answer goes into your reply as text, to answer between its lines, and you write below it.";
+                checked: false;
+                title-color: AppTheme.body;
+                description-color: AppTheme.faint;
+            }
+        }
+
+        Section {
+            title: "Colors and corners";
+            note: "From the theme, so presets and custom themes change them together.";
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Swatch { color: AppTheme.page-bg; name: "page-bg"; }
+                Swatch { color: AppTheme.surface; name: "surface"; }
+                Swatch { color: AppTheme.control-bg; name: "control-bg"; }
+                Swatch { color: AppTheme.muted-control-bg; name: "muted-control-bg"; }
+                Swatch { color: AppTheme.input-border; name: "input-border"; }
+                Swatch { color: AppTheme.primary; name: "primary"; }
+                Swatch { color: AppTheme.accent; name: "accent"; }
+                Swatch { color: AppTheme.destructive; name: "destructive"; }
+            }
+        }
+    }
+}

@@ -1,0 +1,18 @@
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+
+// The keyboard focus ring: a soft halo around a control, just outside its
+// edge, while the edge itself turns the focus color. Place it in the control,
+// with the control's size and corner radius.
+export component FocusRing inherits Rectangle {
+    in property <length> radius;
+    in property <length> around-width;
+    in property <length> around-height;
+    x: -LayoutMetrics.focus-ring-width;
+    y: -LayoutMetrics.focus-ring-width;
+    width: root.around-width + 2 * LayoutMetrics.focus-ring-width;
+    height: root.around-height + 2 * LayoutMetrics.focus-ring-width;
+    border-radius: root.radius + LayoutMetrics.focus-ring-width;
+    border-width: LayoutMetrics.focus-ring-width;
+    border-color: AppTheme.focus-halo;
+    accessible-role: none;
+}

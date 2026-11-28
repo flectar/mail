@@ -136,6 +136,8 @@ jobs:
           python3 resources/app-icon/generate.py --check
       - name: Keep operating-system names in the platform layer
         run: python3 scripts/check-platform-gates.py
+      - name: Keep corners on the design system's values
+        run: python3 scripts/check-design-corners.py
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
       - name: Verify the Slint winit file drop patch

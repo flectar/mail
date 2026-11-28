@@ -1,4 +1,6 @@
-import { ComboBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { LayoutMetrics } from "../design-system.slint";
+import { Select } from "select.slint";
 import { LineEdit, Switch } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
@@ -19,7 +21,7 @@ export component SettingsNavItem inherits Rectangle {
     callback clicked;
 
     height: 36px;
-    border-radius: 7px;
+    border-radius: LayoutMetrics.corner-radius;
     background: root.selected ? root.accent-soft : nav-hit.has-hover ? root.accent-soft : transparent;
 
     Image {
@@ -65,7 +67,7 @@ export component SettingsCard inherits Rectangle {
     out property <length> content-y: description-text.y + description-text.height;
 
     background: root.surface;
-    border-radius: 10px;
+    border-radius: LayoutMetrics.container-radius;
     border-width: 1px;
     border-color: root.card-border-color;
 
@@ -158,16 +160,14 @@ export component SettingsSwitchRow inherits Rectangle {
     }
 }
 
-// A small app-level wrapper keeps select geometry consistent while retaining
-// the platform widget's keyboard navigation, popup behavior, and accessibility.
-export component SettingsSelect inherits ComboBox {
+// The settings rows' select, with their choices and the chosen one's index.
+export component SettingsSelect inherits Select {
     in property <[string]> choices;
     in-out property <int> selected-index: 0;
     callback selection-changed(int, string);
 
     model: root.choices;
     current-index <=> root.selected-index;
-    height: 36px;
     min-width: 180px;
 
     selected(value) => {
@@ -268,7 +268,7 @@ export component SettingsLinkRow inherits Rectangle {
     callback clicked;
 
     height: 18px + link-title.height + link-description.height;
-    border-radius: 7px;
+    border-radius: LayoutMetrics.corner-radius;
     forward-focus: keyboard;
     border-width: keyboard.focus-visible ? 2px : 0px;
     border-color: root.accent;
@@ -328,7 +328,7 @@ export component ShortcutSection inherits Rectangle {
     in property <color> heading;
 
     background: root.surface;
-    border-radius: 8px;
+    border-radius: LayoutMetrics.corner-radius;
     border-width: 1px;
     border-color: root.card-border-color;
     VerticalBox {

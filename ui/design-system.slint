@@ -36,8 +36,30 @@ export global LayoutMetrics {
     // outlines never paint over it.
     out property <length> list-scrollbar-gutter: 12px;
     out property <length> compact-inset: 10px;
+    // Controls: buttons, text fields, selects and tabs are one system, with
+    // the sizes, corners and edges below (docs/design-system.md). A button,
+    // field, select or row of tabs is medium unless a dense row calls for
+    // small; search fields and toolbars use the large `control-height`, and
+    // phones the touch target.
+    out property <length> small-control-height: 32px;
+    out property <length> medium-control-height: 36px;
     out property <length> control-height: 40px;
-    out property <length> corner-radius: 8px;
+    // Every corner follows one value, so that a setting can make the whole
+    // app squarer or rounder at once. Corners of a control, such as a button
+    // or a field, are four fifths of it; corners of what holds controls, such
+    // as a card or the track of tabs, are all of it; small ones, such as a
+    // checkbox or a menu row, three fifths.
+    in-out property <length> corner-base: 10px;
+    out property <length> corner-radius: root.corner-base * 0.8;
+    out property <length> container-radius: root.corner-base;
+    out property <length> small-radius: root.corner-base * 0.6;
+    // Room on either side of a button's label, and of a field's or select's
+    // text.
+    out property <length> button-padding: 12px;
+    out property <length> field-padding: 12px;
+    // The keyboard focus ring of every control: a soft halo this wide around
+    // its edge.
+    out property <length> focus-ring-width: 3px;
 }
 
 // Runtime motion stays enabled by default. Deterministic renderers such as the
@@ -238,6 +260,30 @@ export global AppTheme {
     out property <color> input-bg: preset == "default" ? (dark ? #1c1d1e : #ffffff) : themed-surface;
     out property <color> placeholder: preset == "default" ? (dark ? #747572 : #90918d)
         : themed-text.mix(themed-surface, 0.68);
+    // The edge of a button: the text color, faint, so that it sits on any
+    // surface; white in dark mode, as a solid gray reads as a wireframe.
+    out property <color> control-edge: dark ? #ffffff1f : root.title.with-alpha(0.13);
+    // A button's face, lit from above: a sheen too faint to see as a
+    // gradient, and the same when the pointer is on it, a step darker.
+    out property <color> control-face-top: dark ? root.surface.mix(white, 0.92) : root.surface;
+    out property <color> control-face-bottom: dark ? root.surface.mix(white, 0.95) : root.surface.mix(root.page-bg, 0.55);
+    out property <color> control-hover-top: dark ? root.surface.mix(white, 0.88) : root.surface.mix(root.page-bg, 0.45);
+    out property <color> control-hover-bottom: dark ? root.surface.mix(white, 0.91) : root.page-bg;
+    // A toggle that is on looks pressed in: a neutral fill, as the chosen
+    // option among a few.
+    out property <color> control-on: dark ? root.surface.mix(white, 0.84) : root.muted-control-bg;
+    // Outlined controls rest on a faint shadow in light mode. In dark mode
+    // shadows don't read, and their edge marks it alone.
+    out property <color> control-shadow: dark ? transparent : #0000000f;
+    // Under a control raised above the others, such as the chosen tab.
+    out property <color> raised-shadow: dark ? transparent : #0000001f;
+    // Under a primary or destructive button, a glow of its own color.
+    out property <color> primary-shadow: dark ? transparent : root.primary.with-alpha(0.28);
+    out property <color> destructive-shadow: dark ? transparent : root.destructive.with-alpha(0.28);
+    // The keyboard focus ring of every control: its edge turns this color,
+    // with a soft halo of it around.
+    out property <color> focus-ring: accent;
+    out property <color> focus-halo: root.focus-ring.with-alpha(dark ? 0.45 : 0.32);
     out property <color> destructive: #b73731;
     out property <color> destructive-hover: #c8443d;
     out property <color> destructive-pressed: #922d28;

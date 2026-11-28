@@ -1,6 +1,7 @@
 // The editor of a rule that sorts new mail (#238): its name and account,
 // the conditions mail must meet, and what to do with it (src/rules.rs).
-import { ComboBox, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Select } from "select.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { MailRules } from "../rules.slint";
@@ -85,9 +86,7 @@ export global RuleChoices {
     ];
 }
 
-component RuleSelect inherits ComboBox {
-    height: 36px;
-}
+component RuleSelect inherits Select { }
 
 // One value field of a condition, with "KB" after a size.
 component RuleValue inherits HorizontalLayout {
