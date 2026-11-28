@@ -1456,6 +1456,62 @@ export component SettingsDialog inherits Rectangle {
         root.remove-calendar-confirmation = true;
     }
 
+    // A form, picker or confirmation open over the settings page. Escape
+    // closes that first, and never closes Settings behind it.
+    private property <bool> overlay-open: root.compact-nav-open
+        || root.caldav_account_id > 0
+        || root.carddav_account_id > 0
+        || root.account_form_open
+        || root.profile-editor-open
+        || MailRules.editing
+        || root.account-profile-picker-open
+        || AccountMailPreferences.default-sender-picker-open
+        || root.folder-roles-id >= 0
+        || root.delete_data_confirmation
+        || root.withdraw_privacy_confirmation
+        || root.delete_local_mail_confirmation
+        || root.delete_account_confirmation
+        || root.delete-profile-confirmation
+        || root.remove-calendar-confirmation
+        || SyncUi.recovery-words.length > 0
+        || SyncUi.dialog != ""
+        || root.sync-delete-confirmation
+        || root.sync-remove-confirmation
+        || root.oauth-setup-open;
+    // A closed overlay takes the focus with it, and a hidden focused item
+    // drops keys, so the page takes it back for Escape to keep working.
+    changed overlay-open => {
+        if !root.overlay-open { settings-keys.focus(); }
+    }
+
+    // The scope wraps the whole page so Escape reaches it from any control
+    // inside, as the other dialogs do. It takes focus when Settings opens, so
+    // Escape works before anything in it has been clicked.
+    settings-keys := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        focus-on-tab-navigation: false;
+        init => {
+            if !root.overlay-open { self.focus(); }
+        }
+        key-pressed(event) => {
+            if event.text == Key.Escape
+                && !event.modifiers.control && !event.modifiers.alt
+                && !event.modifiers.meta && !event.modifiers.shift {
+                if root.compact-nav-open {
+                    root.compact-nav-open = false;
+                    return accept;
+                }
+                if !root.overlay-open {
+                    root.close-requested();
+                    return accept;
+                }
+            }
+            reject
+        }
+
         Rectangle {
             x: 0px;
             y: 0px;
@@ -5647,4 +5703,5 @@ export component SettingsDialog inherits Rectangle {
                 root.save-oauth-apps(google-id, google-secret, microsoft-id);
             }
         }
+    }
 }
