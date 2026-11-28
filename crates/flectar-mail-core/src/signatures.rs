@@ -47,6 +47,10 @@ pub fn text_html(text: &str) -> String {
     html
 }
 
+/// The class of a block that keeps the layout it came with, such as a signature's table with a
+/// logo beside its text, which the composer shows as it is rather than as text to edit.
+pub const LAYOUT_CLASS: &str = "flectar-layout";
+
 /// The CSS properties signatures keep, for their type, colors and the boxes of their layout.
 /// None of them takes a picture or another address, so nothing in a signature's CSS loads
 /// from the web.
@@ -125,14 +129,38 @@ const STYLE_PROPERTIES: &[&str] = &[
     "list-style-position",
 ];
 
-/// The formatting the composer writes, and pictures the signature holds itself: no active
-/// HTML, pictures from the web or other remote requests in signature settings.
+/// The formatting the composer writes, the layout of signatures made elsewhere, such as a table
+/// with a logo beside the text, and pictures the signature holds itself: no active HTML,
+/// pictures from the web or other remote requests in signature settings. The composer cleans
+/// each layout it keeps the same way.
 pub fn sanitize_html(html: &str) -> String {
     static SANITIZER: std::sync::LazyLock<ammonia::Builder<'static>> =
         std::sync::LazyLock::new(|| {
             let mut builder = ammonia::Builder::default();
             builder
-                .add_generic_attributes(["style", "align", "dir"])
+                // Signatures written in older mail apps set their type with `<font>`.
+                .add_tags(["font", "tfoot"])
+                .add_generic_attributes([
+                    "style",
+                    "align",
+                    "dir",
+                    // The attributes signatures lay their tables out with, which mail apps
+                    // render and other mail clients' sanitizers keep.
+                    "valign",
+                    "width",
+                    "height",
+                    "border",
+                    "cellpadding",
+                    "cellspacing",
+                    "bgcolor",
+                    // Tells screen readers a table only lays the signature out.
+                    "role",
+                ])
+                .add_tag_attributes("font", ["color", "face", "size"])
+                .add_tag_attributes("hr", ["color", "noshade"])
+                .add_tag_attributes("td", ["nowrap"])
+                .add_tag_attributes("th", ["nowrap"])
+                .add_allowed_classes("div", [LAYOUT_CLASS])
                 .add_url_schemes(["data"])
                 .filter_style_properties(STYLE_PROPERTIES.iter().copied().collect())
                 .attribute_filter(|element, attribute, value| match (element, attribute) {
@@ -437,6 +465,46 @@ mod tests {
                 "<p>a &lt;img&gt; bc<img alt=\"Logo &quot;Zoë&quot; &gt;\" src=\"{logo}\">d</p>"
             )
         );
+    }
+
+    #[test]
+    fn signatures_made_elsewhere_keep_their_table_layout() {
+        let logo = "data:image/png;base64,iVBORw0KGgo=";
+        let html = format!(
+            "<div class=\"{LAYOUT_CLASS} brand\"><table role=\"presentation\" cellpadding=\"0\" \
+             cellspacing=\"0\" border=\"0\" width=\"480\" style=\"border-collapse:collapse\">\
+             <tbody><tr><td valign=\"top\" width=\"96\" bgcolor=\"#ffffff\" nowrap \
+             style=\"padding:0 12px 0 0;border-right:2px solid #0a66c2\"><img src=\"{logo}\" \
+             width=\"80\" height=\"80\" border=\"0\" alt=\"Logo\" style=\"display:block\"></td>\
+             <td valign=\"top\"><font face=\"Arial\" color=\"#1f2328\" size=\"2\"><b>Zoë</b>\
+             </font><hr color=\"#d0d7de\" size=\"1\" noshade style=\"border:0;border-top:1px \
+             solid #d0d7de\"><a href=\"https://example.org\">example.org</a></td></tr></tbody>\
+             </table></div>"
+        );
+        let clean = sanitize_html(&html);
+        for kept in [
+            "<div class=\"flectar-layout\">",
+            "role=\"presentation\"",
+            "cellpadding=\"0\"",
+            "cellspacing=\"0\"",
+            "border=\"0\"",
+            "width=\"480\"",
+            "style=\"border-collapse:collapse\"",
+            "valign=\"top\"",
+            "width=\"96\"",
+            "bgcolor=\"#ffffff\"",
+            "nowrap",
+            "style=\"padding:0 12px 0 0;border-right:2px solid #0a66c2\"",
+            "src=\"data:image/png;base64,iVBORw0KGgo=\"",
+            "style=\"display:block\"",
+            "<font face=\"Arial\" color=\"#1f2328\" size=\"2\">",
+            "<hr color=\"#d0d7de\" size=\"1\" noshade=\"\" style=\"border:0;border-top:1px solid #d0d7de\">",
+            "href=\"https://example.org\"",
+        ] {
+            assert!(clean.contains(kept), "{kept} in {clean}");
+        }
+        // Classes of its own, which nothing styles here, go.
+        assert!(!clean.contains("brand"), "{clean}");
     }
 
     #[test]
