@@ -123,6 +123,138 @@ fn shown_parts(parts: &[Part]) -> Vec<&Part> {
     shown
 }
 
+/// A picture that HTML links from the web.
+#[cfg(feature = "remote-content")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LinkedPicture {
+    /// Its address as the HTML gives it.
+    pub(crate) src: String,
+    /// Its address on the web.
+    pub(crate) url: String,
+    /// The width it shows at in CSS pixels, when its HTML says.
+    pub(crate) shown_width: Option<u32>,
+}
+
+/// The pictures what was copied links from the web, each once, in order: those a signature
+/// downloads to keep (#549).
+#[cfg(feature = "remote-content")]
+pub(crate) fn linked_pictures(html: &str) -> Vec<LinkedPicture> {
+    if html.len() > MAX_HTML_BYTES {
+        return Vec::new();
+    }
+    let parts = parts(html);
+    let mut pictures: Vec<LinkedPicture> = Vec::new();
+    for part in shown_parts(&parts) {
+        let Part::Start {
+            name, attributes, ..
+        } = part
+        else {
+            continue;
+        };
+        if name != "img" {
+            continue;
+        }
+        let attribute = |wanted: &str| {
+            attributes
+                .iter()
+                .find(|(name, _)| name == wanted)
+                .map(|(_, value)| value.trim())
+        };
+        let Some(src) = attribute("src") else {
+            continue;
+        };
+        let Some(url) = web_address(src) else {
+            continue;
+        };
+        if pictures.iter().any(|picture| picture.src == src) {
+            continue;
+        }
+        let shown_width = attribute("width")
+            .and_then(|width| width.parse().ok())
+            .or_else(|| attribute("style").and_then(css_width))
+            .filter(|width| *width > 0);
+        pictures.push(LinkedPicture {
+            src: src.to_owned(),
+            url,
+            shown_width,
+        });
+    }
+    pictures
+}
+
+/// `src` as an address on the web, one that doesn't say its scheme taking the web's secure one.
+#[cfg(feature = "remote-content")]
+fn web_address(src: &str) -> Option<String> {
+    let src = match src.strip_prefix("//") {
+        Some(rest) => std::borrow::Cow::Owned(format!("https://{rest}")),
+        None => std::borrow::Cow::Borrowed(src),
+    };
+    let url = url::Url::parse(&src).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.into())
+}
+
+/// The width a `style` gives an element, in whole CSS pixels, when it gives one in pixels.
+#[cfg(feature = "remote-content")]
+fn css_width(style: &str) -> Option<u32> {
+    style.split(';').find_map(|declaration| {
+        let (property, value) = declaration.split_once(':')?;
+        if !property.trim().eq_ignore_ascii_case("width") {
+            return None;
+        }
+        let pixels: f32 = value.trim().strip_suffix("px")?.trim().parse().ok()?;
+        (pixels.is_finite() && pixels >= 1.0).then(|| pixels.round() as u32)
+    })
+}
+
+/// `html` with the address of each picture `source` gives a new one for in its place. The rest
+/// is written back as it was read, comments too, which mark what browsers copied.
+#[cfg(feature = "remote-content")]
+pub(crate) fn with_picture_sources(
+    html: &str,
+    mut source: impl FnMut(&str) -> Option<String>,
+) -> String {
+    let mut output = String::with_capacity(html.len());
+    for part in parts(html) {
+        match part {
+            Part::Start {
+                name, attributes, ..
+            } => {
+                let changed = (name == "img")
+                    .then(|| {
+                        attributes
+                            .iter()
+                            .find(|(attribute, _)| attribute == "src")
+                            .and_then(|(_, value)| source(value.trim()))
+                    })
+                    .flatten();
+                push_start_tag(
+                    &mut output,
+                    &name,
+                    attributes.iter().map(|(attribute, value)| {
+                        let value = match &changed {
+                            Some(changed) if attribute == "src" => changed.as_str(),
+                            _ => value.as_str(),
+                        };
+                        (attribute.as_str(), value)
+                    }),
+                );
+            }
+            Part::End(name) => {
+                output.push_str("</");
+                output.push_str(&name);
+                output.push('>');
+            }
+            Part::Text(text) => push_text(&mut output, &text),
+            Part::Comment(comment) => {
+                output.push_str("<!--");
+                output.push_str(&comment);
+                output.push_str("-->");
+            }
+        }
+    }
+    output
+}
+
 /// Elements whose content doesn't show, as browsers render them.
 const HIDDEN_ELEMENTS: [&str; 19] = [
     "head", "template", "noscript", "svg", "math", "select", "object", "audio", "video", "canvas",
@@ -1258,6 +1390,50 @@ mod tests {
         assert_eq!(
             layout_html("<meta charset=\"utf-8\"><div>Ana</div><hr><div>Sales</div>").as_deref(),
             Some("<div>Ana</div><hr><div>Sales</div>")
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "remote-content")]
+    fn pictures_linked_from_the_web_are_found_where_they_show() {
+        let pictures = linked_pictures(concat!(
+            "<head><style>x {}</style></head><body><img src=\"https://example.org/outside.png\">",
+            "<!--StartFragment--><img src=\" https://example.org/logo.png \" width=\"120\">",
+            "<img src=\"//example.org/a.png\" style=\"border:0; width: 48.4px\">",
+            "<img src=\"https://example.org/logo.png\"><img src=\"data:image/png;base64,AA\">",
+            "<img src=\"cid:part1\"><img src=\"/relative.png\"><img src=\"ftp://example.org/b.png\">",
+            "<noscript><img src=\"https://example.org/hidden.png\"></noscript>",
+            "<!--EndFragment--></body>",
+        ));
+        assert_eq!(
+            pictures,
+            [
+                LinkedPicture {
+                    src: "https://example.org/logo.png".into(),
+                    url: "https://example.org/logo.png".into(),
+                    shown_width: Some(120),
+                },
+                LinkedPicture {
+                    src: "//example.org/a.png".into(),
+                    url: "https://example.org/a.png".into(),
+                    shown_width: Some(48),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "remote-content")]
+    fn picture_sources_change_and_the_rest_stays() {
+        let html = "<!--StartFragment--><p title=\"a &amp; &quot;b&quot;\">x &lt; y\
+                    <img alt=\"Logo\" src=\"https://example.org/logo.png\"></p><a src=\"keep\">l</a>";
+        let changed = with_picture_sources(html, |src| {
+            (src == "https://example.org/logo.png").then(|| "data:image/png;base64,AA".to_owned())
+        });
+        assert_eq!(
+            changed,
+            "<!--StartFragment--><p title=\"a &amp; &quot;b&quot;\">x &lt; y\
+             <img alt=\"Logo\" src=\"data:image/png;base64,AA\"></p><a src=\"keep\">l</a>"
         );
     }
 

@@ -2703,6 +2703,98 @@ impl ComposeSession {
         } else {
             PastedLayout::Merge
         };
+        // A signature keeps the pictures it links from the web, which go in once they're
+        // downloaded.
+        #[cfg(feature = "remote-content")]
+        if layout == PastedLayout::Keep && self.download_pictures_then(html, Self::paste_kept) {
+            return true;
+        }
+        self.paste_html_now(host, html, layout)
+    }
+
+    /// Pastes `html` over the selection of a signature, keeping a layout of its own.
+    #[cfg(feature = "remote-content")]
+    fn paste_kept(&self, host: &HostRef, html: &str) {
+        self.paste_html_now(host, html, PastedLayout::Keep);
+    }
+
+    /// Downloads the pictures `html` links from the web for a signature, then puts it in with
+    /// `apply` over the selection, wherever that has moved by then (#549). False, doing
+    /// nothing, when it links none.
+    #[cfg(feature = "remote-content")]
+    fn download_pictures_then(&self, html: &str, apply: fn(&Self, &HostRef, &str)) -> bool {
+        if crate::compose_paste::linked_pictures(html).is_empty() {
+            return false;
+        }
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return false;
+        };
+        let (revision, range) = {
+            let document = self.document.borrow();
+            let selection = document.selection();
+            let start = usize::try_from(selection.start.min(selection.end)).unwrap_or_default();
+            let end = usize::try_from(selection.start.max(selection.end)).unwrap_or_default();
+            (document.revision(), start..end)
+        };
+        host.ui().set_notice(
+            UiMessage::plain("Downloading the signature's pictures…"),
+            false,
+        );
+        let download =
+            crate::signature_pictures::embed(html.to_owned(), crate::remote::load_picture);
+        let task = composers.runtime.spawn(download);
+        let weak = self.this.clone();
+        let abort = task.abort_handle();
+        let spawned = slint::spawn_local(async move {
+            let Ok(embedded) = task.await else {
+                return;
+            };
+            let Some(session) = weak.upgrade() else {
+                return;
+            };
+            let Some(host) = session.host() else {
+                return;
+            };
+            let followed = session.document.borrow().follow(revision, range);
+            let (crate::rich_compose::Followed::Kept(range)
+            | crate::rich_compose::Followed::Bordered(range)) = followed
+            else {
+                host.ui().set_notice(
+                    UiMessage::plain(
+                        "The signature changed while its pictures were downloading, so nothing was added.",
+                    ),
+                    true,
+                );
+                return;
+            };
+            session.document.borrow_mut().update_selection(
+                i32::try_from(range.start).unwrap_or(i32::MAX),
+                i32::try_from(range.end).unwrap_or(i32::MAX),
+            );
+            apply(&session, &host, &embedded.html);
+            if embedded.missing > 0 {
+                host.ui().set_notice(
+                    UiMessage::detail(
+                        "Couldn't download {} pictures for the signature.",
+                        embedded.missing,
+                    ),
+                    true,
+                );
+            } else {
+                host.ui().set_notice(UiMessage::EMPTY, false);
+            }
+        });
+        if spawned.is_err() {
+            abort.abort();
+            return false;
+        }
+        true
+    }
+
+    /// Pastes `html` over the selection now, unless it holds no text, or images that would take
+    /// the message's images and attachments past what a message carries. Returns whether it
+    /// went in.
+    fn paste_html_now(&self, host: &HostRef, html: &str, layout: PastedLayout) -> bool {
         {
             let files = self
                 .files

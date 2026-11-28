@@ -904,6 +904,9 @@ export global I18n {
         if (key == "Formatting and pictures removed. Undo restores them.") { return @tr("Formatting and pictures removed. Undo restores them."); }
         if (key == "Give the signature a name.") { return @tr("Give the signature a name."); }
         if (key == "A signature can hold pictures, but not attachments.") { return @tr("A signature can hold pictures, but not attachments."); }
+        if (key == "Downloading the signature's pictures…") { return @tr("Downloading the signature's pictures…"); }
+        if (key == "Couldn't download {} pictures for the signature.") { return @tr("Couldn't download a picture for the signature." | "Couldn't download {0} pictures for the signature." % round(argument.to-float()), argument); }
+        if (key == "The signature changed while its pictures were downloading, so nothing was added.") { return @tr("The signature changed while its pictures were downloading, so nothing was added."); }
         if (key == "Choose the account this message should be sent from.") { return @tr("Choose the account this message should be sent from."); }
         if (key == "Choose a verified sender identity for this message.") { return @tr("Choose a verified sender identity for this message."); }
         if (key == "Connect an account before saving or sending mail.") { return @tr("Connect an account before saving or sending mail."); }

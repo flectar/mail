@@ -129,6 +129,8 @@ mod saved_searches;
 mod sender_picker;
 mod server_search;
 mod settings_controller;
+#[cfg(feature = "remote-content")]
+mod signature_pictures;
 pub mod spelling;
 pub use spelling::{SpellingHost, SpellingSession};
 mod sidebar_model;

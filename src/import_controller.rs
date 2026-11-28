@@ -1403,6 +1403,23 @@ pub(super) fn register_import_callbacks(
             translated(&app, &UiMessage::plain("Imported messages")).to_string();
         let import_core = core.clone();
         let request: documents::DocumentFuture<ImportOutcome> = Box::pin(async move {
+            // Imported signatures keep the pictures they link from the web, as pasted ones do
+            // (#549). Those that can't be downloaded are left out when the signature is cleaned.
+            #[cfg(feature = "remote-content")]
+            let drafts = {
+                let mut drafts = drafts;
+                for signature in drafts
+                    .iter_mut()
+                    .flat_map(|draft| draft.signatures.iter_mut())
+                {
+                    let html = std::mem::take(&mut signature.html);
+                    signature.html =
+                        crate::signature_pictures::embed(html, crate::remote::load_picture)
+                            .await
+                            .html;
+                }
+                drafts
+            };
             let accounts = if drafts.is_empty() {
                 None
             } else {

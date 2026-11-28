@@ -356,6 +356,14 @@ async fn load_http_image(request: &Request) -> Option<Vec<u8>> {
     consume_http_image(response, request.signal.as_ref()).await
 }
 
+/// The picture at `url` on the web, loaded as remote images in mail are: from public addresses
+/// only, through the app's proxy, and within the same limits. For pictures a signature links,
+/// which it keeps (#549).
+#[cfg(feature = "remote-content")]
+pub(crate) async fn load_picture(url: url::Url) -> Option<Vec<u8>> {
+    load_http_image(&Request::get(url)).await
+}
+
 #[cfg(feature = "remote-content")]
 async fn consume_http_image(
     mut response: reqwest::Response,
