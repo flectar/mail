@@ -159,10 +159,65 @@ can be replaced. Request an upload key reset on the **App signing** page in
 Play Console, then pin the new certificate and replace both secrets.
 
 To publish on Google Play, run the **Google Play bundle** workflow from `main`
-with the release version and approve it. Upload the `.aab` from its
-`flectar-mail-google-play-<version>` artifact to a track in Play Console.
-Play and GitHub share the version sequence above, and Play accepts each
-version code only once.
+or a release tag with the release version and a testing track, and approve
+it. After its checks it releases the bundle on that track through the Google
+Play Developer API, with the notes in
+`fastlane/metadata/android/<language>/changelogs/<version code>.txt`. The
+track `none` only builds it, and the `.aab` stays in the
+`flectar-mail-google-play-<version>` artifact either way. Production stays a
+step in Play Console, where a release that passed testing is promoted. Play
+and GitHub share the version sequence above, and Play accepts each version
+code only once.
+
+The **Google Play listing** workflow makes the store listing match
+`fastlane/metadata/android`, changing only what differs. A change there on
+`main` starts it, and it waits for approval like every run in the
+`google-play` environment. Run it by hand with **validate only** to check
+changes with Play without publishing them. Image alt text isn't part of the
+API, so it's typed in Play Console. Both workflows stop rather than cancel
+changes that are already in review.
+
+### Google Play Developer API access
+
+The workflows sign in through Workload Identity Federation, so there's no
+Google key to store or leak. Google exchanges the GitHub token of a job in
+this repository's `google-play` environment for a short-lived token of the
+service account `play-publisher@flectar-mail.iam.gserviceaccount.com`, in the
+Google Cloud project `flectar-mail`.
+
+| Environment variable | Value |
+| --- | --- |
+| `FLECTAR_PLAY_WORKLOAD_IDENTITY_PROVIDER` | `projects/<project number>/locations/global/workloadIdentityPools/github/providers/flectar-mail` |
+| `FLECTAR_PLAY_SERVICE_ACCOUNT` | `play-publisher@flectar-mail.iam.gserviceaccount.com` |
+
+In Play Console, under **Manage account › Users and permissions**, the
+service account has no account permissions. For Flectar Mail it may view app
+information, manage the store presence, release to testing tracks and manage
+testing tracks, but not release to production.
+
+To set it up again, run this in Cloud Shell, invite the service account in
+Play Console with those permissions, and set the two variables from what it
+prints.
+
+```bash
+PROJECT_ID=flectar-mail
+gcloud config set project "$PROJECT_ID"
+gcloud services enable androidpublisher.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
+gcloud iam service-accounts create play-publisher --display-name="Flectar Mail Play publisher"
+gcloud iam workload-identity-pools create github --location=global --display-name="GitHub Actions"
+gcloud iam workload-identity-pools providers create-oidc flectar-mail \
+  --location=global \
+  --workload-identity-pool=github \
+  --display-name="flectar/mail" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.environment=assertion.environment" \
+  --attribute-condition="assertion.repository == 'flectar/mail' && assertion.environment == 'google-play'"
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+gcloud iam service-accounts add-iam-policy-binding "play-publisher@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/flectar/mail"
+echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/flectar-mail"
+```
 
 Before shipping, verify an actual update on an emulator or test device:
 install a first signed APK, create test app data, and install the newer APK
@@ -173,5 +228,7 @@ copy Play installed. The keystore regression tests alone do not exercise the
 Android package manager or application data migrations.
 
 References: [Android app signing](https://developer.android.com/studio/publish/app-signing),
-[version codes](https://developer.android.com/studio/publish/versioning), and
-[GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
+[version codes](https://developer.android.com/studio/publish/versioning),
+[GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets),
+the [Google Play Developer API](https://developers.google.com/android-publisher), and
+[Workload Identity Federation for GitHub](https://github.com/google-github-actions/auth#preferred-direct-workload-identity-federation).
