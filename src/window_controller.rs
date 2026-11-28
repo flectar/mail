@@ -98,7 +98,13 @@ pub(super) fn create_and_register_window_lifecycle(
         let Some(app) = app_for_close.upgrade() else {
             return slint::CloseRequestResponse::HideWindow;
         };
-        if app.invoke_system_back_requested() {
+        // On a phone the system's back arrives as a close request: one step
+        // back through the app's screens, as a mouse's back button takes.
+        #[cfg(mobile)]
+        let stepped_back = app.invoke_navigate_back();
+        #[cfg(not(mobile))]
+        let stepped_back = app.invoke_system_back_requested();
+        if stepped_back {
             return slint::CloseRequestResponse::KeepWindowShown;
         }
         if app.get_close_to_tray() {

@@ -79,6 +79,12 @@ device shows. It can't be undone, so it asks first.
 In the minimal layout, arrow keys highlight messages and **Enter** opens them;
 **Escape** or **F6** returns to the list.
 
+Android's back gesture or button goes back one step: from a message to the
+list, out of Settings, a drawer or a dialog, or up a folder in Files. From the
+list it leaves the app, as Android apps do. A mouse's back button does the
+same on a desktop and closes the open message, and its forward button opens
+that message again.
+
 Lists start with the newest mail. To read a mailbox from its oldest mail
 instead, choose **Oldest first** from the filter button next to the search
 field. Each mailbox, folder and label keeps the order you chose for it, and

@@ -17,7 +17,8 @@ documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
 The locally patched `i-slint-backend-android-activity` 1.19.0 crate likewise
 retains its upstream license texts in
 [`crates/i-slint-backend-android-activity/LICENSES`](crates/i-slint-backend-android-activity/LICENSES),
-and its pointer scroll backport is documented in
+and its patches, the pointer scroll backport and Back as a close request, are
+documented in
 [`patches/slint-android-activity/README.md`](patches/slint-android-activity/README.md).
 The locally patched `i-slint-renderer-software` 1.19.0 crate retains its
 upstream license texts in
