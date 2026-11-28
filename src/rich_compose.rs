@@ -32,8 +32,9 @@ pub(crate) fn marked_as_copied(html: &str) -> String {
 }
 /// The line a signature starts under, after a blank line, as mail has long marked them.
 pub(crate) const SIGNATURE_SEPARATOR: &str = "\n\n-- \n";
-/// Holds an image's place in the text, as in other rich text: its style carries the image.
-pub(crate) const IMAGE_PLACEHOLDER: char = '\u{fffc}';
+/// Holds the place of an image or a layout block in the text, as the object replacement
+/// character does in other rich text: its style carries what it holds.
+pub(crate) const OBJECT_PLACEHOLDER: char = '\u{fffc}';
 /// Images larger than this, in pixels across or down, aren't taken.
 const MAX_IMAGE_SIDE: u32 = 16_384;
 /// The narrowest an image can be made to show, in CSS pixels.
@@ -188,6 +189,108 @@ impl PartialEq for InlineImage {
 
 impl Eq for InlineImage {}
 
+/// A part of the text kept in the layout it came with, such as a signature laid out in a table
+/// with a logo beside its text, which the text's own lines and styles can't hold (#549). It
+/// shows and goes out as its HTML lays it out, as one piece of the text, the way a picture
+/// does, and editing it as text takes it apart into lines.
+#[derive(Debug)]
+pub(crate) struct LayoutBlock {
+    /// Tells this block from others, also when two hold the same HTML.
+    pub(crate) id: u64,
+    /// Its HTML, cleaned as signatures are: formatting, layout and pictures of its own.
+    pub(crate) html: Arc<str>,
+}
+
+impl LayoutBlock {
+    /// The block `html` lays out, cleaned, or `None` when nothing in it shows. Every block is
+    /// made here, so none holds HTML that wasn't cleaned, wherever it came from: the
+    /// clipboard, a signature, a draft, or a translation service.
+    pub(crate) fn new(html: &str) -> Option<Self> {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let html = flectar_mail_core::signatures::sanitize_html(html);
+        crate::compose_paste::styled_text(&html, &CharacterStyle::default())?;
+        Some(Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            html: html.into(),
+        })
+    }
+
+    /// Its text and styles, matched to a message whose default text style is `base`: what
+    /// editing it as text leaves.
+    pub(crate) fn styled_text(
+        &self,
+        base: &CharacterStyle,
+    ) -> Option<(String, Vec<ComposeStyleRun>)> {
+        crate::compose_paste::styled_text(&self.html, base)
+    }
+
+    /// Its HTML to edit by hand, with each picture it holds referred to as `cid:pictureN` in
+    /// place of its file, as mail refers to the pictures a message carries, and those files in
+    /// order, for [`with_pictures_restored`] to put back.
+    pub(crate) fn html_to_edit(&self) -> (String, Vec<String>) {
+        let mut pictures: Vec<String> = Vec::new();
+        let html = crate::compose_paste::with_picture_sources(&self.html, |src| {
+            src.starts_with("data:").then(|| {
+                let index = match pictures.iter().position(|picture| picture == src) {
+                    Some(index) => index,
+                    None => {
+                        pictures.push(src.to_owned());
+                        pictures.len() - 1
+                    }
+                };
+                format!("cid:picture{}", index + 1)
+            })
+        });
+        (html, pictures)
+    }
+
+    /// Its text as plain text, each link followed by its address where its text doesn't show
+    /// it, and each picture as its description, or as its alt text alone when `described` is
+    /// false.
+    fn plain_text(&self, described: bool) -> String {
+        self.styled_text(&CharacterStyle::default())
+            .map(|(text, runs)| plain_text_of(&text, &runs, described, 0).0)
+            .unwrap_or_default()
+    }
+}
+
+impl PartialEq for LayoutBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for LayoutBlock {}
+
+/// `html` written by hand for a layout block, with the pictures [`LayoutBlock::html_to_edit`]
+/// referred to as `cid:pictureN` back in it. A reference to no picture stays as it is, which
+/// cleaning the block takes out.
+pub(crate) fn with_pictures_restored(html: &str, pictures: &[String]) -> String {
+    crate::compose_paste::with_picture_sources(html, |src| {
+        let number: usize = src.strip_prefix("cid:picture")?.parse().ok()?;
+        pictures.get(number.checked_sub(1)?).cloned()
+    })
+}
+
+/// What an object placeholder holds in the text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Embed {
+    Image(Arc<InlineImage>),
+    Layout(Arc<LayoutBlock>),
+}
+
+/// What pasting does with HTML that lays its text out in a way the text's lines can't hold,
+/// such as in a table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PastedLayout {
+    /// The text goes in in the message's formatting, as Merge Formatting does in word
+    /// processors: what's pasted into a message.
+    Merge,
+    /// It goes in as a layout block that keeps it: what's pasted into a signature, whose look
+    /// is the point of it (#549).
+    Keep,
+}
+
 /// `text` with its quote blocks written as plain-text mail quotes, in lines
 /// that start with `>`, for the plain-text part of a message being sent.
 pub(crate) fn with_plain_text_quotes(text: &str) -> String {
@@ -259,8 +362,26 @@ pub(crate) struct CharacterStyle {
     /// The alignment of the paragraph the character is in, which all of its characters share:
     /// that of its first character after any list or quote marker.
     pub(crate) align: Alignment,
-    /// The image an image placeholder shows.
-    pub(crate) image: Option<Arc<InlineImage>>,
+    /// The image or layout block an object placeholder holds.
+    pub(crate) embed: Option<Embed>,
+}
+
+impl CharacterStyle {
+    /// The image an object placeholder in this style shows.
+    pub(crate) fn image(&self) -> Option<&Arc<InlineImage>> {
+        match &self.embed {
+            Some(Embed::Image(image)) => Some(image),
+            _ => None,
+        }
+    }
+
+    /// The layout block an object placeholder in this style holds.
+    pub(crate) fn layout(&self) -> Option<&Arc<LayoutBlock>> {
+        match &self.embed {
+            Some(Embed::Layout(block)) => Some(block),
+            _ => None,
+        }
+    }
 }
 
 /// A color as `0xRRGGBB`.
@@ -355,14 +476,20 @@ impl FontFamily {
     }
 
     fn from_css(value: &str) -> Option<Self> {
+        // A saved signature comes back as its cleaner writes CSS, with spaces around commas.
+        let value = value
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(", ");
         [Self::Serif, Self::Monospace]
             .into_iter()
-            .find(|family| family.css() == Some(value))
+            .find(|family| family.css() == Some(value.as_str()))
     }
 }
 
 /// How a paragraph lines up.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum Alignment {
     #[default]
     Left,
@@ -819,9 +946,9 @@ impl RichComposeDocument {
     /// on in the style and alignment of the line above it, as pressing Enter does in a word
     /// processor, but not in its link, and an empty message starts in the default text style.
     fn typing_style_at(&self, cursor: usize) -> CharacterStyle {
-        // What's typed next to an image is text.
+        // What's typed next to an image or a layout block is text.
         CharacterStyle {
-            image: None,
+            embed: None,
             ..self.typing_style_near(cursor)
         }
     }
@@ -902,14 +1029,14 @@ impl RichComposeDocument {
             ..valid_offset(&self.text, to_i32(range.end));
         let mut pieces: Vec<(Range<usize>, String)> = Vec::new();
         for edit in crate::word_diff::word_edits(&self.text[range.clone()], revised) {
-            // A revision can't make pictures, and keeps those the text has.
+            // A revision can't make pictures or layout blocks, and keeps those the text has.
             let mut inserted: String = revised[edit.new]
                 .chars()
-                .filter(|character| *character != IMAGE_PLACEHOLDER)
+                .filter(|character| *character != OBJECT_PLACEHOLDER)
                 .collect();
             let (start, end) = (range.start + edit.old.start, range.start + edit.old.end);
             let mut at = start;
-            for (offset, _) in self.text[start..end].match_indices(IMAGE_PLACEHOLDER) {
+            for (offset, _) in self.text[start..end].match_indices(OBJECT_PLACEHOLDER) {
                 // A picture keeps the line breaks around it too.
                 let picture = start + offset;
                 let mut kept = picture;
@@ -917,7 +1044,7 @@ impl RichComposeDocument {
                     kept -= 1;
                 }
                 pieces.push((at..kept, std::mem::take(&mut inserted)));
-                at = picture + IMAGE_PLACEHOLDER.len_utf8();
+                at = picture + OBJECT_PLACEHOLDER.len_utf8();
                 if at < end && self.text[at..].starts_with('\n') {
                     at += 1;
                 }
@@ -966,7 +1093,7 @@ impl RichComposeDocument {
     fn revised_style(&self, range: Range<usize>) -> CharacterStyle {
         if !range.is_empty()
             && let Some(style) = self.style_at(range.start)
-            && style.image.is_none()
+            && style.embed.is_none()
         {
             return style.clone();
         }
@@ -997,11 +1124,23 @@ impl RichComposeDocument {
 
     /// Pastes HTML from the clipboard over the selection, as one undoable edit with the caret
     /// after it: text copied from a message being written as it was, and HTML from elsewhere
-    /// with the formatting `compose_paste` keeps. `None` when it holds no text, for the plain
-    /// text to go in instead.
-    pub fn paste_html(&mut self, html: &str) -> Option<ComposeSelection> {
+    /// with the formatting `compose_paste` keeps, or as a layout block where `layout` keeps a
+    /// layout the text's lines can't hold. `None` when it holds no text, for the plain text to
+    /// go in instead.
+    pub(crate) fn paste_html(
+        &mut self,
+        html: &str,
+        layout: PastedLayout,
+    ) -> Option<ComposeSelection> {
+        let kept = || {
+            crate::compose_paste::layout_html(html)
+                .and_then(|layout| LayoutBlock::new(&layout))
+                .map(layout_runs)
+        };
         let (mut text, mut runs) = if html.contains(COPIED_MARK) {
             import_body_html(html)
+        } else if let Some(kept) = (layout == PastedLayout::Keep).then(kept).flatten() {
+            Some(kept)
         } else {
             crate::compose_paste::styled_text(html, &self.base)
         }
@@ -1123,32 +1262,76 @@ impl RichComposeDocument {
         let cursor = valid_offset(&self.text, self.selection.1);
         let (start, end) = ordered(anchor, cursor);
         let style = CharacterStyle {
-            image: Some(Arc::new(image)),
+            embed: Some(Embed::Image(Arc::new(image))),
             ..self.typing_style.clone()
         };
         let mut placeholder = [0; 4];
-        let text = IMAGE_PLACEHOLDER.encode_utf8(&mut placeholder);
+        let text = OBJECT_PLACEHOLDER.encode_utf8(&mut placeholder);
         let caret = start + text.len();
         self.replace_styled(start..end, text, style, caret)
     }
 
     /// The image the selection holds, when it holds that and nothing else, for its controls.
     pub(crate) fn selected_image(&self) -> Option<&Arc<InlineImage>> {
+        self.selected_object()?.image()
+    }
+
+    /// The layout block the selection holds, when it holds that and nothing else, for its
+    /// controls.
+    pub(crate) fn selected_layout(&self) -> Option<&Arc<LayoutBlock>> {
+        self.selected_object()?.layout()
+    }
+
+    /// The style of the object placeholder the selection holds, when it holds that alone.
+    fn selected_object(&self) -> Option<&CharacterStyle> {
         let anchor = valid_offset(&self.text, self.selection.0);
         let cursor = valid_offset(&self.text, self.selection.1);
         let (start, end) = ordered(anchor, cursor);
         let mut selected = self.text[start..end].chars();
-        if selected.next() != Some(IMAGE_PLACEHOLDER) || selected.next().is_some() {
+        if selected.next() != Some(OBJECT_PLACEHOLDER) || selected.next().is_some() {
             return None;
         }
-        self.style_at(start)?.image.as_ref()
+        self.style_at(start)
+    }
+
+    /// Puts the layout block `html` lays out in place of the one the selection holds, as one
+    /// undoable edit that leaves the new block selected. `None`, changing nothing, when the
+    /// selection holds no layout block alone, or when nothing in `html` shows.
+    pub(crate) fn replace_selected_layout(&mut self, html: &str) -> Option<ComposeSelection> {
+        self.selected_layout()?;
+        let block = LayoutBlock::new(html)?;
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let (text, mut runs) = layout_runs(block);
+        // It lines up as the block it replaces did.
+        let align = self.style_at(start).map(|style| style.align);
+        for run in &mut runs {
+            run.style.align = align.unwrap_or_default();
+        }
+        let caret = start + text.len();
+        self.replace_runs(start..end, &text, &runs, caret);
+        Some(self.update_selection(to_i32(start), to_i32(caret)))
+    }
+
+    /// Takes the layout block the selection holds apart into text in the message's formatting,
+    /// as one undoable edit with the caret after it. `None` when the selection holds no layout
+    /// block alone, or one with no text.
+    fn edit_layout_as_text(&mut self, start: usize, end: usize) -> Option<ComposeSelection> {
+        let block = Arc::clone(self.selected_layout()?);
+        let (text, runs) = block.styled_text(&self.base)?;
+        let caret = start + text.len();
+        Some(self.replace_runs(start..end, &text, &runs, caret))
     }
 
     /// The images in the text, in order.
     pub(crate) fn images(&self) -> impl Iterator<Item = &Arc<InlineImage>> {
-        self.styles
-            .iter()
-            .filter_map(|run| run.style.image.as_ref())
+        self.styles.iter().filter_map(|run| run.style.image())
+    }
+
+    /// The layout blocks in the text, in order.
+    pub(crate) fn layouts(&self) -> impl Iterator<Item = &Arc<LayoutBlock>> {
+        self.styles.iter().filter_map(|run| run.style.layout())
     }
 
     /// The text as mail read as plain text gets it: each link followed by its address where its
@@ -1200,19 +1383,10 @@ impl RichComposeDocument {
         Some(self.replace_styled(0..end, &text, self.base.clone(), caret))
     }
 
-    /// The text as plain text shows it, each image as its description.
+    /// The text as plain text shows it, each image as its description and each layout block
+    /// as its text.
     pub(crate) fn text_with_image_descriptions(&self) -> String {
-        let mut text = String::with_capacity(self.text.len());
-        let mut copied = 0;
-        for (offset, _) in self.text.match_indices(IMAGE_PLACEHOLDER) {
-            if let Some(image) = self.style_at(offset).and_then(|style| style.image.as_ref()) {
-                text.push_str(&self.text[copied..offset]);
-                text.push_str(&image.description());
-                copied = offset + IMAGE_PLACEHOLDER.len_utf8();
-            }
-        }
-        text.push_str(&self.text[copied..]);
-        text
+        objects_as_text(&self.text, &self.styles, true)
     }
 
     /// The selection as HTML and as plain text, for the clipboard: the HTML pastes back into a
@@ -1238,9 +1412,11 @@ impl RichComposeDocument {
             ..Self::default()
         };
         let html = part.body_html()?;
+        // Other apps read pictures as their alt text, and layout blocks as their text.
+        let text = objects_as_text(&part.text, &part.styles, false);
         Some((
             format!("{COPIED_MARK}{html}"),
-            with_plain_text_quotes(&part.text),
+            with_plain_text_quotes(&text),
         ))
     }
 
@@ -1375,13 +1551,19 @@ impl RichComposeDocument {
                             link: style.link.clone(),
                             link_is_auto: style.link_is_auto,
                             align: style.align,
-                            image: style.image.clone(),
+                            embed: style.embed.clone(),
                             ..base.clone()
                         };
                     });
                 }
                 // What the selection holds goes, as a selected image's Remove button asks.
                 "delete" if start != end => return self.insert_text(""),
+                // A selected layout block's Edit as text.
+                "layout-text" => {
+                    if let Some(selection) = self.edit_layout_as_text(start, end) {
+                        return selection;
+                    }
+                }
                 "bullet" => return self.toggle_block(BlockKind::Bullet, start, end),
                 "number" => return self.toggle_block(BlockKind::Number, start, end),
                 "quote" => return self.toggle_block(BlockKind::Quote, start, end),
@@ -1557,8 +1739,11 @@ impl RichComposeDocument {
         let before = self.begin_style_edit(start_byte..end_byte);
         self.typing_override = None;
         self.edit_styles(start_byte, end_byte, |style| {
-            style.link = normalized.clone();
-            style.link_is_auto = false;
+            // A layout block keeps the links it has, and takes none around it.
+            if style.layout().is_none() {
+                style.link = normalized.clone();
+                style.link_is_auto = false;
+            }
         });
         self.selection = (to_i32(start_byte), to_i32(end_byte));
         self.bump_revision();
@@ -1587,13 +1772,13 @@ impl RichComposeDocument {
             .iter()
             .map(|run| {
                 let mut run = run.clone();
-                if let Some(image) = &run.style.image
-                    && let Some(data) = file(image)
+                if let Some(image) = run.style.image().cloned()
+                    && let Some(data) = file(&image)
                 {
-                    run.style.image = Some(Arc::new(InlineImage {
+                    run.style.embed = Some(Embed::Image(Arc::new(InlineImage {
                         data,
-                        ..InlineImage::clone(image)
-                    }));
+                        ..InlineImage::clone(&image)
+                    })));
                 }
                 run
             })
@@ -1765,7 +1950,7 @@ impl RichComposeDocument {
             .styles
             .iter()
             .filter(|run| run.range.start < end_byte && run.range.end > start_byte)
-            .filter_map(|run| run.style.image.as_ref())
+            .filter_map(|run| run.style.image())
             .any(|image| {
                 let mut changed = InlineImage::clone(image);
                 edit(&mut changed);
@@ -1775,11 +1960,11 @@ impl RichComposeDocument {
             return;
         }
         self.set_text_style(start_byte, end_byte, |style| {
-            if let Some(image) = &style.image {
+            if let Some(image) = style.image() {
                 let mut changed = InlineImage::clone(image);
                 edit(&mut changed);
                 if changed != **image {
-                    style.image = Some(Arc::new(changed));
+                    style.embed = Some(Embed::Image(Arc::new(changed)));
                 }
             }
         });
@@ -2646,6 +2831,16 @@ fn append_image_html(output: &mut String, image: &InlineImage) {
     );
 }
 
+/// A layout block as it goes out: its HTML as it was kept, in a `<div>` that marks it, so a
+/// draft reopens with it as a block again.
+fn append_layout_html(output: &mut String, block: &LayoutBlock) {
+    output.push_str("<div class=\"");
+    output.push_str(flectar_mail_core::signatures::LAYOUT_CLASS);
+    output.push_str("\">");
+    output.push_str(&block.html);
+    output.push_str("</div>");
+}
+
 /// The CSS for an image shown `width` pixels across.
 fn image_css(width: u32) -> String {
     format!("width:{width}px;max-width:100%;height:auto")
@@ -2727,6 +2922,18 @@ fn append_html_run(
     if range.is_empty() {
         return;
     }
+    // A layout block holds links of its own, so none goes around it.
+    if let Some(block) = style.layout() {
+        for character in text[range].chars() {
+            if character == OBJECT_PLACEHOLDER {
+                append_layout_html(output, block);
+            } else {
+                append_html_char(output, character);
+            }
+        }
+        *after_space = false;
+        return;
+    }
     if let Some(url) = style.link.as_deref() {
         output.push_str("<a href=\"");
         for character in url.chars() {
@@ -2734,9 +2941,9 @@ fn append_html_run(
         }
         output.push_str("\">");
     }
-    if let Some(image) = &style.image {
+    if let Some(image) = style.image() {
         for character in text[range].chars() {
-            if character == IMAGE_PLACEHOLDER {
+            if character == OBJECT_PLACEHOLDER {
                 append_image_html(output, image);
             } else {
                 append_html_char(output, character);
@@ -2817,17 +3024,81 @@ enum HtmlToken {
     },
     End(String),
     Text(String),
+    /// A layout block as `append_layout_html` writes it: the HTML in its `<div>`.
+    Layout(String),
 }
 
-struct HtmlTokenSink(RefCell<Vec<HtmlToken>>);
+#[derive(Default)]
+struct HtmlTokenSink {
+    tokens: RefCell<Vec<HtmlToken>>,
+    /// The layout block being read: how many `<div>`s deep in it, and its HTML so far.
+    layout: RefCell<Option<(usize, String)>>,
+}
+
+impl HtmlTokenSink {
+    /// Takes `token` into the layout block being read, if there is one. A block's HTML is
+    /// written as it was, to be cleaned again as a block.
+    fn read_layout(&self, token: &Token) -> bool {
+        let mut layout = self.layout.borrow_mut();
+        let Some((depth, html)) = layout.as_mut() else {
+            return false;
+        };
+        match token {
+            Token::TagToken(tag) if tag.kind == TagKind::StartTag => {
+                if tag.name.as_str() == "div" {
+                    *depth += 1;
+                }
+                crate::compose_paste::push_start_tag(
+                    html,
+                    tag.name.as_str(),
+                    tag.attrs
+                        .iter()
+                        .map(|attribute| (attribute.name.local.as_str(), &*attribute.value)),
+                );
+            }
+            Token::TagToken(tag) if tag.name.as_str() == "div" && *depth == 1 => {
+                let html = std::mem::take(html);
+                *layout = None;
+                self.tokens.borrow_mut().push(HtmlToken::Layout(html));
+            }
+            Token::TagToken(tag) => {
+                if tag.name.as_str() == "div" {
+                    *depth -= 1;
+                }
+                html.push_str("</");
+                html.push_str(tag.name.as_str());
+                html.push('>');
+            }
+            Token::CharacterTokens(text) => crate::compose_paste::push_text(html, text),
+            _ => {}
+        }
+        true
+    }
+}
 
 impl TokenSink for HtmlTokenSink {
     type Handle = ();
 
     fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+        if self.read_layout(&token) {
+            return TokenSinkResult::Continue;
+        }
         let token = match token {
             Token::TagToken(tag) if tag.kind == TagKind::EndTag => {
                 HtmlToken::End(tag.name.as_str().to_owned())
+            }
+            Token::TagToken(tag)
+                if tag.name.as_str() == "div"
+                    && tag.attrs.iter().any(|attribute| {
+                        attribute.name.local.as_str() == "class"
+                            && attribute
+                                .value
+                                .split_ascii_whitespace()
+                                .any(|class| class == flectar_mail_core::signatures::LAYOUT_CLASS)
+                    }) =>
+            {
+                *self.layout.borrow_mut() = Some((1, String::new()));
+                return TokenSinkResult::Continue;
             }
             Token::TagToken(tag) => {
                 let attribute = |wanted: &str| {
@@ -2850,7 +3121,7 @@ impl TokenSink for HtmlTokenSink {
             Token::CharacterTokens(text) => HtmlToken::Text(text.to_string()),
             _ => return TokenSinkResult::Continue,
         };
-        self.0.borrow_mut().push(token);
+        self.tokens.borrow_mut().push(token);
         TokenSinkResult::Continue
     }
 }
@@ -2968,7 +3239,7 @@ impl HtmlImport {
                 .and_then(|span| span.family)
                 .unwrap_or_default(),
             align: Alignment::default(),
-            image: None,
+            embed: None,
         }
     }
 
@@ -3000,12 +3271,31 @@ impl HtmlImport {
             self.push(" ", space);
         }
         let style = CharacterStyle {
-            image: Some(Arc::new(image)),
+            embed: Some(Embed::Image(Arc::new(image))),
             ..self.style()
         };
-        self.push(IMAGE_PLACEHOLDER.encode_utf8(&mut [0; 4]), style);
+        self.push(OBJECT_PLACEHOLDER.encode_utf8(&mut [0; 4]), style);
         self.line_has_text = true;
         Some(())
+    }
+
+    /// A layout block as `append_layout_html` writes it, cleaned again. One with nothing left
+    /// to show leaves no place in the text.
+    fn layout(&mut self, html: &str) {
+        let Some(block) = LayoutBlock::new(html) else {
+            return;
+        };
+        if !self.line_open {
+            self.start_line();
+        }
+        if let Some(space) = self.pending_space.take() {
+            self.push(" ", space);
+        }
+        self.push(
+            OBJECT_PLACEHOLDER.encode_utf8(&mut [0; 4]),
+            layout_style(block),
+        );
+        self.line_has_text = true;
     }
 
     fn push(&mut self, text: &str, style: CharacterStyle) {
@@ -3063,6 +3353,7 @@ impl HtmlImport {
     fn token(&mut self, token: HtmlToken) -> Option<()> {
         match token {
             HtmlToken::Text(text) => self.characters(&text),
+            HtmlToken::Layout(html) => self.layout(&html),
             HtmlToken::Start {
                 name,
                 src,
@@ -3249,14 +3540,58 @@ impl HtmlImport {
     }
 }
 
-/// A signature's text and formatting: the composer's own HTML as it wrote it, and other HTML
-/// with the formatting pasting keeps, without the blank space around it. `None` when it holds
-/// no text.
+/// A signature's text and formatting, without the blank space around it: the composer's own
+/// HTML as it wrote it, other HTML that lays its text out in a table or with rules as one
+/// layout block that keeps it, and the rest with the formatting pasting keeps. `None` when it
+/// holds no text.
 fn signature_runs(html: &str, base: &CharacterStyle) -> Option<(String, Vec<ComposeStyleRun>)> {
     import_body_html(html)
+        .or_else(|| {
+            crate::compose_paste::layout_html(html)
+                .and_then(|layout| LayoutBlock::new(&layout))
+                .map(layout_runs)
+        })
         .or_else(|| crate::compose_paste::styled_text(html, base))
         .map(|(text, runs)| trimmed_runs(text, runs))
         .filter(|(text, _)| !text.is_empty())
+}
+
+/// `text`, styled by `runs`, with each image in its place as its description, or as its alt
+/// text alone when `described` is false, and each layout block as its text.
+fn objects_as_text(text: &str, runs: &[ComposeStyleRun], described: bool) -> String {
+    let mut shown_text = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (offset, _) in text.match_indices(OBJECT_PLACEHOLDER) {
+        let shown = match style_at_runs(runs, offset).and_then(|style| style.embed.as_ref()) {
+            Some(Embed::Image(image)) if described => image.description(),
+            Some(Embed::Image(image)) => image.alt.trim().to_owned(),
+            Some(Embed::Layout(block)) => block.plain_text(described),
+            None => continue,
+        };
+        shown_text.push_str(&text[copied..offset]);
+        shown_text.push_str(&shown);
+        copied = offset + OBJECT_PLACEHOLDER.len_utf8();
+    }
+    shown_text.push_str(&text[copied..]);
+    shown_text
+}
+
+/// The style of an object placeholder that holds `block`.
+fn layout_style(block: LayoutBlock) -> CharacterStyle {
+    CharacterStyle {
+        embed: Some(Embed::Layout(Arc::new(block))),
+        ..CharacterStyle::default()
+    }
+}
+
+/// `block` as text: the placeholder that holds it.
+fn layout_runs(block: LayoutBlock) -> (String, Vec<ComposeStyleRun>) {
+    let text = OBJECT_PLACEHOLDER.to_string();
+    let runs = vec![ComposeStyleRun {
+        range: 0..text.len(),
+        style: layout_style(block),
+    }];
+    (text, runs)
 }
 
 /// Whether text in `style` reads the same as plain text in `base`: no marks, colors, other
@@ -3268,7 +3603,7 @@ fn is_plain_style(style: &CharacterStyle, base: &CharacterStyle) -> bool {
         && style.size == base.size
         && style.family == base.family
         && style.align == Alignment::Left
-        && style.image.is_none()
+        && style.embed.is_none()
         && (style.link.is_none() || style.link_is_auto)
 }
 
@@ -3308,15 +3643,17 @@ fn plain_text_of(
         if !continues_link {
             link_start = range.start;
         }
-        match &run.style.image {
-            Some(image) => {
+        match &run.style.embed {
+            Some(embed) => {
                 for (local, character) in text[range.clone()].char_indices() {
-                    if character == IMAGE_PLACEHOLDER {
+                    if character == OBJECT_PLACEHOLDER {
                         copy(&mut plain, range.start + local..range.start + local);
-                        if described {
-                            plain.push_str(&image.description());
-                        } else {
-                            plain.push_str(image.alt.trim());
+                        match embed {
+                            Embed::Image(image) if described => {
+                                plain.push_str(&image.description());
+                            }
+                            Embed::Image(image) => plain.push_str(image.alt.trim()),
+                            Embed::Layout(block) => plain.push_str(&block.plain_text(described)),
                         }
                     } else {
                         let start = range.start + local;
@@ -3390,13 +3727,13 @@ fn trimmed_runs(text: String, runs: Vec<ComposeStyleRun>) -> (String, Vec<Compos
 }
 
 fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
-    let tokenizer = Tokenizer::new(HtmlTokenSink(RefCell::default()), Default::default());
+    let tokenizer = Tokenizer::new(HtmlTokenSink::default(), Default::default());
     let input = BufferQueue::default();
     input.push_back(html.into());
     let _ = tokenizer.feed(&input);
     tokenizer.end();
     let mut import = HtmlImport::default();
-    for token in tokenizer.sink.0.into_inner() {
+    for token in tokenizer.sink.tokens.into_inner() {
         import.token(token)?;
     }
     import.finish()
@@ -5209,7 +5546,10 @@ mod tests {
         document.load("Hello world", 0, 0);
         document.update_selection(6, 11);
         let selection = document
-            .paste_html("<b>there</b> <span style=\"color:#cc0000\">friend</span>")
+            .paste_html(
+                "<b>there</b> <span style=\"color:#cc0000\">friend</span>",
+                PastedLayout::Merge,
+            )
             .unwrap();
         assert_eq!(document.text(), "Hello there friend");
         assert_eq!(selection, ComposeSelection { start: 18, end: 18 });
@@ -5221,7 +5561,10 @@ mod tests {
         // HTML without text leaves the plain text to paste.
         assert!(
             document
-                .paste_html("<img src=\"https://example.com/a.png\">")
+                .paste_html(
+                    "<img src=\"https://example.com/a.png\">",
+                    PastedLayout::Merge
+                )
                 .is_none()
         );
     }
@@ -5232,7 +5575,10 @@ mod tests {
         let mut document = RichComposeDocument::default();
         document.load("", 0, 0);
         document
-            .paste_html("<div>\n  Hello\n  <b>there</b>\n</div>\n<div>again</div>")
+            .paste_html(
+                "<div>\n  Hello\n  <b>there</b>\n</div>\n<div>again</div>",
+                PastedLayout::Merge,
+            )
             .unwrap();
         assert_eq!(document.text(), "Hello there\nagain");
         assert_eq!(document.style_at(6).unwrap().marks, BOLD);
@@ -5243,12 +5589,12 @@ mod tests {
         let list = "<ul><li>first</li><li>second</li></ul>";
         let mut document = RichComposeDocument::default();
         document.load("Items: ", 7, 7);
-        document.paste_html(list).unwrap();
+        document.paste_html(list, PastedLayout::Merge).unwrap();
         assert_eq!(document.text(), "Items: first\n• second");
 
         let mut document = RichComposeDocument::default();
         document.load("Items:\n", 7, 7);
-        document.paste_html(list).unwrap();
+        document.paste_html(list, PastedLayout::Merge).unwrap();
         assert_eq!(document.text(), "Items:\n• first\n• second");
     }
 
@@ -5274,7 +5620,7 @@ mod tests {
 
         let mut pasted = RichComposeDocument::default();
         pasted.load("", 0, 0);
-        pasted.paste_html(&html).unwrap();
+        pasted.paste_html(&html, PastedLayout::Merge).unwrap();
         assert_eq!(pasted.text(), text);
         assert_eq!(pasted.styles, document.styles);
 
@@ -5472,7 +5818,7 @@ mod tests {
             "Hi Ana\nChartThe plan <https://example.org/plan> is ready"
         );
         // The caret stays after the pictures' alt text.
-        let placeholders = 2 * IMAGE_PLACEHOLDER.len_utf8() as i32;
+        let placeholders = 2 * OBJECT_PLACEHOLDER.len_utf8() as i32;
         assert_eq!(
             selection.start,
             caret.start - placeholders + "Chart".len() as i32
@@ -5555,7 +5901,7 @@ mod tests {
         document.insert_image(InlineImage::from_file_bytes(png(1200, 600), "").unwrap());
         document.insert_image(InlineImage::from_file_bytes(png(200, 100), "").unwrap());
         let text = document.text().to_owned();
-        let first = 4..4 + IMAGE_PLACEHOLDER.len_utf8();
+        let first = 4..4 + OBJECT_PLACEHOLDER.len_utf8();
         let second = first.end..text.len();
 
         // Only a selection of one image has controls.
@@ -5573,8 +5919,8 @@ mod tests {
             document
                 .style_at(range.start)
                 .unwrap()
-                .image
-                .clone()
+                .image()
+                .cloned()
                 .unwrap()
         };
         document.format(
@@ -5812,7 +6158,7 @@ mod tests {
         let text = format!("{}x", document.text());
         let end = text.len() as i32;
         document.synchronize_key_edit(&text, end, end, "x");
-        assert_eq!(document.style_at(text.len() - 1).unwrap().image, None);
+        assert_eq!(document.style_at(text.len() - 1).unwrap().embed, None);
         assert_eq!(document.images().count(), 1);
 
         // Removing formatting leaves the image.
@@ -5860,5 +6206,285 @@ mod tests {
             assert_eq!(document.load_html(html, text), None, "{html}");
             assert_eq!(document.text(), "unchanged");
         }
+    }
+
+    /// A signature as a browser copies it from a signature generator: the logo in a cell on the
+    /// left, the details beside it with rules between them (#549).
+    fn layout_signature() -> String {
+        use base64::Engine;
+        let logo = base64::engine::general_purpose::STANDARD.encode(png(48, 48));
+        format!(
+            "<html><body><!--StartFragment--><table role=\"presentation\" cellpadding=\"0\" \
+             cellspacing=\"0\" border=\"0\"><tr><td valign=\"top\" style=\"padding-right:12px\">\
+             <img src=\"data:image/png;base64,{logo}\" width=\"48\" height=\"48\" alt=\"Logo\">\
+             </td><td valign=\"top\"><b>Zoë Ortiz</b><br>Head of design<hr \
+             style=\"border:0;border-top:1px solid #d0d7de\"><a href=\"https://example.org\">\
+             example.org</a><script>alert(1)</script></td></tr></table><!--EndFragment-->\
+             </body></html>"
+        )
+    }
+
+    #[test]
+    fn a_signature_keeps_a_pasted_layout_that_a_message_takes_as_text() {
+        let pasted = layout_signature();
+        let mut signature = RichComposeDocument::default();
+        signature.load("", 0, 0);
+        let selection = signature.paste_html(&pasted, PastedLayout::Keep).unwrap();
+        assert_eq!(signature.text(), "\u{fffc}");
+        assert_eq!(selection, ComposeSelection { start: 3, end: 3 });
+        let block = Arc::clone(signature.layouts().next().unwrap());
+        for kept in [
+            "<table role=\"presentation\" cellpadding=\"0\"",
+            "valign=\"top\"",
+            "style=\"padding-right:12px\"",
+            "src=\"data:image/png;base64,",
+            "<hr style=\"border:0;border-top:1px solid #d0d7de\">",
+            "href=\"https://example.org\"",
+        ] {
+            assert!(block.html.contains(kept), "{kept} in {}", block.html);
+        }
+        assert!(!block.html.contains("script"), "{}", block.html);
+        // It goes out as it is, and opens to write again as the same block.
+        let html = signature.body_html().unwrap();
+        assert!(
+            html.starts_with("<div><div class=\"flectar-layout\"><table"),
+            "{html}"
+        );
+        let mut reopened = RichComposeDocument::default();
+        reopened.load_signature_html(&html);
+        assert_eq!(reopened.text(), "\u{fffc}");
+        assert_eq!(reopened.layouts().next().unwrap().html, block.html);
+        // Saving it cleans it the same way again.
+        let saved = flectar_mail_core::signatures::sanitize_html(&html);
+        assert_eq!(saved, html);
+
+        // A message takes the same copy as text in its own formatting.
+        let mut message = RichComposeDocument::default();
+        message.load("", 0, 0);
+        message.paste_html(&pasted, PastedLayout::Merge).unwrap();
+        assert!(message.layouts().next().is_none());
+        assert!(
+            message.text().contains("Zoë Ortiz\nHead of design"),
+            "{:?}",
+            message.text()
+        );
+        // A copy with nothing laid out goes in as text in a signature too.
+        signature
+            .paste_html("<b>Pat</b> Lee", PastedLayout::Keep)
+            .unwrap();
+        assert_eq!(signature.text(), "\u{fffc}Pat Lee");
+    }
+
+    #[test]
+    fn a_layout_block_reads_as_its_text_in_plain_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        // Its cells sit side by side, a tab apart, as browsers write a table's text.
+        let plain = document.plain_text();
+        assert!(
+            plain.starts_with("[image: Logo]\tZoë Ortiz\nHead of design"),
+            "{plain:?}"
+        );
+        assert!(plain.ends_with("example.org"), "{plain:?}");
+        assert_eq!(document.text_with_image_descriptions(), plain);
+        assert_eq!(
+            signature_preview(&document.body_html().unwrap()),
+            plain,
+            "Settings previews it as its text"
+        );
+        // Taking the formatting out leaves its text.
+        let end = document.text().len() as i32;
+        document.format("clear", document.text().to_owned().as_str(), 0, end);
+        assert!(
+            document.layouts().next().is_some(),
+            "clearing styles keeps it"
+        );
+        assert!(document.make_plain().is_some());
+        assert!(document.layouts().next().is_none());
+        assert!(document.text().contains("Head of design"));
+    }
+
+    #[test]
+    fn signatures_from_elsewhere_keep_their_tables_as_a_block() {
+        // As another mail app wrote it, outside the composer.
+        let thunderbird = "<div>Best,</div><table cellpadding=\"4\"><tr><td><b>Ana</b></td>\
+                           <td>List moderator</td></tr></table>";
+        let mut editor = RichComposeDocument::default();
+        editor.load_signature_html(thunderbird);
+        assert_eq!(editor.text(), "\u{fffc}");
+        let block = editor.layouts().next().unwrap();
+        // Marked for screen readers as a table that only lays it out.
+        assert!(
+            block
+                .html
+                .contains("<div>Best,</div><table cellpadding=\"4\" role=\"presentation\">")
+        );
+        // In a message, it goes in under the separator as a block, and as text in plain text.
+        let mut message = RichComposeDocument::default();
+        message.load("", 0, 0);
+        let (_, inserted) = message.replace_signature(None, 0, Some(thunderbird), false);
+        assert_eq!(inserted.as_deref(), Some("\n\n-- \n\u{fffc}"));
+        let mut plain = RichComposeDocument::default();
+        plain.load("", 0, 0);
+        let (_, inserted) = plain.replace_signature(None, 0, Some(thunderbird), true);
+        assert_eq!(
+            inserted.as_deref(),
+            Some("\n\n-- \nBest,\nAna\tList moderator")
+        );
+        // One with nothing laid out opens as text to edit, as before.
+        editor.load_signature_html("<div>Pat Lee<br><i>Support</i></div>");
+        assert_eq!(editor.text(), "Pat Lee\nSupport");
+        assert!(editor.layouts().next().is_none());
+    }
+
+    #[test]
+    fn drafts_reopen_with_their_layout_blocks() {
+        let mut signature = RichComposeDocument::default();
+        signature.load("", 0, 0);
+        signature
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let html = signature.body_html().unwrap();
+        let mut message = RichComposeDocument::default();
+        message.load("Thanks", 6, 6);
+        message.replace_signature(None, 6, Some(&html), false);
+        let draft_html = message.body_html_with(false, |_| None).unwrap();
+        let draft_text = message.text().to_owned();
+        assert_eq!(draft_text, "Thanks\n\n-- \n\u{fffc}");
+
+        let mut reopened = RichComposeDocument::default();
+        assert!(reopened.load_html(&draft_html, &draft_text).is_some());
+        assert_eq!(reopened.text(), draft_text);
+        assert_eq!(
+            reopened.layouts().next().unwrap().html,
+            signature.layouts().next().unwrap().html
+        );
+        // A server's sanitized copy keeps the class among other attributes.
+        let served = draft_html.replace(
+            "<div class=\"flectar-layout\">",
+            "<div data-x=\"1\" class=\"flectar-layout x\">",
+        );
+        let mut reopened = RichComposeDocument::default();
+        assert!(reopened.load_html(&served, &draft_text).is_some());
+        assert!(reopened.layouts().next().is_some());
+        // What a block holds is cleaned again, whoever wrote it.
+        let tampered = draft_html.replace(
+            "<table",
+            "<img src=\"https://tracker.example/p.gif\"><table onclick=\"x()\"",
+        );
+        let mut reopened = RichComposeDocument::default();
+        assert!(reopened.load_html(&tampered, &draft_text).is_some());
+        let block = reopened.layouts().next().unwrap();
+        assert!(!block.html.contains("tracker.example"), "{}", block.html);
+        assert!(!block.html.contains("onclick"), "{}", block.html);
+    }
+
+    #[test]
+    fn a_layout_block_edits_as_text_and_takes_no_link() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let text = document.text().to_owned();
+        let end = text.len() as i32;
+        document.set_link("https://example.com", &text, 0, end);
+        assert_eq!(document.style_at(0).unwrap().link, None);
+        assert!(!document.body_html().unwrap().contains("example.com"));
+
+        // Selected, it's taken apart into lines, which undo puts back together.
+        document.update_selection(0, end);
+        assert!(document.selected_layout().is_some());
+        assert!(document.selected_image().is_none());
+        document.format("layout-text", &text, 0, end);
+        assert!(document.layouts().next().is_none());
+        assert_eq!(document.images().count(), 1);
+        assert!(
+            document
+                .text()
+                .starts_with("\u{fffc}\tZoë Ortiz\nHead of design\nexample.org"),
+            "{:?}",
+            document.text()
+        );
+        document.history("undo");
+        assert_eq!(document.text(), text);
+        assert!(document.layouts().next().is_some());
+    }
+
+    #[test]
+    fn a_copied_layout_block_pastes_back_as_a_block() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let end = document.text().len() as i32;
+        document.update_selection(0, end);
+        let (html, plain) = document.selection_html().unwrap();
+        // Other apps get its text, the logo as its alt text.
+        assert_eq!(plain, "Logo\tZoë Ortiz\nHead of design\nexample.org");
+        let mut message = RichComposeDocument::default();
+        message.load("", 0, 0);
+        message.paste_html(&html, PastedLayout::Merge).unwrap();
+        assert_eq!(message.text(), "\u{fffc}");
+        assert!(message.layouts().next().is_some());
+    }
+
+    #[test]
+    fn a_layout_block_is_edited_by_hand_with_its_pictures_referred_to() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let before = Arc::clone(document.layouts().next().unwrap());
+        let end = document.text().len() as i32;
+        document.update_selection(0, end);
+        // Its picture is referred to rather than written out.
+        let (html, pictures) = document.selected_layout().unwrap().html_to_edit();
+        assert_eq!(pictures.len(), 1);
+        assert!(pictures[0].starts_with("data:image/png;base64,"));
+        assert!(html.contains("src=\"cid:picture1\""), "{html}");
+        assert!(!html.contains("data:"), "{html}");
+
+        let edited = html.replace("Head of design", "Head of product");
+        let restored = with_pictures_restored(&edited, &pictures);
+        let selection = document.replace_selected_layout(&restored).unwrap();
+        assert_eq!(selection, ComposeSelection { start: 0, end: 3 });
+        let after = Arc::clone(document.layouts().next().unwrap());
+        assert!(after.html.contains("Head of product"), "{}", after.html);
+        assert!(after.html.contains(&pictures[0]), "its picture is back");
+        // One undo puts the block back as it was.
+        document.history("undo");
+        assert_eq!(document.layouts().next().unwrap().html, before.html);
+
+        // HTML with nothing to show changes nothing, and a reference to no picture goes.
+        document.update_selection(0, end);
+        assert_eq!(document.replace_selected_layout("<div> </div>"), None);
+        assert_eq!(document.layouts().next().unwrap().html, before.html);
+        let unknown =
+            with_pictures_restored("<p>Pat<img src=\"cid:picture9\" alt=\"x\"></p>", &pictures);
+        document.replace_selected_layout(&unknown).unwrap();
+        assert_eq!(&*document.layouts().next().unwrap().html, "<p>Pat</p>");
+        // Only a selected layout block is replaced.
+        document.load("Text", 0, 4);
+        assert_eq!(document.replace_selected_layout(&restored), None);
+    }
+
+    #[test]
+    fn signatures_keep_their_formatting_through_their_cleaner() {
+        // The cleaner writes font lists with spaces around their commas.
+        let mut written = RichComposeDocument::default();
+        written.load("Zoë Ortiz\n", 0, 0);
+        written.format("family:serif", "Zoë Ortiz\n", 0, "Zoë Ortiz".len() as i32);
+        let saved = flectar_mail_core::signatures::sanitize_html(&written.body_html().unwrap());
+        assert!(saved.contains("Times New Roman , Times , serif"), "{saved}");
+        assert!(import_body_html(&saved).is_some(), "{saved}");
+        let mut reopened = RichComposeDocument::default();
+        reopened.load_signature_html(&saved);
+        assert_eq!(reopened.style_at(0).unwrap().family, FontFamily::Serif);
     }
 }
