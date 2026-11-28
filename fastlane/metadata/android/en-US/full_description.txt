@@ -1,0 +1,24 @@
+Flectar Mail is a fast, native home for your email, calendars and contacts. It starts quickly, works offline, and keeps your mail on your device.
+
+All your accounts in one place
+• One inbox for all your accounts, with conversations grouped
+• Works with IMAP, POP3, SMTP, JMAP, CalDAV and CardDAV servers
+• Gmail, Outlook and Microsoft 365 sign in with your own Google or Microsoft app registration for now. Gmail also works with an app password.
+• Calendars and contacts next to your mail, and calendar invitations you can answer from the message
+
+Write and organize
+• Rich text editor with spell check, signatures and templates
+• Undo send, send later, snooze and reply reminders
+• Rules, blocked senders and unsubscribe links
+• Search across all your mail, with saved searches
+• New-mail notifications
+
+Private by design
+• Remote images stay blocked until you allow them, so tracking pixels can't tell when you read a message
+• Messages are drawn by Flectar Mail's own Rust engine, never in a web view, and email scripts never run
+• No ads and no Flectar account. Your mail is stored on your device and goes to your mail servers, and to translation or AI services only if you set them up and use them.
+
+Open source
+Flectar Mail is open-source software under the GNU AGPL 3.0. Source code, issues and translations: https://github.com/flectar/mail
+
+Flectar Mail is in beta. Some complex messages may not display correctly yet, and reports help us fix them.

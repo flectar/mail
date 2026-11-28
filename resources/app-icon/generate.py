@@ -13,7 +13,9 @@ is the master itself and is not generated. Outputs:
 - platform/ios/Assets.xcassets/AppIcon<Name>.appiconset: opaque 1024 px
   alternate icons;
 - platform/android/.../res: adaptive launcher icons for the launcher aliases;
-- platform/windows/msix/Assets: the master icon's logos for the Store package.
+- platform/windows/msix/Assets: the master icon's logos for the Store package;
+- fastlane/metadata/android/en-US/images/icon.png: the Google Play listing's
+  512 px icon, full bleed because Play rounds its corners.
 
 Rasterizing needs the resvg command-line tool (`cargo install resvg`); --check
 only reads files, and also checks that the Android manifest and the iOS
@@ -38,6 +40,7 @@ IOS_PROJECT = PROJECT / "platform/ios/project.yml"
 ANDROID_MAIN = PROJECT / "platform/android/gradle/app/src/main"
 ANDROID_RES = ANDROID_MAIN / "res"
 WINDOWS_ASSETS = PROJECT / "platform/windows/msix/Assets"
+PLAY_ICON = PROJECT / "fastlane/metadata/android/en-US/images/icon.png"
 
 # Background gradients run from the bottom stop to the top stop, like the
 # master's. A glyph gradient replaces the white envelope.
@@ -352,6 +355,7 @@ def expected_rasters():
     rasters.update({IOS_ASSETS / f"AppIcon{title(name)}.appiconset/AppIcon-1024.png": (1024, 2)
                     for name in VARIANTS})
     rasters.update({WINDOWS_ASSETS / name: (size, 6) for name, (size, _) in windows_logos().items()})
+    rasters[PLAY_ICON] = (512, 6)
     return rasters
 
 
@@ -487,7 +491,7 @@ def main():
                 if ico_sizes(path) != ICO_SIZES:
                     raise ValueError(f"{path.relative_to(PROJECT)} has the sizes {ico_sizes(path)}, "
                                      f"expected {ICO_SIZES}")
-            print(f"Checked {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
+            print(f"Checked {len(VARIANTS)} icon variants, the macOS icon set and the store icons: "
                   f"{len(texts)} files, {len(rasters)} rasters and {len(icons)} Windows icons")
             return 0
         for path, text in texts.items():
@@ -501,6 +505,8 @@ def main():
         for name in VARIANTS:
             for label, size in RASTERS:
                 rasterize(VARIANTS_DIR / f"{name}.svg", VARIANTS_DIR / f"{name}-{label}.png", size)
+        PLAY_ICON.parent.mkdir(parents=True, exist_ok=True)
+        rasterize(ROOT / "flectar-mail-nonmasked.svg", PLAY_ICON, 512)
         full_bleed = (ROOT / "flectar-mail-nonmasked.svg").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as directory:
             for name, colors in VARIANTS.items():
@@ -534,7 +540,7 @@ def main():
                     pngs.append(png.read_bytes())
                 write_ico(icon, pngs)
         check_declarations()
-        print(f"Generated {len(VARIANTS)} icon variants, the macOS icon set and the Store logos: "
+        print(f"Generated {len(VARIANTS)} icon variants, the macOS icon set and the store icons: "
               f"{len(texts)} files, {len(rasters)} rasters and {len(icons)} Windows icons")
         return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as error:

@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- The Google Play feature graphic, 1024 x 500, on Flectar's brand: the warm
+     canvas, Flectar Serif headlines and Flectar Grotesk text. Play crops up to
+     about 152 px from the sides and 76 px from the top and bottom in some
+     formats, so the icon, the text and the top of the screen stay inside
+     that. Play also asks for no device imagery, so the screen has a plain
+     border without a particular phone's buttons or camera.
+
+     scripts/generate-store-assets.sh renders it with Chromium next to
+     icon.svg, screen.png (the app on a phone's screen, from screen.html) and
+     the brand fonts, which it reads from a flectar.com checkout for the
+     render only. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Flectar Serif"; src: url(fonts/FlectarSerif-Regular.woff2) format("woff2"); font-weight: 400; }
+@font-face { font-family: "Flectar Grotesk"; src: url(fonts/FlectarGrotesk-VF.woff2) format("woff2"); font-weight: 300 900; }
+
+html, body { margin: 0; width: 1024px; height: 500px; overflow: hidden; }
+body { background: oklch(96% 0.008 85); color: oklch(20% 0.04 260); position: relative; }
+
+.column { position: absolute; left: 160px; top: 0; bottom: 0; width: 380px; display: flex; flex-direction: column; justify-content: center; }
+.icon { display: block; width: 48px; height: 48px; }
+.text { white-space: nowrap; }
+h1 { font: 400 64px/65px "Flectar Serif", serif; height: 130px; letter-spacing: -1.2px; margin: 26px 0 0; }
+p { font: 19px/28px "Flectar Grotesk", sans-serif; height: 28px; color: oklch(28% 0.01 270 / 78%); margin: 18px 0 0; letter-spacing: -0.1px; }
+
+/* 400 x 860 dp at 0.74 px per dp in a 7 dp border, its top inside the safe area. */
+.screen { position: absolute; left: 560px; top: 80px; width: 296px; height: 636.4px;
+  border: 5px solid #0d0f12; border-radius: 28.7px; background: #0d0f12;
+  box-shadow: 0 28px 60px -22px oklch(20% 0.04 260 / 40%); }
+</style>
+</head>
+<body>
+<div class="column">
+  <img class="icon" src="icon.svg" alt="" decoding="sync">
+  <h1 class="text">Email, made<br>fast again</h1>
+  <p class="text">Mail, calendars and contacts in one native app.</p>
+</div>
+<img class="screen" src="screen.png" alt="" decoding="sync">
+</body>
+</html>
