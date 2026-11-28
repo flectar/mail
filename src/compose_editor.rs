@@ -654,9 +654,13 @@ impl CosmicComposeEditor {
         let last_line_align = if valid_offset(text, selection.end) == text.len() {
             document.typing_style().align
         } else {
-            text.len()
-                .checked_sub(1)
-                .map_or_else(Alignment::default, |end| document.paragraph_alignment(end))
+            // That of the last character, which can take several bytes: an accented letter, an
+            // emoji or a picture.
+            text.char_indices()
+                .next_back()
+                .map_or_else(Alignment::default, |(last, _)| {
+                    document.paragraph_alignment(last)
+                })
         };
         let key = LayoutKey {
             revision: document.revision(),
@@ -2797,6 +2801,33 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn text_ending_in_a_wide_character_lays_out_with_the_caret_elsewhere() {
+        let mut ending_in_a_picture = RichComposeDocument::default();
+        ending_in_a_picture.load("Logo\n", 5, 5);
+        ending_in_a_picture.insert_image(InlineImage::from_file_bytes(red_png(8, 8), "").unwrap());
+        let mut documents = ["Café", "Thanks 👋"].map(|text| {
+            let mut document = RichComposeDocument::default();
+            document.load(text, 0, 0);
+            document
+        });
+        for document in documents.iter_mut().chain([&mut ending_in_a_picture]) {
+            document.update_selection(0, 0);
+            let mut surface = CosmicComposeEditor::default();
+            let rendered = surface.render(
+                document,
+                document.selection(),
+                320.0,
+                120.0,
+                0.0,
+                1.0,
+                spelling_style(),
+                "",
+            );
+            assert!(rendered.content_height > 0.0, "{:?}", document.text());
         }
     }
 
