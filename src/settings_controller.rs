@@ -1063,6 +1063,7 @@ pub(super) fn register_settings_preference_callbacks(
                     name: account.name,
                     email: account.email,
                     initials: account.initials,
+                    avatar_tone: account.avatar_tone,
                     avatar: account.avatar_small,
                     has_avatar: account.has_avatar,
                     other_profile: if member {

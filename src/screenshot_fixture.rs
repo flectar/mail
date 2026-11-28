@@ -175,6 +175,7 @@ fixture_row!(MailboxRow {
     avatar,
     avatar_image,
     has_avatar,
+    avatar_tone,
     is_account,
     count,
     color,
@@ -200,6 +201,7 @@ fixture_row!(EmailRow {
     sender,
     address,
     initials,
+    avatar_tone,
     favicon,
     favicon_small,
     has_favicon,
@@ -251,6 +253,7 @@ fixture_row!(AccountRow {
     status,
     sync_error,
     initials,
+    avatar_tone,
     avatar,
     avatar_small,
     has_avatar,
@@ -393,6 +396,8 @@ fn apply(app: &AppWindow) {
         .set_selected_label(FixtureValue::read(&data["ReaderUi.selected_label"]));
     app.global::<ReaderUi>()
         .set_selected_initials(FixtureValue::read(&data["ReaderUi.selected_initials"]));
+    app.global::<ReaderUi>()
+        .set_selected_avatar_tone(FixtureValue::read(&data["ReaderUi.selected_avatar_tone"]));
     app.global::<ReaderUi>()
         .set_selected_favicon(FixtureValue::read(&data["ReaderUi.selected_favicon"]));
     app.global::<ReaderUi>()

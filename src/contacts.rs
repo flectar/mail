@@ -101,29 +101,13 @@ impl ContactDirectoryState {
 }
 
 fn contact_avatar_tone(contact: &ContactRecord) -> i32 {
-    // FNV-1a gives each contact a stable, inexpensive palette slot. Using the
-    // normalized email keeps the fallback consistent when a display name is
-    // edited and avoids a visibly changing "random" color between launches.
-    let mut hash = 0x811c_9dc5_u32;
-    let identity = if contact.email.is_empty() {
-        contact.id.to_string()
+    // The address keeps the color when the name is edited; a contact without
+    // one keeps its id's.
+    if contact.email.is_empty() {
+        crate::avatar_tone::avatar_tone(&contact.id.to_string())
     } else {
-        contact.email.clone()
-    };
-    let email = identity.trim();
-    // Unicode lowercasing can depend on surrounding characters (Greek sigma).
-    // Keep that normalization for non-ASCII addresses, but hash ordinary email
-    // bytes directly without an intermediate string.
-    let normalized = if email.is_ascii() {
-        std::borrow::Cow::Borrowed(email)
-    } else {
-        std::borrow::Cow::Owned(email.to_lowercase())
-    };
-    for byte in normalized.bytes().map(|byte| byte.to_ascii_lowercase()) {
-        hash ^= u32::from(byte);
-        hash = hash.wrapping_mul(0x0100_0193);
+        crate::avatar_tone::avatar_tone(&contact.email)
     }
-    (hash % 6) as i32
 }
 
 fn record_initials(contact: &ContactRecord) -> String {
@@ -346,6 +330,7 @@ pub(crate) fn clear_contact_form(app: &AppWindow) {
     app.set_contact_favorite(false);
     app.set_contact_is_suggested(false);
     app.set_contact_initials("?".into());
+    app.set_contact_avatar_tone(-1);
     app.set_contact_interactions(app.global::<I18n>().invoke_new_contact_entry());
     app.set_contact_last_interacted("".into());
 }
@@ -435,6 +420,7 @@ fn apply_contact_form(app: &AppWindow, contact: &ContactRecord) {
     app.set_contact_favorite(contact.is_favorite);
     app.set_contact_is_suggested(!contact.is_managed);
     app.set_contact_initials(record_initials(contact).into());
+    app.set_contact_avatar_tone(contact_avatar_tone(contact));
     app.set_contact_interactions(
         app.global::<I18n>()
             .invoke_interaction_count(contact.interactions as i32),
@@ -559,6 +545,7 @@ fn contact_account_rows(
                 name: account.name,
                 email: account.email,
                 initials: account.initials,
+                avatar_tone: account.avatar_tone,
                 avatar: account.avatar_small,
                 has_avatar: account.has_avatar,
                 count: if count == 0 {
@@ -625,6 +612,7 @@ fn same_sidebar_row(a: &ContactSidebarRow, b: &ContactSidebarRow) -> bool {
         name,
         email,
         initials,
+        avatar_tone,
         avatar,
         has_avatar,
         count,
@@ -638,6 +626,7 @@ fn same_sidebar_row(a: &ContactSidebarRow, b: &ContactSidebarRow) -> bool {
         && *name == other.name
         && *email == other.email
         && *initials == other.initials
+        && *avatar_tone == other.avatar_tone
         && *has_avatar == other.has_avatar
         && *count == other.count
         && *selected == other.selected

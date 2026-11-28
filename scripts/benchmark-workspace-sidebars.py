@@ -20,13 +20,13 @@ def fixture(workspace, count):
         return [dict(
             id=i, account_id=i // 5, group_start=i % 5 == 0,
             name=f"Calendar {i}", account_name=f"Account {i // 5}",
-            email=f"account{i // 5}@example.com", initials="AC", has_avatar=False,
+            email=f"account{i // 5}@example.com", initials="AC", has_avatar=False, avatar_tone=0,
             provider="local", color="",
             color_index=i % 4, read_only=False, enabled=True,
             is_default=i % 5 == 0, last_synced="",
         ) for i in range(count)]
 
-    empty = dict(id=-1, name="", email="", initials="", has_avatar=False,
+    empty = dict(id=-1, name="", email="", initials="", avatar_tone=0, has_avatar=False,
                  count="", selected=False)
 
     def row(kind, key, account=None):

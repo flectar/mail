@@ -20,6 +20,7 @@ export global ReaderUi {
     in property <string> selected_label: "";
     in property <bool> selected_is_draft: false;
     in property <string> selected_initials: "?";
+    in property <int> selected_avatar_tone: 0;
     in property <image> selected_favicon;
     in property <bool> selected_has_favicon: false;
     in property <string> selected_plain_text: "";
@@ -81,6 +82,7 @@ export component BoundReadingPane inherits MailReadingPane {
     selected-label-count: ReaderUi.selected_mail_label_count;
     selected-account-uses-labels: ReaderUi.selected_account_uses_labels;
     selected_initials: ReaderUi.selected_initials;
+    selected_avatar_tone: ReaderUi.selected_avatar_tone;
     selected_favicon: ReaderUi.selected_favicon;
     selected_has_favicon: ReaderUi.selected_has_favicon;
     selected_plain_text: ReaderUi.selected_plain_text;

@@ -39,6 +39,7 @@ export component ComposerContactMenu inherits Rectangle {
             y: (parent.height - self.height) / 2;
             size: 26px;
             fallback: contact.initials;
+            color-tone: contact.avatar_tone;
             background-color: root.accent-background;
             foreground-color: root.accent-color;
         }

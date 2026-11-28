@@ -170,6 +170,7 @@ fn typing_goes_on_after_a_chosen_suggestion() {
                 name: name.into(),
                 email: email.into(),
                 initials: name[..1].into(),
+                avatar_tone: 0,
             })
             .collect::<Vec<_>>();
         weak.unwrap().set_found(ModelRc::new(VecModel::from(found)));

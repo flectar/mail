@@ -246,6 +246,7 @@ pub(super) fn apply_email(
     send_later.set_open_send_error(email.send_error.clone().unwrap_or_default().into());
     send_later.set_open_send_uncertain(email.send_uncertain);
     ui.set_selected_initials(email.initials.clone().into());
+    ui.set_selected_avatar_tone(crate::avatar_tone::avatar_tone(&email.address));
     ui.set_selected_starred(email.starred);
     ui.set_selected_unread(email.unread);
     ui.set_selected_sender_verification(email.sender_verification.clone().into());

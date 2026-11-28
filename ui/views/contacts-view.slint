@@ -77,6 +77,8 @@ export component ContactsView inherits Rectangle {
     in property <bool> has-photo;
     callback resolve-conflict(bool);
     in property <string> edit-initials: "?";
+    // The open contact's avatar color, as in the list; -1 for a new contact.
+    in property <int> contact-avatar-tone: -1;
     in property <string> interaction-label: "";
     private property <bool> delete-confirming: false;
     in-out property <bool> detail-page-visible: false;
@@ -232,6 +234,7 @@ export component ContactsView inherits Rectangle {
                                 avatar-image: entry.account.avatar;
                                 has-avatar-image: entry.account.has-avatar;
                                 has-avatar: true;
+                                avatar-tone: entry.account.avatar-tone;
                                 icon: @image-url("../icons/lucide/filled/people.svg");
                                 sidebar-background: root.sidebar-bg;
                                 body-color: root.body-text;
@@ -410,10 +413,10 @@ export component ContactsView inherits Rectangle {
                                     fallback: contact.initials;
                                     source: contact.avatar;
                                     has-source: contact.has-avatar;
-                                    color-tone: contact.selected ? -1 : contact.avatar-tone;
-                                    dark-mode: root.dark-mode;
-                                    background-color: contact.selected ? root.accent-soft : root.avatar-bg;
-                                    foreground-color: contact.selected ? root.accent : root.secondary-text;
+                                    // A person keeps their color while their row is selected.
+                                    color-tone: contact.avatar-tone;
+                                    background-color: root.avatar-bg;
+                                    foreground-color: root.secondary-text;
                                 }
 
                                 contact-lines := Rectangle {
@@ -682,6 +685,8 @@ export component ContactsView inherits Rectangle {
                                 fallback: root.edit-initials;
                                 source: root.photo;
                                 has-source: root.has-photo;
+                                // The same color as in the list; a new contact has none yet.
+                                color-tone: root.contact-avatar-tone;
                                 background-color: root.accent-soft;
                                 foreground-color: root.accent;
                             }

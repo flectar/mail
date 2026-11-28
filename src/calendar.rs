@@ -942,6 +942,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
                     .map(|row| row.avatar_small.clone())
                     .unwrap_or_default(),
                 has_avatar: account_row.is_some_and(|row| row.has_avatar),
+                avatar_tone: account_row.map_or(-1, |row| row.avatar_tone),
                 provider: source.provider.into(),
                 color: source.color.clone().into(),
                 color_index: calendar_color_index(&source.color, source.id),

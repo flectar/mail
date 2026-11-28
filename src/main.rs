@@ -14,6 +14,7 @@ mod attachment_reminder;
 mod auto_replies;
 #[cfg(desktop)]
 mod autostart;
+mod avatar_tone;
 /// The unread count where the app draws it itself.
 #[cfg(any(
     test,

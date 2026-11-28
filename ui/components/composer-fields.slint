@@ -414,6 +414,7 @@ export component ComposerFromRow inherits Rectangle {
                             source: account.avatar_small;
                             has-source: account.has_avatar;
                             fallback: account.initials;
+                            color-tone: account.avatar_tone;
                             background-color: account.has_avatar ? #ffffff : root.selected-background;
                             foreground-color: root.title-color;
                             avatar-border-width: account.has_avatar ? 1px : 0px;

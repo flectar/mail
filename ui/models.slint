@@ -101,6 +101,9 @@ export struct MailboxRow {
     avatar: string,
     avatar_image: image,
     has_avatar: bool,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     is_account: bool,
     count: string,
     color: color,
@@ -187,6 +190,9 @@ export struct EmailRow {
     sender: string,
     address: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     favicon: image,
     favicon_small: image,
     has_favicon: bool,
@@ -262,6 +268,9 @@ export struct ProfileMemberRow {
     name: string,
     email: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     avatar: image,
     has_avatar: bool,
     // The other profile the account is in now; empty when none.
@@ -294,6 +303,9 @@ export struct ThreadMessageRow {
     sender: string,
     address: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     favicon: image,
     favicon_small: image,
     has_favicon: bool,
@@ -368,6 +380,9 @@ export struct AccountRow {
     resume_day: int,
     resume_at: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     avatar: image,
     avatar_small: image,
     has_avatar: bool,
@@ -589,6 +604,9 @@ export struct CalendarSourceRow {
     initials: string,
     avatar: image,
     has_avatar: bool,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     provider: string,
     color: string,
     color_index: int,
@@ -619,6 +637,9 @@ export struct ComposeContact {
     name: string,
     email: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
 }
 
 // Mirrors flectar_mail_core::models::ContactSync.
@@ -655,6 +676,9 @@ export struct ContactAccountRow {
     name: string,
     email: string,
     initials: string,
+    // The color of the avatar without a picture: Avatar's color-tone,
+    // from the address (src/avatar_tone.rs).
+    avatar_tone: int,
     avatar: image,
     has_avatar: bool,
     count: string,

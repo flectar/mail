@@ -618,6 +618,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         avatar-image: entry.mailbox.avatar_image;
                         has-avatar-image: entry.mailbox.has_avatar;
                         has-avatar: !self.local;
+                        avatar-tone: entry.mailbox.avatar_tone;
                         count: entry.mailbox.count;
                         icon: @image-url("../icons/lucide/filled/folders.svg");
                         sidebar-background: root.background-color;
