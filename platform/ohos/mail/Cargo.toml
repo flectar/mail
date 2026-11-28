@@ -12,6 +12,12 @@ name = "flectar_mail_ohos"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
+[features]
+default = ["scan-kit"]
+# Scan Kit is a HarmonyOS kit. OpenHarmony builds disable this feature and pair
+# devices through codes and displayed QR codes instead of scanning.
+scan-kit = []
+
 [dependencies]
 libc = "0.2"
 flectar-mail = { path = "../../..", default-features = false, features = ["remote-content", "gpu-renderer"] }
