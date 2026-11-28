@@ -398,6 +398,7 @@ pub(super) fn apply_connected_accounts(
                 resume_day,
                 resume_at: resume_at.into(),
                 initials: avatar_initials(&name).into(),
+                avatar_tone: crate::avatar_tone::avatar_tone(&account.email),
                 avatar: avatar
                     .map(|images| slint_image(&images.regular))
                     .unwrap_or_default(),

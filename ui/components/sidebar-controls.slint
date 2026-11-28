@@ -364,6 +364,8 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     in property <bool> has-avatar-image: false;
     in property <image> icon;
     in property <bool> has-avatar: false;
+    // The account's avatar color (Avatar's color-tone).
+    in property <int> avatar-tone: -1;
     in property <bool> open: true;
     in property <color> sidebar-background;
     in property <color> body-color;
@@ -426,6 +428,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
         source: root.avatar-image;
         has-source: root.has-avatar-image;
         fallback: root.avatar;
+        color-tone: root.avatar-tone;
         background-color: root.has-avatar-image ? #ffffff : root.hover-background;
         foreground-color: root.body-color;
     }
@@ -690,6 +693,7 @@ export component SidebarAccountHeading inherits Rectangle {
     in property <string> avatar;
     in property <image> avatar-image;
     in property <bool> has-avatar-image: false;
+    in property <int> avatar-tone: -1;
     in property <color> body-color: AppTheme.body;
     in property <color> muted-color: AppTheme.muted;
     in property <color> avatar-background: AppTheme.muted-control-bg;
@@ -705,6 +709,7 @@ export component SidebarAccountHeading inherits Rectangle {
         source: root.avatar-image;
         has-source: root.has-avatar-image;
         fallback: root.avatar;
+        color-tone: root.avatar-tone;
         background-color: root.has-avatar-image ? #ffffff : root.avatar-background;
         foreground-color: root.body-color;
     }

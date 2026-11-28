@@ -115,6 +115,7 @@ def event_defaults:
   ]
 | .sidebar_rows |= map(
     .show_row = true
+    | .mailbox.avatar_tone = (.mailbox.avatar_tone // -1)
     | .reveal_row = false
     | .mailbox.role = (.mailbox.role // "none")
     | .mailbox.is_selectable = (if .mailbox.is_selectable == null then true else .mailbox.is_selectable end)
@@ -225,7 +226,7 @@ def event_defaults:
     "thread_messages", "selected_thread_index", "mail_labels", "mail_label_results",
     "selected_mail_label_count", "selected_account_uses_labels", "email_tiles", "email_links",
     "selected_sender", "selected_address", "selected_subject", "selected_time", "selected_to",
-    "selected_details", "selected_label", "selected_initials", "selected_favicon",
+    "selected_details", "selected_label", "selected_initials", "selected_avatar_tone", "selected_favicon",
     "selected_has_favicon", "selected_plain_text", "selected_source", "selected_text",
     "has_selection", "clipboard_request", "clipboard_request_id", "selected_starred",
     "selected_unread", "selected_is_draft", "selected_sender_verification",

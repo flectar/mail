@@ -555,6 +555,7 @@ pub(super) fn apply_compose_contacts(
             name: contact.name.clone().unwrap_or_default().into(),
             email: contact.email.clone().into(),
             initials: contact_initials(contact).into(),
+            avatar_tone: crate::avatar_tone::avatar_tone(&contact.email),
         })
         .collect::<Vec<_>>();
     ui.set_contact_suggestions(ModelRc::new(VecModel::from(rows)));

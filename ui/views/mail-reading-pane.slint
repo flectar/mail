@@ -191,6 +191,7 @@ component ThreadMessageHeader inherits Rectangle {
     in property <string> sender;
     in property <string> address;
     in property <string> initials: "?";
+    in property <int> avatar-tone: 0;
     in property <image> favicon;
     in property <bool> has-favicon: false;
     in property <string> preview;
@@ -260,9 +261,10 @@ component ThreadMessageHeader inherits Rectangle {
         source: root.favicon;
         has-source: root.has-favicon;
         fallback: root.initials;
+        color-tone: root.avatar-tone;
         image-fit: contain;
-        background-color: root.outgoing ? root.accent : root.control-bg;
-        foreground-color: root.outgoing ? #ffffff : root.secondary-text;
+        background-color: root.control-bg;
+        foreground-color: root.secondary-text;
         avatar-border-width: root.has-favicon ? 1px : 0px;
         avatar-border-color: root.border;
     }
@@ -455,6 +457,7 @@ export component MailReadingPane inherits FocusScope {
     in property <MessageDetails> selected_details;
     in property <string> selected_label: "";
     in property <string> selected_initials: "?";
+    in property <int> selected_avatar_tone: 0;
     in property <image> selected_favicon;
     in property <bool> selected_has_favicon: false;
     in property <string> selected_plain_text: "";
@@ -1570,6 +1573,7 @@ export component MailReadingPane inherits FocusScope {
                                     sender: root.selected_sender;
                                     address: root.selected_address;
                                     initials: root.selected_initials;
+                                    avatar-tone: root.selected_avatar_tone;
                                     favicon: root.selected_favicon;
                                     has-favicon: root.selected_has_favicon;
                                     preview: root.selected_plain_text;
@@ -1600,6 +1604,7 @@ export component MailReadingPane inherits FocusScope {
                                     sender: row.sender;
                                     address: row.address;
                                     initials: row.initials;
+                                    avatar-tone: row.avatar_tone;
                                     favicon: root.compact ? row.favicon_small : row.favicon;
                                     has-favicon: row.has_favicon;
                                     preview: row.preview;

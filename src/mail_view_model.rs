@@ -843,6 +843,7 @@ pub(super) fn make_thread_rows(
                 sender: message.sender.clone().into(),
                 address: message.address.clone().into(),
                 initials: message.initials.clone().into(),
+                avatar_tone: crate::avatar_tone::avatar_tone(&message.address),
                 favicon: favicon.clone().unwrap_or_default(),
                 favicon_small: favicons
                     .map(|icons| slint_image(&icons.small))
@@ -1135,6 +1136,7 @@ pub(super) fn scope_matches(email: &MailMessage, scope: Scope) -> bool {
 // and freshly projected label models have different identities.
 pub(super) fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
     a.id == b.id
+        && a.avatar_tone == b.avatar_tone
         && a.account_id == b.account_id
         && a.account == b.account
         && a.account_color == b.account_color
@@ -1196,6 +1198,7 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                 sender: email.sender.clone().into(),
                 address: email.address.clone().into(),
                 initials: email.initials.clone().into(),
+                avatar_tone: crate::avatar_tone::avatar_tone(&email.address),
                 favicon: favicon.clone().unwrap_or_default(),
                 favicon_small: favicon_small.unwrap_or_default(),
                 has_favicon: favicon.is_some(),
@@ -1910,6 +1913,11 @@ pub(super) fn make_mailbox_rows(
                     .map(|images| slint_image(&images.small))
                     .unwrap_or_default(),
                 has_avatar: avatar.is_some(),
+                avatar_tone: if mailbox.is_account {
+                    crate::avatar_tone::avatar_tone(&mailbox.detail)
+                } else {
+                    -1
+                },
                 is_account: mailbox.is_account,
                 count: sidebar_badge_text(if mailbox.is_account {
                     account_totals

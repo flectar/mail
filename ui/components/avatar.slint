@@ -10,40 +10,23 @@ export component Avatar inherits Rectangle {
     in property <length> size: 40px;
     in property <color> background-color: #f1f1ef;
     in property <color> foreground-color: #4b4c49;
-    // Optional stable palette slot for people without stored photos. Callers
-    // derive the slot from an identity key; Avatar owns the theme-aware muted
-    // palette so fallback styling is not duplicated across contact surfaces.
+    // The palette slot, 0 to 5, of a person or account without a photo,
+    // from their address (src/avatar_tone.rs), so they keep one color in
+    // every view. -1 draws `background-color` instead.
     in property <int> color-tone: -1;
-    in property <bool> dark-mode: false;
     in property <color> avatar-border-color: transparent;
     in property <length> avatar-border-width: 0px;
     in property <ImageFit> image-fit: cover;
-    private property <color> tone-background: root.dark-mode
-        ? (root.color-tone == 0 ? #293631
-            : root.color-tone == 1 ? #332f3b
-            : root.color-tone == 2 ? #382f2b
-            : root.color-tone == 3 ? #29353b
-            : root.color-tone == 4 ? #383529
-            : #2e372c)
-        : (root.color-tone == 0 ? #dfe8e3
-            : root.color-tone == 1 ? #e5e1ec
-            : root.color-tone == 2 ? #e9e1dc
-            : root.color-tone == 3 ? #dce6ea
-            : root.color-tone == 4 ? #e9e5d9
-            : #e0e7dd);
-    private property <color> tone-foreground: root.dark-mode
-        ? (root.color-tone == 0 ? #a8c4b7
-            : root.color-tone == 1 ? #c0b3d0
-            : root.color-tone == 2 ? #cdb3a5
-            : root.color-tone == 3 ? #a9c0ca
-            : root.color-tone == 4 ? #c9c09e
-            : #b0c6aa)
-        : (root.color-tone == 0 ? #455c51
-            : root.color-tone == 1 ? #594e68
-            : root.color-tone == 2 ? #675045
-            : root.color-tone == 3 ? #405a66
-            : root.color-tone == 4 ? #635b40
-            : #4a6145);
+    // Six gradients, a lighter hue at the top left deepening to the bottom
+    // right. White initials pass 4.5:1 from 30% of the way on, in both
+    // themes.
+    private property <brush> tone-background: root.color-tone == 0 ? @linear-gradient(135deg, #3b82f6 0%, #4338ca 100%)
+        : root.color-tone == 1 ? @linear-gradient(135deg, #8b5cf6 0%, #a21caf 100%)
+        : root.color-tone == 2 ? @linear-gradient(135deg, #e1540c 0%, #be123c 100%)
+        : root.color-tone == 3 ? @linear-gradient(135deg, #e74796 0%, #9d174d 100%)
+        : root.color-tone == 4 ? @linear-gradient(135deg, #c86d06 0%, #b91c1c 100%)
+        : @linear-gradient(135deg, #058e64 0%, #0f766e 100%);
+    private property <color> tone-foreground: #ffffff;
     // Initials keep at least the caption size, but shrink to fit the circle
     // where the platform font makes them wider than a small avatar.
     private property <length> initials-size: max(TypeScale.caption, root.size * 0.29);

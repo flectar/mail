@@ -187,6 +187,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         avatar,
         avatar_image,
         has_avatar,
+        avatar_tone,
         is_account,
         count,
         color,
@@ -219,6 +220,7 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *detail == other.detail
         && *avatar == other.avatar
         && *has_avatar == other.has_avatar
+        && *avatar_tone == other.avatar_tone
         && *is_account == other.is_account
         && *count == other.count
         && *color == other.color

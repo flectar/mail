@@ -1384,6 +1384,7 @@ export component AppWindow inherits Window {
     in-out property <bool> contact_favorite: false;
     in property <bool> contact_is_suggested: false;
     in property <string> contact_initials: "?";
+    in property <int> contact_avatar_tone: -1;
     in property <string> contact_interactions: "";
     in property <string> contact_last_interacted: "";
     in property <int> contact_total_count: 0;
@@ -2392,6 +2393,7 @@ export component AppWindow inherits Window {
             edit-favorite <=> root.contact_favorite;
             is-suggested: root.contact_is_suggested;
             edit-initials: root.contact_initials;
+            contact-avatar-tone: root.contact_avatar_tone;
             email-values <=> root.contact-emails;
             phone-values <=> root.contact-phones;
             add-value(kind) => { root.add-contact-value(kind); }

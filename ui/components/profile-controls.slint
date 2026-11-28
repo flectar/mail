@@ -248,6 +248,7 @@ export component ProfileMemberChoice inherits FocusVisibleScope {
         y: (parent.height - self.height) / 2;
         size: 30px;
         fallback: root.member.initials;
+        color-tone: root.member.avatar_tone;
         source: root.member.avatar;
         has-source: root.member.has_avatar;
         background-color: AppTheme.avatar-bg;
@@ -352,6 +353,7 @@ export component AccountProfilePicker inherits Rectangle {
                     Avatar {
                         size: 40px;
                         fallback: root.account.initials;
+                        color-tone: root.account.avatar_tone;
                         source: root.account.avatar;
                         has-source: root.account.has_avatar;
                         background-color: AppTheme.avatar-bg;
