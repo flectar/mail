@@ -284,6 +284,26 @@ fn register_desktop_events(app: &AppWindow) {
                     return EventResult::PreventDefault;
                 }
             }
+            // A mouse's back button steps back through the app's screens, and
+            // forward opens again the message back closed, as in a browser.
+            winit::event::WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Back,
+                ..
+            } => {
+                if app.invoke_navigate_back() {
+                    return EventResult::PreventDefault;
+                }
+            }
+            winit::event::WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Forward,
+                ..
+            } => {
+                if app.invoke_navigate_forward() {
+                    return EventResult::PreventDefault;
+                }
+            }
             winit::event::WindowEvent::Focused(focused) => {
                 let chrome = app.global::<WindowChrome>();
                 chrome.set_active(*focused);

@@ -328,3 +328,45 @@ fn phones_show_the_tab_overview_over_settings() {
     assert_eq!(app.get_active_view(), "mail");
     app.hide().unwrap();
 }
+
+/// A mouse's back button leaves Settings and closes the open message, which
+/// forward opens again. The window's own close button does neither.
+#[test]
+fn back_and_forward_step_through_settings_and_the_open_message() {
+    let (app, window) = window(1320, 800);
+    let draw = show(&window, &app);
+    app.invoke_open_settings();
+    draw();
+    assert!(
+        !app.invoke_system_back_requested(),
+        "the close button doesn't leave Settings"
+    );
+    assert!(app.invoke_navigate_back(), "back leaves Settings");
+    assert_eq!(app.get_active_view(), "mail");
+
+    let closed = Rc::new(Cell::new(false));
+    let close = closed.clone();
+    app.on_close_preview_for_back(move || close.set(true));
+    app.on_reopen_closed_email(|| true);
+    app.set_has_selected(true);
+    assert!(app.invoke_navigate_back(), "back closes the open message");
+    assert!(closed.get());
+    assert!(app.invoke_navigate_forward(), "forward opens it again");
+
+    app.set_has_selected(false);
+    assert!(!app.invoke_navigate_back(), "nothing is left to go back to");
+    app.hide().unwrap();
+}
+
+/// On a phone the system's back steps out of Settings, and with nothing left
+/// it lets the app go.
+#[test]
+fn phone_back_steps_out_of_settings_then_lets_the_app_go() {
+    let (app, window) = window(390, 844);
+    let _draw = show(&window, &app);
+    app.invoke_open_settings();
+    assert!(app.invoke_navigate_back());
+    assert_eq!(app.get_active_view(), "mail");
+    assert!(!app.invoke_navigate_back());
+    app.hide().unwrap();
+}

@@ -142,7 +142,7 @@ jobs:
         run: bash scripts/blitz-patches.sh verify
       - name: Verify the Slint winit file drop patch
         run: python3 scripts/verify-slint-winit.py
-      - name: Verify the Slint Android pointer scroll backport
+      - name: Verify the Slint Android backend patches
         run: python3 scripts/verify-slint-android-activity.py
       - name: Verify the Slint software renderer clip fix
         run: python3 scripts/verify-slint-renderer-software.py
