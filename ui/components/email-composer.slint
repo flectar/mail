@@ -3,7 +3,7 @@ import { SenderPicker } from "sender-picker.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, SpellingLanguage } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
-import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LayoutBar, LinkEditor, TranslateEditor } from "composer-actions.slint";
+import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerPhotos, ComposerToolbar, DiscardConfirmation, ImageAltEditor, ImageBar, ImageResizeFrame, LayoutBar, LayoutHtmlEditor, LinkEditor, TranslateEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
@@ -159,6 +159,8 @@ export component EmailComposer inherits Rectangle {
     callback plain-text-chosen(bool);
     callback format-requested(string, string, int, int);
     callback paste-requested(string, int, int) -> bool;
+    // The selected layout block's HTML, to edit by hand.
+    callback layout-html-requested() -> string;
     callback copy-requested(bool, string, int, int) -> bool;
     callback link-requested(string, string, int, int);
     // Translating the message (#240): a service is set up, the languages to
@@ -215,6 +217,10 @@ export component EmailComposer inherits Rectangle {
     private property <int> link-selection-start: 0;
     private property <int> link-selection-end: 0;
     private property <bool> image-alt-open: false;
+    private property <bool> layout-html-open: false;
+    private property <string> layout-html: "";
+    private property <int> layout-selection-start: 0;
+    private property <int> layout-selection-end: 0;
     private property <string> image-alt: "";
     private property <int> image-selection-start: 0;
     private property <int> image-selection-end: 0;
@@ -305,6 +311,13 @@ export component EmailComposer inherits Rectangle {
     }
 
     // Asks for the selected image's alt text.
+    function edit-layout-html() {
+        root.layout-selection-start = root.selection-start;
+        root.layout-selection-end = root.selection-end;
+        root.layout-html = root.layout-html-requested();
+        root.layout-html-open = true;
+    }
+
     function edit-image-alt() {
         root.image-selection-start = root.selection-start;
         root.image-selection-end = root.selection-end;
@@ -1122,6 +1135,7 @@ export component EmailComposer inherits Rectangle {
                     secondary-color: root.secondary-color;
                     subtle-border-color: root.subtle-border-color;
                     apply-format(kind) => { root.apply-format(kind); }
+                    edit-html => { root.edit-layout-html(); }
                 }
             }
         }
@@ -1306,6 +1320,34 @@ export component EmailComposer inherits Rectangle {
                 horizontal-alignment: center;
                 wrap: word-wrap;
             }
+        }
+    }
+
+    LayoutHtmlEditor {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        compact: root.compact;
+        open: root.layout-html-open;
+        html <=> root.layout-html;
+        background-color: root.background-color;
+        body-color: root.body-color;
+        frame-border-color: root.frame-border-color;
+        muted-color: root.muted-color;
+        title-color: root.title-color;
+        cancel => {
+            root.layout-html-open = false;
+            root.layout-html = "";
+            body-input.set-selection-offsets(root.layout-selection-start, root.layout-selection-end);
+            body-input.focus();
+        }
+        apply(html) => {
+            root.layout-html-open = false;
+            root.format-requested("layout-html:" + html, root.body, root.layout-selection-start, root.layout-selection-end);
+            root.layout-html = "";
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
+            body-input.focus();
         }
     }
 

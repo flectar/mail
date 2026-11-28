@@ -208,7 +208,6 @@ fn css_width(style: &str) -> Option<u32> {
 
 /// `html` with the address of each picture `source` gives a new one for in its place. The rest
 /// is written back as it was read, comments too, which mark what browsers copied.
-#[cfg(feature = "remote-content")]
 pub(crate) fn with_picture_sources(
     html: &str,
     mut source: impl FnMut(&str) -> Option<String>,
@@ -1423,7 +1422,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "remote-content")]
     fn picture_sources_change_and_the_rest_stays() {
         let html = "<!--StartFragment--><p title=\"a &amp; &quot;b&quot;\">x &lt; y\
                     <img alt=\"Logo\" src=\"https://example.org/logo.png\"></p><a src=\"keep\">l</a>";

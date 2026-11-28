@@ -158,6 +158,8 @@ export global ComposerUi {
     // Pastes the clipboard's HTML over the selection of the body given, with its
     // formatting: false when it holds none, for the plain text to go in.
     callback paste-formatted(string, int, int) -> bool;
+    // The selected layout block's HTML to edit by hand, its pictures as cid:pictureN (#549).
+    callback layout-html() -> string;
     // Puts the selection on the clipboard with its formatting, and for a cut takes it
     // out: false when the plain text is left to copy.
     callback copy-formatted(bool, string, int, int) -> bool;
@@ -342,6 +344,7 @@ export component BoundComposer inherits EmailComposer {
     plain-text-chosen(plain) => { ComposerUi.plain-text-chosen(plain); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
     paste-requested(body, anchor, cursor) => { return ComposerUi.paste-formatted(body, anchor, cursor); }
+    layout-html-requested() => { return ComposerUi.layout-html(); }
     copy-requested(cut, body, anchor, cursor) => { return ComposerUi.copy-formatted(cut, body, anchor, cursor); }
     link-requested(url, body, anchor, cursor) => { ComposerUi.link(url, body, anchor, cursor); }
     body-edited(body, anchor, cursor, key-text) => { ComposerUi.edit-body(body, anchor, cursor, key-text); }

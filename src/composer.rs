@@ -112,6 +112,9 @@ pub(super) struct ComposeSession {
     signatures: RefCell<Vec<Signature>>,
     /// The signature this composer writes, in place of a message.
     signature_target: RefCell<Option<SignatureTarget>>,
+    /// The pictures of the layout block whose HTML is being edited by hand, which the HTML
+    /// refers to as `cid:pictureN` (#549).
+    layout_pictures: RefCell<Vec<String>>,
     /// Bumped for each sending-account change; older results are dropped.
     preferences_generation: Cell<u64>,
     /// The copies mail from each of the sending account's identities starts
@@ -837,6 +840,7 @@ impl Composers {
             signature: RefCell::default(),
             signatures: RefCell::default(),
             signature_target: RefCell::default(),
+            layout_pictures: RefCell::default(),
             preferences_generation: Cell::new(0),
             copies: RefCell::default(),
             added_copies: RefCell::default(),
@@ -2293,8 +2297,18 @@ impl ComposeSession {
             if let Some(session) = weak.upgrade()
                 && !session.plain_text.get()
             {
-                session.edit(|document| document.format(&kind, &body, anchor, cursor));
+                match kind.strip_prefix("layout-html:") {
+                    Some(html) => session.save_layout_html(&body, anchor, cursor, html),
+                    None => session.edit(|document| document.format(&kind, &body, anchor, cursor)),
+                }
             }
+        });
+        let weak = self.reference();
+        ui.on_layout_html(move || {
+            weak.upgrade()
+                .map(|session| session.layout_html_to_edit())
+                .unwrap_or_default()
+                .into()
         });
         let weak = self.reference();
         ui.on_plain_text_chosen(move |plain| {
@@ -2789,6 +2803,57 @@ impl ComposeSession {
             return false;
         }
         true
+    }
+
+    /// The HTML of the selected layout block, to edit by hand: its pictures, which the session
+    /// keeps until it's saved, as `cid:pictureN` references (#549).
+    fn layout_html_to_edit(&self) -> String {
+        let document = self.document.borrow();
+        let Some(block) = document.selected_layout() else {
+            return String::new();
+        };
+        let (html, pictures) = block.html_to_edit();
+        *self.layout_pictures.borrow_mut() = pictures;
+        html
+    }
+
+    /// Puts what was written by hand for the selected layout block in its place, with its
+    /// pictures back in it and those it links from the web downloaded first (#549).
+    fn save_layout_html(&self, body: &str, anchor: i32, cursor: i32, html: &str) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        {
+            let mut document = self.document.borrow_mut();
+            if document.text() != body {
+                document.synchronize(body, anchor, cursor);
+            } else {
+                document.update_selection(anchor, cursor);
+            }
+        }
+        let pictures = std::mem::take(&mut *self.layout_pictures.borrow_mut());
+        let html = crate::rich_compose::with_pictures_restored(html, &pictures);
+        #[cfg(feature = "remote-content")]
+        if self.download_pictures_then(&html, Self::replace_layout) {
+            return;
+        }
+        self.replace_layout(&host, &html);
+    }
+
+    /// Puts the layout `html` lays out in place of the selected layout block.
+    fn replace_layout(&self, host: &HostRef, html: &str) {
+        let mut replaced = false;
+        self.edit(|document| match document.replace_selected_layout(html) {
+            Some(selection) => {
+                replaced = true;
+                selection
+            }
+            None => document.selection(),
+        });
+        if !replaced {
+            host.ui()
+                .set_notice(UiMessage::plain("Nothing in that HTML shows."), true);
+        }
     }
 
     /// Pastes `html` over the selection now, unless it holds no text, or images that would take

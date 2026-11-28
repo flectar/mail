@@ -1,4 +1,4 @@
-import { HorizontalBox, ScrollView } from "std-widgets.slint";
+import { HorizontalBox, ScrollView, TextEdit } from "std-widgets.slint";
 import { ComposeAttachment, ComposeLink } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, Switch } from "controls.slint";
@@ -1143,7 +1143,7 @@ export component ImageBar inherits Rectangle {
 
 // The controls of a selected layout block, a part of the text kept in the layout it was pasted
 // with, such as a signature laid out in a table: turning it into text to edit, which leaves its
-// layout behind, and taking it out.
+// layout behind, editing its HTML, which keeps it, and taking it out.
 export component LayoutBar inherits Rectangle {
     in property <color> body-color;
     in property <color> control-hover-color;
@@ -1151,6 +1151,7 @@ export component LayoutBar inherits Rectangle {
     in property <color> secondary-color;
     in property <color> subtle-border-color;
     callback apply-format(string);
+    callback edit-html();
 
     width: bar-row.preferred-width;
     height: 38px;
@@ -1175,6 +1176,13 @@ export component LayoutBar inherits Rectangle {
             text-color: root.body-color;
             hover-background: root.control-hover-color;
             clicked => { root.apply-format("layout-text"); }
+        }
+
+        BarButton {
+            text: @tr("Edit HTML");
+            text-color: root.body-color;
+            hover-background: root.control-hover-color;
+            clicked => { root.edit-html(); }
         }
 
         Rectangle {
@@ -1405,6 +1413,102 @@ export component ImageAltEditor inherits Rectangle {
             text: @tr("Apply");
             primary: true;
             clicked => { root.apply(root.alt); }
+        }
+    }
+}
+
+// Writing a layout block's HTML by hand, to change what it says and keep its layout. The pictures
+// it holds are referred to as cid:pictureN, as mail refers to the pictures a message carries.
+export component LayoutHtmlEditor inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> open: false;
+    in-out property <string> html: "";
+    in property <color> background-color;
+    in property <color> body-color;
+    in property <color> frame-border-color;
+    in property <color> muted-color;
+    in property <color> title-color;
+    callback cancel();
+    callback apply(string);
+
+    visible: root.open;
+    background: AppTheme.scrim;
+    z: 6000;
+    TouchArea { }
+
+    changed open => {
+        if (root.open) {
+            html-input.focus();
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.compact ? parent.width - 32px : min(680px, parent.width - 64px);
+        height: root.compact ? parent.height - 48px : min(520px, parent.height - 64px);
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.frame-border-color;
+        background: root.background-color;
+
+        html-heading := Text {
+            x: 20px;
+            y: 18px;
+            width: parent.width - 40px;
+            height: max(24px, self.preferred-height);
+            text: @tr("Edit HTML");
+            color: root.title-color;
+            font-size: TypeScale.heading-small;
+            font-weight: 700;
+        }
+
+        html-note := Text {
+            x: 20px;
+            y: html-heading.y + html-heading.height + 6px;
+            width: parent.width - 40px;
+            height: max(20px, self.preferred-height);
+            text: @tr("Its own pictures show as cid:picture references. Pictures it links from the web are downloaded into it when you save, and scripts and anything else that would load from the web are left out.");
+            color: root.muted-color;
+            font-size: TypeScale.secondary;
+            wrap: word-wrap;
+        }
+
+        html-input := TextEdit {
+            x: 20px;
+            y: html-note.y + html-note.height + 10px;
+            width: parent.width - 40px;
+            height: html-apply.y - self.y - 14px;
+            text <=> root.html;
+            wrap: word-wrap;
+            font-size: TypeScale.secondary;
+            accessible-label: @tr("Edit HTML");
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.cancel();
+                    return accept;
+                }
+                reject
+            }
+        }
+
+        Button {
+            x: html-apply.x - self.width - 8px;
+            y: html-apply.y;
+            width: max(78px, self.content-width);
+            height: 34px;
+            text: @tr("Cancel");
+            clicked => { root.cancel(); }
+        }
+
+        html-apply := Button {
+            x: parent.width - self.width - 20px;
+            y: parent.height - self.height - 18px;
+            width: max(82px, self.content-width);
+            height: 34px;
+            text: @tr("Save");
+            primary: true;
+            clicked => { root.apply(root.html); }
         }
     }
 }

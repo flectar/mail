@@ -224,6 +224,26 @@ impl LayoutBlock {
         crate::compose_paste::styled_text(&self.html, base)
     }
 
+    /// Its HTML to edit by hand, with each picture it holds referred to as `cid:pictureN` in
+    /// place of its file, as mail refers to the pictures a message carries, and those files in
+    /// order, for [`with_pictures_restored`] to put back.
+    pub(crate) fn html_to_edit(&self) -> (String, Vec<String>) {
+        let mut pictures: Vec<String> = Vec::new();
+        let html = crate::compose_paste::with_picture_sources(&self.html, |src| {
+            src.starts_with("data:").then(|| {
+                let index = match pictures.iter().position(|picture| picture == src) {
+                    Some(index) => index,
+                    None => {
+                        pictures.push(src.to_owned());
+                        pictures.len() - 1
+                    }
+                };
+                format!("cid:picture{}", index + 1)
+            })
+        });
+        (html, pictures)
+    }
+
     /// Its text as plain text, each link followed by its address where its text doesn't show
     /// it, and each picture as its description, or as its alt text alone when `described` is
     /// false.
@@ -241,6 +261,16 @@ impl PartialEq for LayoutBlock {
 }
 
 impl Eq for LayoutBlock {}
+
+/// `html` written by hand for a layout block, with the pictures [`LayoutBlock::html_to_edit`]
+/// referred to as `cid:pictureN` back in it. A reference to no picture stays as it is, which
+/// cleaning the block takes out.
+pub(crate) fn with_pictures_restored(html: &str, pictures: &[String]) -> String {
+    crate::compose_paste::with_picture_sources(html, |src| {
+        let number: usize = src.strip_prefix("cid:picture")?.parse().ok()?;
+        pictures.get(number.checked_sub(1)?).cloned()
+    })
+}
 
 /// What an object placeholder holds in the text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1262,6 +1292,26 @@ impl RichComposeDocument {
             return None;
         }
         self.style_at(start)
+    }
+
+    /// Puts the layout block `html` lays out in place of the one the selection holds, as one
+    /// undoable edit that leaves the new block selected. `None`, changing nothing, when the
+    /// selection holds no layout block alone, or when nothing in `html` shows.
+    pub(crate) fn replace_selected_layout(&mut self, html: &str) -> Option<ComposeSelection> {
+        self.selected_layout()?;
+        let block = LayoutBlock::new(html)?;
+        let anchor = valid_offset(&self.text, self.selection.0);
+        let cursor = valid_offset(&self.text, self.selection.1);
+        let (start, end) = ordered(anchor, cursor);
+        let (text, mut runs) = layout_runs(block);
+        // It lines up as the block it replaces did.
+        let align = self.style_at(start).map(|style| style.align);
+        for run in &mut runs {
+            run.style.align = align.unwrap_or_default();
+        }
+        let caret = start + text.len();
+        self.replace_runs(start..end, &text, &runs, caret);
+        Some(self.update_selection(to_i32(start), to_i32(caret)))
     }
 
     /// Takes the layout block the selection holds apart into text in the message's formatting,
@@ -6381,6 +6431,47 @@ mod tests {
         message.paste_html(&html, PastedLayout::Merge).unwrap();
         assert_eq!(message.text(), "\u{fffc}");
         assert!(message.layouts().next().is_some());
+    }
+
+    #[test]
+    fn a_layout_block_is_edited_by_hand_with_its_pictures_referred_to() {
+        let mut document = RichComposeDocument::default();
+        document.load("", 0, 0);
+        document
+            .paste_html(&layout_signature(), PastedLayout::Keep)
+            .unwrap();
+        let before = Arc::clone(document.layouts().next().unwrap());
+        let end = document.text().len() as i32;
+        document.update_selection(0, end);
+        // Its picture is referred to rather than written out.
+        let (html, pictures) = document.selected_layout().unwrap().html_to_edit();
+        assert_eq!(pictures.len(), 1);
+        assert!(pictures[0].starts_with("data:image/png;base64,"));
+        assert!(html.contains("src=\"cid:picture1\""), "{html}");
+        assert!(!html.contains("data:"), "{html}");
+
+        let edited = html.replace("Head of design", "Head of product");
+        let restored = with_pictures_restored(&edited, &pictures);
+        let selection = document.replace_selected_layout(&restored).unwrap();
+        assert_eq!(selection, ComposeSelection { start: 0, end: 3 });
+        let after = Arc::clone(document.layouts().next().unwrap());
+        assert!(after.html.contains("Head of product"), "{}", after.html);
+        assert!(after.html.contains(&pictures[0]), "its picture is back");
+        // One undo puts the block back as it was.
+        document.history("undo");
+        assert_eq!(document.layouts().next().unwrap().html, before.html);
+
+        // HTML with nothing to show changes nothing, and a reference to no picture goes.
+        document.update_selection(0, end);
+        assert_eq!(document.replace_selected_layout("<div> </div>"), None);
+        assert_eq!(document.layouts().next().unwrap().html, before.html);
+        let unknown =
+            with_pictures_restored("<p>Pat<img src=\"cid:picture9\" alt=\"x\"></p>", &pictures);
+        document.replace_selected_layout(&unknown).unwrap();
+        assert_eq!(&*document.layouts().next().unwrap().html, "<p>Pat</p>");
+        // Only a selected layout block is replaced.
+        document.load("Text", 0, 4);
+        assert_eq!(document.replace_selected_layout(&restored), None);
     }
 
     #[test]
