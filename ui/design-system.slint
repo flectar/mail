@@ -281,6 +281,12 @@ export global AppTheme {
     out property <color> control-shadow: dark ? transparent : #0000000f;
     // Under a control raised above the others, such as the chosen tab.
     out property <color> raised-shadow: dark ? transparent : #0000001f;
+    // A menu floats over the page: in dark mode a step lighter than the
+    // surface, as raised things are, with a shadow in both themes.
+    out property <color> popover-bg: dark ? root.surface.mix(white, 0.93) : root.surface;
+    out property <color> popover-shadow: dark ? #00000073 : #0000001c;
+    // A menu's highlighted row, `fill-hover` over the menu's own color.
+    out property <color> popover-hover: root.popover-bg.mix(root.title, dark ? 0.92 : 0.925);
     // Under a primary or destructive button, a glow of its own color.
     out property <color> primary-shadow: dark ? transparent : root.primary.with-alpha(0.28);
     out property <color> destructive-shadow: dark ? transparent : root.destructive.with-alpha(0.28);
@@ -289,6 +295,9 @@ export global AppTheme {
     out property <color> focus-ring: accent;
     out property <color> focus-halo: root.focus-ring.with-alpha(dark ? 0.45 : 0.32);
     out property <color> destructive: #b73731;
+    // Destructive text, such as a menu's Delete, which in dark mode needs a
+    // lighter red to reach 4.5:1.
+    out property <color> destructive-text: dark ? #f87171 : root.destructive;
     out property <color> destructive-hover: #c8443d;
     out property <color> destructive-pressed: #922d28;
     // Dims the window behind a modal dialog, alike in both themes. Every

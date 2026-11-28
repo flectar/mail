@@ -1,4 +1,5 @@
-import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage, SpellingLanguage } from "../models.slint";
+import { AccountRow, ComposeAttachment, ComposeLink, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage } from "../models.slint";
+import { PopupMenuEntry } from "popup-menu.slint";
 import { AppTheme } from "../design-system.slint";
 import { EmailComposer } from "email-composer.slint";
 
@@ -127,7 +128,7 @@ export global ComposerUi {
     // choose from, and the misspelled word the menu opened on with its corrections.
     in property <bool> spelling-available: false;
     in property <bool> spelling-enabled: false;
-    in property <[SpellingLanguage]> spelling-languages: [];
+    in property <[PopupMenuEntry]> spelling-languages: [];
     // The system picks the languages itself, as macOS does, so there are none to choose.
     in property <bool> spelling-languages-automatic: false;
     in property <string> spelling-word: "";

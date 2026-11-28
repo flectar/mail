@@ -42,6 +42,7 @@ pub(crate) fn clear(reader: &ReaderRef) {
     let ui = reader.global::<MailAttachments>();
     ui.invoke_command("close".into(), "".into());
     ui.set_rows(ModelRc::default());
+    ui.set_names(ModelRc::default());
 }
 pub(crate) fn project(reader: &ReaderRef, email: &MailMessage, same: bool) {
     let previous = same.then(|| {
@@ -66,6 +67,8 @@ pub(crate) fn project(reader: &ReaderRef, email: &MailMessage, same: bool) {
     }
     let thumbnail_ids = thumbnail_ids(&email.attachments, &rows);
     let ui = reader.global::<MailAttachments>();
+    let names: Vec<slint::SharedString> = rows.iter().map(|row| row.name.clone()).collect();
+    ui.set_names(ModelRc::new(VecModel::from(names)));
     ui.set_rows(ModelRc::new(VecModel::from(rows)));
     for id in thumbnail_ids {
         ui.invoke_command("thumbnail".into(), id);

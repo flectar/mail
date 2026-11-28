@@ -9,6 +9,7 @@ import { ProfileSwitcher } from "profile-switcher.slint";
 import { PaneDivider } from "workspace-layout.slint";
 import { TabRow, TabsUi, WorkspaceIcon } from "tabs-ui.slint";
 import { MailboxWords } from "../mailbox-words.slint";
+import { PopupMenu } from "popup-menu.slint";
 
 export { TabRow, TabsUi }
 
@@ -522,7 +523,7 @@ component TabItem inherits Rectangle {
         }
     }
 
-    menu-area := ContextMenuArea {
+    Rectangle {
         width: parent.width;
         height: parent.height;
 
@@ -577,7 +578,7 @@ component TabItem inherits Rectangle {
                     }
                     self.middle-pressed = false;
                 } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
-                    menu-area.show({ x: self.mouse-x, y: self.mouse-y });
+                    menu-area.open-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
                 }
             }
             // The wheel leaves the tab and the strip hovered.
@@ -628,37 +629,34 @@ component TabItem inherits Rectangle {
                             && self.mouse-y >= 0px && self.mouse-y < self.height {
                             root.close();
                         } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
-                            menu-area.show({ x: parent.x + self.mouse-x, y: parent.y + self.mouse-y });
+                            menu-area.open-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
                         }
                     }
                 }
             }
         }
 
-        Menu {
-            MenuItem {
-                title: @tr("New tab");
-                activated => { TabsUi.create(); }
-            }
-            MenuItem {
-                title: @tr("Reopen closed tab");
-                enabled: TabsUi.can-reopen;
-                activated => { TabsUi.reopen(); }
-            }
-            MenuSeparator {}
-            MenuItem {
-                title: @tr("Close tab");
-                activated => { TabsUi.close(root.entry.id); }
-            }
-            MenuItem {
-                title: @tr("Close other tabs");
-                enabled: root.count > 1;
-                activated => { TabsUi.close-others(root.entry.id); }
-            }
-            MenuItem {
-                title: @tr("Close tabs to the right");
-                enabled: root.index < root.count - 1;
-                activated => { TabsUi.close-to-right(root.entry.id); }
+        menu-area := PopupMenu {
+            label: root.title;
+            entries: [
+                { id: "new", title: @tr("New tab") },
+                { id: "reopen", title: @tr("Reopen closed tab"), disabled: !TabsUi.can-reopen },
+                { id: "close", title: @tr("Close tab"), group: 1 },
+                { id: "close-others", title: @tr("Close other tabs"), group: 1, disabled: root.count <= 1 },
+                { id: "close-right", title: @tr("Close tabs to the right"), group: 1, disabled: root.index >= root.count - 1 },
+            ];
+            activated(id, index) => {
+                if id == "new" {
+                    TabsUi.create();
+                } else if id == "reopen" {
+                    TabsUi.reopen();
+                } else if id == "close" {
+                    TabsUi.close(root.entry.id);
+                } else if id == "close-others" {
+                    TabsUi.close-others(root.entry.id);
+                } else if id == "close-right" {
+                    TabsUi.close-to-right(root.entry.id);
+                }
             }
         }
     }

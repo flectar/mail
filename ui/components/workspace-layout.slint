@@ -2,15 +2,11 @@ import { HorizontalBox } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { LineEdit, ToolbarIconButton } from "controls.slint";
+import { PopupMenu, PopupMenuEntry } from "popup-menu.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { TabSwitcherButton } from "tab-overview.slint";
 import { TabsUi } from "tabs-ui.slint";
-
-export struct WorkspaceSearchFilter {
-    title: string,
-    value: string,
-}
 
 // All top-level workspaces are placed by this component. This prevents a view
 // from silently adding the product-rail offset or mobile navigation allowance
@@ -320,10 +316,9 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     // such as an account whose checks fail while the sidebar is hidden.
     in property <bool> leading-badge: false;
     in property <string> leading-badge-description;
-    in property <[WorkspaceSearchFilter]> filters: [];
-    // The filter in use, which its menu item checks. Lists that only offer
-    // actions in the menu leave it empty.
-    in property <string> selected-filter: "";
+    // The filters, first in the menu, as entries whose id is the value. A
+    // list that keeps one filter in use checks it.
+    in property <[PopupMenuEntry]> filters: [];
     // Newest first and Oldest first after the filters, for lists that sort
     // by date. Disabled, they show the order the list has anyway.
     in property <bool> show-sort: false;
@@ -420,65 +415,68 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 accepted(value) => { root.submitted(value); }
             }
 
-            filter-menu := ContextMenuArea {
+            ToolbarIconButton {
+                // Inside the field, as tall as it.
                 x: parent.width - LayoutMetrics.medium-control-height;
                 width: LayoutMetrics.medium-control-height;
                 height: LayoutMetrics.medium-control-height;
-
-                ToolbarIconButton {
-                    // Inside the field, as tall as it.
-                    width: parent.width;
-                    height: parent.height;
-                    icon: root.filter-active
-                        ? @image-url("../icons/lucide/outline/list-filter-plus.svg")
-                        : @image-url("../icons/lucide/outline/list-filter.svg");
-                    icon-color: root.filter-active ? AppTheme.accent : AppTheme.secondary;
-                    hover-background: AppTheme.muted-control-bg;
-                    active: root.filter-active;
-                    active-background: AppTheme.accent-soft;
-                    tooltip-text: root.filter-tooltip;
-                    accessible-id: root.filter-accessible-id;
-                    clicked => { filter-menu.show({ x: 0px, y: parent.height }); }
+                icon: root.filter-active
+                    ? @image-url("../icons/lucide/outline/list-filter-plus.svg")
+                    : @image-url("../icons/lucide/outline/list-filter.svg");
+                icon-color: root.filter-active ? AppTheme.accent : AppTheme.secondary;
+                hover-background: AppTheme.muted-control-bg;
+                active: root.filter-active || filter-menu.is-open;
+                active-background: root.filter-active ? AppTheme.accent-soft : AppTheme.muted-control-bg;
+                tooltip-text: root.filter-tooltip;
+                accessible-id: root.filter-accessible-id;
+                accessible-expanded: filter-menu.is-open;
+                clicked => {
+                    filter-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible);
                 }
+            }
 
-                Menu {
-                    for option in root.filters : MenuItem {
-                        title: option.title;
-                        checkable: root.selected-filter != "";
-                        checked: option.value == root.selected-filter;
-                        activated => { root.filter-selected(option.value); }
-                    }
-                    if root.show-sort : MenuSeparator {}
-                    if root.show-sort : MenuItem {
-                        title: @tr("Newest first");
-                        enabled: root.sort-enabled;
-                        checkable: true;
-                        checked: !root.oldest-first;
-                        activated => { root.sort-selected(false); }
-                    }
-                    if root.show-sort : MenuItem {
-                        title: @tr("Oldest first");
-                        enabled: root.sort-enabled;
-                        checkable: true;
-                        checked: root.oldest-first;
-                        activated => { root.sort-selected(true); }
-                    }
-                    if root.show-save-search : MenuSeparator {}
-                    if root.show-save-search : MenuItem {
-                        title: @tr("Save search…");
-                        enabled: root.text != "";
-                        activated => { root.save-search(); }
-                    }
-                    if root.show-search-tips : MenuSeparator {}
-                    if root.show-search-tips : MenuItem {
-                        title: @tr("Search tips");
-                        activated => { root.search-tips(); }
-                    }
-                    if !root.show-refresh : MenuSeparator {}
-                    if !root.show-refresh : MenuItem {
-                        title: root.refresh-tooltip;
-                        enabled: root.refresh-enabled;
-                        activated => { root.refresh(); }
+            filter-menu := PopupMenu {
+                label: root.filter-tooltip;
+                // Filters a list keeps one of are all checkable, so the first
+                // one tells.
+                inset: root.show-sort || root.filters[0].checkable;
+                model: root.filters;
+                trailing: [
+                    {
+                        id: "newest",
+                        title: @tr("Newest first"),
+                        group: 1,
+                        hidden: !root.show-sort,
+                        disabled: !root.sort-enabled,
+                        checkable: true,
+                        checked: !root.oldest-first,
+                    },
+                    {
+                        id: "oldest",
+                        title: @tr("Oldest first"),
+                        group: 1,
+                        hidden: !root.show-sort,
+                        disabled: !root.sort-enabled,
+                        checkable: true,
+                        checked: root.oldest-first,
+                    },
+                    { id: "save-search", title: @tr("Save search…"), group: 2, hidden: !root.show-save-search, disabled: root.text == "" },
+                    { id: "search-tips", title: @tr("Search tips"), group: 3, hidden: !root.show-search-tips },
+                    { id: "refresh", title: root.refresh-tooltip, group: 4, hidden: root.show-refresh, disabled: !root.refresh-enabled },
+                ];
+                activated(id, index) => {
+                    if index >= 0 {
+                        root.filter-selected(id);
+                    } else if id == "newest" {
+                        root.sort-selected(false);
+                    } else if id == "oldest" {
+                        root.sort-selected(true);
+                    } else if id == "save-search" {
+                        root.save-search();
+                    } else if id == "search-tips" {
+                        root.search-tips();
+                    } else if id == "refresh" {
+                        root.refresh();
                     }
                 }
             }

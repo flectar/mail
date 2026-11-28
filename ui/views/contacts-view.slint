@@ -14,6 +14,7 @@ import { ScrollFade } from "../components/scroll-fade.slint";
 import { CollapsibleWorkspaceSidebar, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
+import { PopupMenu } from "../components/popup-menu.slint";
 
 component FieldLabel inherits Text {
     in property <string> label;
@@ -323,11 +324,10 @@ export component ContactsView inherits Rectangle {
                         text <=> root.query;
                         placeholder-text: @tr("Search contacts");
                         filters: [
-                            { title: @tr("All contacts"), value: "all" },
-                            { title: @tr("Favorites"), value: "favorites" },
-                            { title: @tr("Suggested"), value: "suggestions" },
+                            { id: "all", title: @tr("All contacts"), checkable: true, checked: root.filter == "all" },
+                            { id: "favorites", title: @tr("Favorites"), checkable: true, checked: root.filter == "favorites" },
+                            { id: "suggestions", title: @tr("Suggested"), checkable: true, checked: root.filter == "suggestions" },
                         ];
-                        selected-filter: root.filter;
                         filter-active: root.filter != "all";
                         filter-tooltip: @tr("Filter contacts");
                         filter-accessible-id: "contacts-filter-button";
@@ -338,7 +338,7 @@ export component ContactsView inherits Rectangle {
                         filter-selected(value) => { root.open-filter(value); }
                         refresh => { root.refresh(); }
 
-                        contacts-more-menu := ContextMenuArea {
+                        Rectangle {
                             width: LayoutMetrics.desktop-icon-button-size;
                             height: LayoutMetrics.control-height;
 
@@ -348,17 +348,21 @@ export component ContactsView inherits Rectangle {
                                 hover-background: AppTheme.muted-control-bg;
                                 tooltip-text: @tr("More contact actions");
                                 accessible-id: "contacts-more-button";
-                                clicked => { contacts-more-menu.show({ x: 0px, y: parent.height }); }
+                                clicked => { contacts-more-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                             }
 
-                            Menu {
-                                MenuItem {
-                                    title: @tr("Import contacts…");
-                                    activated => { ContactImport.choose-file(); }
-                                }
-                                MenuItem {
-                                    title: @tr("Export contacts…");
-                                    activated => { ContactImport.export(); }
+                            contacts-more-menu := PopupMenu {
+                                label: @tr("More contact actions");
+                                entries: [
+                                    { id: "import", title: @tr("Import contacts…") },
+                                    { id: "export", title: @tr("Export contacts…") },
+                                ];
+                                activated(id, index) => {
+                                    if id == "import" {
+                                        ContactImport.choose-file();
+                                    } else {
+                                        ContactImport.export();
+                                    }
                                 }
                             }
                         }

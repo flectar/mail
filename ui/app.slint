@@ -48,6 +48,7 @@ export { ActionTooltip }
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 export { InterfaceText } from "typography.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "design-system.slint";
+import { PopupMenuSpace } from "components/popup-menu.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
 import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, MessageDetails, StorageUsageRow, ThreadMessageRow } from "models.slint";
@@ -1059,7 +1060,11 @@ export component ComposerWindow inherits Window {
     min-height: 480px;
     background: AppTheme.surface;
 
-    init => { root.apply-theme(); }
+    init => {
+        root.apply-theme();
+        PopupMenuSpace.window-height = self.height;
+    }
+    changed height => { PopupMenuSpace.window-height = self.height; }
     changed theme => { root.apply-theme(); }
     request-close => { composer.back-requested(); }
 
@@ -1963,6 +1968,9 @@ export component AppWindow inherits Window {
     changed appearance => { root.appearance-changed(); }
 
     changed width => { root.sync-window-chrome(); }
+    // Menus open above their button when there's no room below it. No init
+    // sets it, as scripts/generate-screenshots.sh adds this window's init.
+    changed height => { PopupMenuSpace.window-height = self.height; }
     changed full-screen => { root.sync-window-chrome(); }
     changed compact-layout => { root.sync-window-chrome(); }
     private property <length> chrome-band: WindowChrome.band-height;

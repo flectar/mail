@@ -1,0 +1,556 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// One entry of a menu the app draws (docs/design-system.md, Menus).
+export struct PopupMenuEntry {
+    // What `activated` reports.
+    id: string,
+    title: string,
+    // A 16 px icon in the leading column.
+    icon: image,
+    // A key or chord shown at the end, such as Ctrl+R.
+    shortcut: string,
+    // Entries come in groups, in order, and a line separates two groups.
+    group: int,
+    // Leaves the entry out, for one that only applies sometimes.
+    hidden: bool,
+    disabled: bool,
+    destructive: bool,
+    // A check mark in the leading column while `checked`.
+    checkable: bool,
+    checked: bool,
+    // Opens the page of the entries whose `parent` is this, in place of the
+    // menu's first page, as phone menus show a submenu.
+    submenu: string,
+    // The page the entry is on: the `submenu` of the entry that opens it,
+    // or empty for the first page.
+    parent: string,
+}
+
+// The window's height, which each window keeps here, so that a menu with no
+// room below its button opens above it, as a native menu does. Slint shows a
+// component nothing else of the window's size.
+export global PopupMenuSpace {
+    in-out property <length> window-height: 0px;
+}
+
+// A row of the menu: a line above it when it starts another group, then the
+// entry. A hidden entry takes no room.
+component PopupMenuRow {
+    in property <PopupMenuEntry> entry;
+    // On the page in view and not hidden.
+    in property <bool> shown;
+    in property <bool> highlighted;
+    in property <bool> line-above;
+    in property <bool> compact;
+    in property <bool> inset;
+    // What screen readers call the row, its title unless it says otherwise.
+    in property <string> accessible-name: root.entry.title;
+    callback hovered(bool);
+    callback chosen();
+
+    private property <length> row-height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.small-control-height;
+    private property <length> line-room: root.line-above ? 9px : 0px;
+    private property <bool> has-icon: root.entry.icon.width > 0;
+    // Checks and icons sit in a column before the titles, as shadcn's
+    // DropdownMenu has them, and `inset` lines plain titles up with them.
+    private property <bool> leading: root.inset || root.entry.checkable || root.has-icon;
+    private property <color> foreground: (root.entry.destructive ? AppTheme.destructive-text : AppTheme.title)
+        .with-alpha(root.entry.disabled ? 0.5 : 1);
+
+    height: !root.shown ? 0px : root.row-height + root.line-room;
+    preferred-width: root.shown ? content.preferred-width : 0px;
+
+    if root.line-above && root.shown : Rectangle {
+        // Across the whole menu, through its padding.
+        x: -4px;
+        y: 4px;
+        width: root.width + 8px;
+        height: 1px;
+        background: AppTheme.control-edge;
+    }
+
+    face := Rectangle {
+        y: root.line-room;
+        width: root.width;
+        height: root.row-height;
+        visible: root.shown;
+        border-radius: LayoutMetrics.small-radius;
+        background: root.highlighted ? AppTheme.popover-hover : transparent;
+
+        content := HorizontalLayout {
+            padding-left: root.leading ? 32px : 8px;
+            padding-right: 16px;
+            spacing: 24px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.entry.title;
+                color: root.foreground;
+                font-size: TypeScale.body;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+
+            if root.entry.submenu != "" : Image {
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../icons/lucide/outline/chevron-right.svg");
+                colorize: AppTheme.secondary.with-alpha(root.entry.disabled ? 0.5 : 1);
+                image-fit: contain;
+                accessible-role: none;
+            }
+
+            if root.entry.shortcut != "" && !root.compact : Text {
+                text: root.entry.shortcut;
+                color: AppTheme.secondary.with-alpha(root.entry.disabled ? 0.5 : 1);
+                font-size: TypeScale.caption;
+                letter-spacing: 1px;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+        }
+
+        if root.entry.checkable ? root.entry.checked : root.has-icon : Image {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            width: 16px;
+            height: 16px;
+            source: root.entry.checkable ? @image-url("../icons/lucide/outline/check.svg") : root.entry.icon;
+            colorize: root.entry.checkable || root.entry.destructive
+                ? root.foreground
+                : AppTheme.secondary.with-alpha(root.entry.disabled ? 0.5 : 1);
+            image-fit: contain;
+            accessible-role: none;
+        }
+
+        TouchArea {
+            enabled: !root.entry.disabled;
+            accessible-role: button;
+            accessible-label: root.accessible-name;
+            accessible-enabled: !root.entry.disabled;
+            accessible-checkable: root.entry.checkable;
+            accessible-checked: root.entry.checked;
+            accessible-action-default => { root.chosen(); }
+            changed has-hover => { root.hovered(self.has-hover); }
+            clicked => { root.chosen(); }
+        }
+    }
+}
+
+// A menu the app draws, the same on every platform. Put it anywhere outside
+// a layout, and open it from its button with `open-below`, or at a point
+// with `open-at`. Its entries are data, so an entry that only applies
+// sometimes is `hidden`, and `model` or `model-titles` add entries from a
+// model after the fixed ones (docs/design-system.md, Menus).
+export component PopupMenu {
+    in property <[PopupMenuEntry]> entries;
+    // Entries from a model after `entries`.
+    in property <[PopupMenuEntry]> model;
+    // Plain entries from a list of titles after `model`, such as saved
+    // prompts or spelling suggestions.
+    in property <[string]> model-titles;
+    // Disables the `model-titles` entries, such as while a request runs.
+    in property <bool> model-titles-disabled;
+    // Disables the `model` entries.
+    in property <bool> model-disabled;
+    // The pages `model` and `model-titles` are on, as `parent` is for an
+    // entry.
+    in property <string> model-page;
+    in property <string> model-titles-page;
+    // Entries after the ones from a model.
+    in property <[PopupMenuEntry]> trailing;
+    // Lines plain titles up with the checks and icons of other entries.
+    in property <bool> inset;
+    in property <bool> compact;
+    // Lines the menu up with the end of its button rather than its start,
+    // for a button at the end of a toolbar.
+    in property <bool> align-end;
+    // The menu's name for screen readers, such as its button's tooltip.
+    in property <string> label;
+    in property <length> min-menu-width: 128px;
+    in property <length> max-menu-width: 360px;
+    in property <length> max-menu-height: 600px;
+    out property <bool> is-open: popup.is-open;
+    // `index` counts within `model` and then `model-titles` for their
+    // entries, and is -1 for the others.
+    callback activated(id: string, index: int);
+
+    private property <int> entries-end: root.entries.length;
+    private property <int> titles-start: root.entries-end + root.model.length;
+    private property <int> model-end: root.titles-start + root.model-titles.length;
+    private property <int> count: root.model-end + root.trailing.length;
+    private property <int> highlighted: -1;
+    // The page in view, its title, and the entry that opened it.
+    private property <string> page;
+    private property <string> page-title;
+    private property <int> page-opener: -1;
+    private property <length> scroll-y: 0px;
+    // The highlight moved by key, which scrolls it into view. The pointer
+    // never scrolls the menu.
+    private property <bool> keyboard-moved: false;
+    private property <length> anchor-start: 0px;
+    private property <length> anchor-end: 0px;
+    // Where the menu's top goes when it opens below, and its bottom when it
+    // opens above.
+    private property <length> anchor-top: 0px;
+    private property <length> anchor-bottom: 0px;
+    private property <bool> prefer-above: false;
+
+    width: 0px;
+    height: 0px;
+
+    // Opens under a button, from its window position (`absolute-position`)
+    // and size, or over it when there's no room under it. Opened from the
+    // keyboard, the first entry is highlighted.
+    public function open-below(x: length, y: length, width: length, height: length, keyboard: bool) {
+        root.open-popup(x, y + height + 4px, y - 4px, width, false, keyboard);
+    }
+
+    // Opens over a button at the bottom of the window, such as a phone's
+    // floating button, or under it when there's no room over it.
+    public function open-above(x: length, y: length, width: length, height: length, keyboard: bool) {
+        root.open-popup(x, y + height + 4px, y - 4px, width, true, keyboard);
+    }
+
+    // Opens at a point in window coordinates, such as where a right click
+    // landed, and grows up from it when there's no room under it.
+    public function open-at(x: length, y: length, keyboard: bool) {
+        root.open-popup(x, y, y, 0px, false, keyboard);
+    }
+
+    public function close() {
+        popup.close();
+    }
+
+    function open-popup(x: length, top: length, bottom: length, width: length, prefer-above: bool, keyboard: bool) {
+        root.anchor-start = x - root.absolute-position.x;
+        root.anchor-end = root.anchor-start + width;
+        root.anchor-top = top - root.absolute-position.y;
+        root.anchor-bottom = bottom - root.absolute-position.y;
+        root.prefer-above = prefer-above;
+        root.page = "";
+        root.scroll-y = 0px;
+        root.keyboard-moved = keyboard;
+        root.highlighted = keyboard ? root.first() : -1;
+        popup.show();
+    }
+
+    pure function fits-below(height: length) -> bool {
+        return PopupMenuSpace.window-height <= 0px
+            || root.absolute-position.y + root.anchor-top + height <= PopupMenuSpace.window-height;
+    }
+
+    pure function fits-above(height: length) -> bool {
+        return root.absolute-position.y + root.anchor-bottom - height >= 0px;
+    }
+
+    pure function opens-above(height: length) -> bool {
+        return root.prefer-above
+            ? root.fits-above(height) || !root.fits-below(height)
+            : !root.fits-below(height) && root.fits-above(height);
+    }
+
+    // The lists as one, by index.
+    pure function entry-at(i: int) -> PopupMenuEntry {
+        return i < root.entries-end ? root.entries[i]
+            : i < root.titles-start ? root.from-model(root.model[i - root.entries-end])
+            : i < root.model-end ? root.from-titles(root.model-titles[i - root.titles-start])
+            : root.trailing[i - root.model-end];
+    }
+
+    pure function from-model(entry: PopupMenuEntry) -> PopupMenuEntry {
+        return {
+            id: entry.id,
+            title: entry.title,
+            icon: entry.icon,
+            shortcut: entry.shortcut,
+            group: entry.group,
+            hidden: entry.hidden,
+            disabled: entry.disabled || root.model-disabled,
+            destructive: entry.destructive,
+            checkable: entry.checkable,
+            checked: entry.checked,
+            submenu: entry.submenu,
+            parent: root.model-page,
+        };
+    }
+
+    pure function from-titles(title: string) -> PopupMenuEntry {
+        return { title: title, disabled: root.model-titles-disabled, parent: root.model-titles-page };
+    }
+
+    pure function shown(i: int) -> bool {
+        return i >= 0 && i < root.count && !root.entry-at(i).hidden && root.entry-at(i).parent == root.page;
+    }
+
+    // The nearest shown entry before `i`, or -1. Slint functions can't loop,
+    // so this looks back 64 entries in steps of four.
+    pure function before4(i: int) -> int {
+        return root.shown(i - 1) ? i - 1 : root.shown(i - 2) ? i - 2 : root.shown(i - 3) ? i - 3 : root.shown(i - 4) ? i - 4 : -1;
+    }
+
+    pure function before16(i: int) -> int {
+        let a = root.before4(i);
+        if a >= 0 { return a; }
+        let b = root.before4(i - 4);
+        if b >= 0 { return b; }
+        let c = root.before4(i - 8);
+        if c >= 0 { return c; }
+        return root.before4(i - 12);
+    }
+
+    pure function before(i: int) -> int {
+        let a = root.before16(i);
+        if a >= 0 { return a; }
+        let b = root.before16(i - 16);
+        if b >= 0 { return b; }
+        let c = root.before16(i - 32);
+        if c >= 0 { return c; }
+        return root.before16(i - 48);
+    }
+
+    // The nearest shown entry after `i`, or -1.
+    pure function after4(i: int) -> int {
+        return root.shown(i + 1) ? i + 1 : root.shown(i + 2) ? i + 2 : root.shown(i + 3) ? i + 3 : root.shown(i + 4) ? i + 4 : -1;
+    }
+
+    pure function after16(i: int) -> int {
+        let a = root.after4(i);
+        if a >= 0 { return a; }
+        let b = root.after4(i + 4);
+        if b >= 0 { return b; }
+        let c = root.after4(i + 8);
+        if c >= 0 { return c; }
+        return root.after4(i + 12);
+    }
+
+    pure function after(i: int) -> int {
+        let a = root.after16(i);
+        if a >= 0 { return a; }
+        let b = root.after16(i + 16);
+        if b >= 0 { return b; }
+        let c = root.after16(i + 32);
+        if c >= 0 { return c; }
+        return root.after16(i + 48);
+    }
+
+    pure function first() -> int {
+        return root.shown(0) ? 0 : root.after(0);
+    }
+
+    pure function last() -> int {
+        return root.shown(root.count - 1) ? root.count - 1 : root.before(root.count - 1);
+    }
+
+    // A line separates an entry from the shown one before it, when that one
+    // is in another group, and a page's entries from its Back row.
+    pure function line-above(i: int) -> bool {
+        let previous = root.before(i);
+        return previous >= 0 ? root.entry-at(previous).group != root.entry-at(i).group : root.page != "";
+    }
+
+    // The arrow keys wrap around. Disabled entries can be highlighted but not
+    // chosen, as the WAI-ARIA menu pattern has it.
+    function move-highlight(down: bool) {
+        if down {
+            let next = root.highlighted < 0 ? -1 : root.after(root.highlighted);
+            root.highlighted = next >= 0 ? next : root.first();
+        } else {
+            let previous = root.highlighted < 0 ? -1 : root.before(root.highlighted);
+            root.highlighted = previous >= 0 ? previous : root.last();
+        }
+    }
+
+    function choose(i: int, keyboard: bool) {
+        if !root.shown(i) || root.entry-at(i).disabled {
+            return;
+        }
+        if root.entry-at(i).submenu != "" {
+            root.page-opener = i;
+            root.page-title = root.entry-at(i).title;
+            root.page = root.entry-at(i).submenu;
+            root.scroll-y = 0px;
+            root.highlighted = keyboard ? root.first() : -1;
+            return;
+        }
+        let id = root.entry-at(i).id;
+        let index = i >= root.entries-end && i < root.model-end ? i - root.entries-end : -1;
+        popup.close();
+        root.activated(id, index);
+    }
+
+    function page-back(keyboard: bool) {
+        root.page = "";
+        root.scroll-y = 0px;
+        root.highlighted = keyboard ? root.page-opener : -1;
+    }
+
+    // Keeps the highlighted row in view as the arrow keys move it.
+    function reveal(top: length, height: length, visible: length) {
+        if !root.keyboard-moved || visible <= 0px {
+            return;
+        }
+        if top - 4px + root.scroll-y < 0px {
+            root.scroll-y = 4px - top;
+        } else if top + height + 4px + root.scroll-y > visible {
+            root.scroll-y = visible - top - height - 4px;
+        }
+    }
+
+    popup := PopupWindow {
+        x: root.align-end ? root.anchor-end - self.width : root.anchor-start;
+        y: root.opens-above(self.height) ? root.anchor-bottom - self.height : root.anchor-top;
+        width: clamp(rows.preferred-width + 2px, root.min-menu-width, root.max-menu-width);
+        height: min(rows.preferred-height + 2px, root.max-menu-height);
+        close-policy: close-on-click-outside;
+        forward-focus: keys;
+
+        Rectangle {
+            border-radius: LayoutMetrics.corner-radius;
+            border-width: 1px;
+            border-color: AppTheme.control-edge;
+            background: AppTheme.popover-bg;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: AppTheme.popover-shadow;
+            clip: true;
+
+            keys := FocusScope {
+                capture-key-pressed(event) => {
+                    root.keyboard-moved = true;
+                    if event.text == Key.DownArrow {
+                        root.move-highlight(true);
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow {
+                        root.move-highlight(false);
+                        return accept;
+                    }
+                    if event.text == Key.Home {
+                        root.highlighted = root.first();
+                        return accept;
+                    }
+                    if event.text == Key.End {
+                        root.highlighted = root.last();
+                        return accept;
+                    }
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.choose(root.highlighted, true);
+                        return accept;
+                    }
+                    if event.text == Key.RightArrow && root.shown(root.highlighted) && root.entry-at(root.highlighted).submenu != "" {
+                        root.choose(root.highlighted, true);
+                        return accept;
+                    }
+                    if root.page != "" && (event.text == Key.LeftArrow || event.text == Key.Escape) {
+                        root.page-back(true);
+                        return accept;
+                    }
+                    if event.text == Key.Escape || event.text == Key.Tab {
+                        popup.close();
+                        return accept;
+                    }
+                    reject
+                }
+
+                scroll := ScrollView {
+                    x: 1px;
+                    y: 1px;
+                    width: parent.width - 2px;
+                    height: parent.height - 2px;
+                    accessible-role: list;
+                    accessible-label: root.label;
+                    content-y <=> root.scroll-y;
+                    content-height: rows.preferred-height;
+                    horizontal-scrollbar-policy: always-off;
+
+                    rows := VerticalLayout {
+                        width: parent.width;
+                        padding: 4px;
+                        alignment: start;
+
+                        if root.page != "" : PopupMenuRow {
+                            entry: { title: root.page-title, icon: @image-url("../icons/lucide/outline/chevron-left.svg") };
+                            shown: true;
+                            compact: root.compact;
+                            accessible-name: @tr("Back");
+                            chosen => { root.page-back(false); }
+                        }
+                        for entry[i] in root.entries : PopupMenuRow {
+                            entry: entry;
+                            shown: root.shown(i);
+                            compact: root.compact;
+                            inset: root.inset;
+                            highlighted: root.highlighted == i;
+                            line-above: root.line-above(i);
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
+                            hovered(on) => {
+                                root.keyboard-moved = false;
+                                if on { root.highlighted = i; } else if root.highlighted == i { root.highlighted = -1; }
+                            }
+                            chosen => { root.choose(i, false); }
+                        }
+                        for entry[i] in root.model : PopupMenuRow {
+                            entry: root.from-model(entry);
+                            shown: root.shown(root.entries-end + i);
+                            compact: root.compact;
+                            inset: root.inset;
+                            highlighted: root.highlighted == root.entries-end + i;
+                            line-above: root.line-above(root.entries-end + i);
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
+                            hovered(on) => {
+                                root.keyboard-moved = false;
+                                if on {
+                                    root.highlighted = root.entries-end + i;
+                                } else if root.highlighted == root.entries-end + i {
+                                    root.highlighted = -1;
+                                }
+                            }
+                            chosen => { root.choose(root.entries-end + i, false); }
+                        }
+                        for title[i] in root.model-titles : PopupMenuRow {
+                            entry: root.from-titles(title);
+                            shown: root.shown(root.titles-start + i);
+                            compact: root.compact;
+                            inset: root.inset;
+                            highlighted: root.highlighted == root.titles-start + i;
+                            line-above: root.line-above(root.titles-start + i);
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
+                            hovered(on) => {
+                                root.keyboard-moved = false;
+                                if on {
+                                    root.highlighted = root.titles-start + i;
+                                } else if root.highlighted == root.titles-start + i {
+                                    root.highlighted = -1;
+                                }
+                            }
+                            chosen => { root.choose(root.titles-start + i, false); }
+                        }
+                        for entry[i] in root.trailing : PopupMenuRow {
+                            entry: entry;
+                            shown: root.shown(root.model-end + i);
+                            compact: root.compact;
+                            inset: root.inset;
+                            highlighted: root.highlighted == root.model-end + i;
+                            line-above: root.line-above(root.model-end + i);
+                            changed highlighted => { if self.highlighted { root.reveal(self.y, self.height, scroll.visible-height); } }
+                            hovered(on) => {
+                                root.keyboard-moved = false;
+                                if on {
+                                    root.highlighted = root.model-end + i;
+                                } else if root.highlighted == root.model-end + i {
+                                    root.highlighted = -1;
+                                }
+                            }
+                            chosen => { root.choose(root.model-end + i, false); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

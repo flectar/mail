@@ -7,6 +7,7 @@ import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { SettingsSelect } from "settings-components.slint";
 import { TranslationWords } from "../translation.slint";
+import { PopupMenu } from "popup-menu.slint";
 
 // A color the composer offers, with its name for screen readers.
 struct ComposerSwatch {
@@ -312,6 +313,7 @@ component BarButton inherits Rectangle {
     in property <bool> has-menu: false;
     in property <color> text-color;
     in property <color> hover-background;
+    out property <bool> focus-visible: keyboard.focus-visible;
     callback clicked;
 
     height: 32px;
@@ -435,7 +437,7 @@ export component ComposerToolbar inherits Rectangle {
             // The writing tools come first, where they show however narrow the
             // composer is (#241). Translating is one of them then, which keeps
             // the toolbar as wide as without them.
-            if root.improve-shown : improve-menu := ContextMenuArea {
+            if root.improve-shown : Rectangle {
                 width: 32px;
                 height: 32px;
                 ToolbarButton {
@@ -445,15 +447,28 @@ export component ComposerToolbar inherits Rectangle {
                     icon-color: root.improving ? root.accent-color : root.secondary-color;
                     hover-background: root.control-hover-color;
                     tooltip-text: root.improving ? @tr("Improving the text…") : @tr("Writing tools");
-                    clicked => { improve-menu.show({ x: 0px, y: parent.height + 4px }); }
+                    clicked => { improve-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                 }
-                Menu {
-                    MenuItem { title: @tr("Proofread"); enabled: !root.improving; activated => { root.improve(-1); } }
-                    for prompt[index] in root.ai-prompts : MenuItem { title: prompt; enabled: !root.improving; activated => { root.improve(index); } }
-                    if root.translate-shown : MenuSeparator {}
-                    if root.translate-shown : MenuItem { title: @tr("Translate…"); activated => { root.open-translate(); } }
-                    MenuSeparator {}
-                    MenuItem { title: @tr("Edit prompts…"); activated => { root.edit-prompts(); } }
+                improve-menu := PopupMenu {
+                    label: @tr("Writing tools");
+                    entries: [{ id: "proofread", title: @tr("Proofread"), disabled: root.improving }];
+                    model-titles: root.ai-prompts;
+                    model-titles-disabled: root.improving;
+                    trailing: [
+                        { id: "translate", title: @tr("Translate…"), group: 1, hidden: !root.translate-shown },
+                        { id: "edit-prompts", title: @tr("Edit prompts…"), group: 2 },
+                    ];
+                    activated(id, index) => {
+                        if index >= 0 {
+                            root.improve(index);
+                        } else if id == "proofread" {
+                            root.improve(-1);
+                        } else if id == "translate" {
+                            root.open-translate();
+                        } else if id == "edit-prompts" {
+                            root.edit-prompts();
+                        }
+                    }
                 }
             }
             if root.improve-shown : Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
@@ -462,7 +477,7 @@ export component ComposerToolbar inherits Rectangle {
             if !root.plain-text : HorizontalLayout {
                 spacing: 2px;
 
-                font-menu := ContextMenuArea {
+                Rectangle {
                     width: 32px;
                     height: 32px;
 
@@ -471,17 +486,21 @@ export component ComposerToolbar inherits Rectangle {
                         icon-color: root.secondary-color;
                         hover-background: root.control-hover-color;
                         tooltip-text: @tr("Font");
-                        clicked => { font-menu.show({ x: 0px, y: parent.height + 4px }); }
+                        clicked => { font-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                     }
 
-                    Menu {
-                        MenuItem { title: @tr("font" => "Default"); checkable: true; checked: root.active-family == "default"; activated => { root.apply-format("family:default"); } }
-                        MenuItem { title: @tr("font" => "Serif"); checkable: true; checked: root.active-family == "serif"; activated => { root.apply-format("family:serif"); } }
-                        MenuItem { title: @tr("font" => "Fixed width"); checkable: true; checked: root.active-family == "monospace"; activated => { root.apply-format("family:monospace"); } }
+                    font-menu := PopupMenu {
+                        label: @tr("Font");
+                        entries: [
+                            { id: "family:default", title: @tr("font" => "Default"), checkable: true, checked: root.active-family == "default" },
+                            { id: "family:serif", title: @tr("font" => "Serif"), checkable: true, checked: root.active-family == "serif" },
+                            { id: "family:monospace", title: @tr("font" => "Fixed width"), checkable: true, checked: root.active-family == "monospace" },
+                        ];
+                        activated(id, index) => { root.apply-format(id); }
                     }
                 }
 
-                size-menu := ContextMenuArea {
+                Rectangle {
                     width: 32px;
                     height: 32px;
 
@@ -490,14 +509,18 @@ export component ComposerToolbar inherits Rectangle {
                         icon-color: root.secondary-color;
                         hover-background: root.control-hover-color;
                         tooltip-text: @tr("Text size");
-                        clicked => { size-menu.show({ x: 0px, y: parent.height + 4px }); }
+                        clicked => { size-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                     }
 
-                    Menu {
-                        MenuItem { title: @tr("text size" => "Small"); checkable: true; checked: root.active-size == "small"; activated => { root.apply-format("size:small"); } }
-                        MenuItem { title: @tr("text size" => "Normal"); checkable: true; checked: root.active-size == "normal"; activated => { root.apply-format("size:normal"); } }
-                        MenuItem { title: @tr("text size" => "Large"); checkable: true; checked: root.active-size == "large"; activated => { root.apply-format("size:large"); } }
-                        MenuItem { title: @tr("text size" => "Huge"); checkable: true; checked: root.active-size == "huge"; activated => { root.apply-format("size:huge"); } }
+                    size-menu := PopupMenu {
+                        label: @tr("Text size");
+                        entries: [
+                            { id: "size:small", title: @tr("text size" => "Small"), checkable: true, checked: root.active-size == "small" },
+                            { id: "size:normal", title: @tr("text size" => "Normal"), checkable: true, checked: root.active-size == "normal" },
+                            { id: "size:large", title: @tr("text size" => "Large"), checkable: true, checked: root.active-size == "large" },
+                            { id: "size:huge", title: @tr("text size" => "Huge"), checkable: true, checked: root.active-size == "huge" },
+                        ];
+                        activated(id, index) => { root.apply-format(id); }
                     }
                 }
 
@@ -542,7 +565,7 @@ export component ComposerToolbar inherits Rectangle {
 
                 Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-                align-menu := ContextMenuArea {
+                Rectangle {
                     width: 32px;
                     height: 32px;
 
@@ -553,13 +576,17 @@ export component ComposerToolbar inherits Rectangle {
                         icon-color: root.secondary-color;
                         hover-background: root.control-hover-color;
                         tooltip-text: @tr("Align");
-                        clicked => { align-menu.show({ x: 0px, y: parent.height + 4px }); }
+                        clicked => { align-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                     }
 
-                    Menu {
-                        MenuItem { title: @tr("Align left"); checkable: true; checked: root.active-align == "left"; activated => { root.apply-format("align:left"); } }
-                        MenuItem { title: @tr("Align center"); checkable: true; checked: root.active-align == "center"; activated => { root.apply-format("align:center"); } }
-                        MenuItem { title: @tr("Align right"); checkable: true; checked: root.active-align == "right"; activated => { root.apply-format("align:right"); } }
+                    align-menu := PopupMenu {
+                        label: @tr("Align");
+                        entries: [
+                            { id: "align:left", title: @tr("Align left"), checkable: true, checked: root.active-align == "left" },
+                            { id: "align:center", title: @tr("Align center"), checkable: true, checked: root.active-align == "center" },
+                            { id: "align:right", title: @tr("Align right"), checkable: true, checked: root.active-align == "right" },
+                        ];
+                        activated(id, index) => { root.apply-format(id); }
                     }
                 }
 
@@ -1004,7 +1031,7 @@ export component ComposerFooter inherits Rectangle {
 
             // Options of the message that most messages leave as they are. Phones keep
             // the bar's rarer buttons here too.
-            more-menu := ContextMenuArea {
+            Rectangle {
                 visible: !root.signature;
                 x: root.compact ? parent.width - 48px : discard.x - 2px - self.width;
                 y: root.compact ? 5px : 11px;
@@ -1018,36 +1045,32 @@ export component ComposerFooter inherits Rectangle {
                     icon-color: root.secondary-color;
                     hover-background: root.control-hover-color;
                     tooltip-text: @tr("More options");
-                    clicked => { more-menu.show({ x: 0px, y: -4px }); }
+                    clicked => { more-menu.open-above(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                 }
 
-                Menu {
-                    MenuItem {
-                        title: @tr("Request a read receipt");
-                        checkable: true;
-                        checked: root.request-receipt;
-                        activated => { root.request-receipt = !root.request-receipt; }
-                    }
-                    MenuItem {
-                        title: @tr("High importance");
-                        checkable: true;
-                        checked: root.importance > 0;
-                        activated => { root.importance = root.importance > 0 ? 0 : 1; }
-                    }
-                    MenuItem {
-                        title: @tr("Low importance");
-                        checkable: true;
-                        checked: root.importance < 0;
-                        activated => { root.importance = root.importance < 0 ? 0 : -1; }
-                    }
-                    if root.compact && root.link-sharing && root.attachment-picker-supported : MenuItem {
-                        title: @tr("Share files by link");
-                        activated => { root.share-by-link(); }
-                    }
-                    if root.compact : MenuSeparator {}
-                    if root.compact : MenuItem {
-                        title: @tr("Discard");
-                        activated => { root.request-close(); }
+                more-menu := PopupMenu {
+                    align-end: true;
+                    compact: root.compact;
+                    label: @tr("More options");
+                    entries: [
+                        { id: "receipt", title: @tr("Request a read receipt"), checkable: true, checked: root.request-receipt },
+                        { id: "high", title: @tr("High importance"), checkable: true, checked: root.importance > 0 },
+                        { id: "low", title: @tr("Low importance"), checkable: true, checked: root.importance < 0 },
+                        { id: "share-link", title: @tr("Share files by link"), hidden: !(root.compact && root.link-sharing && root.attachment-picker-supported) },
+                        { id: "discard", title: @tr("Discard"), group: 1, hidden: !root.compact },
+                    ];
+                    activated(id, index) => {
+                        if id == "receipt" {
+                            root.request-receipt = !root.request-receipt;
+                        } else if id == "high" {
+                            root.importance = root.importance > 0 ? 0 : 1;
+                        } else if id == "low" {
+                            root.importance = root.importance < 0 ? 0 : -1;
+                        } else if id == "share-link" {
+                            root.share-by-link();
+                        } else if id == "discard" {
+                            root.request-close();
+                        }
                     }
                 }
             }
@@ -1099,7 +1122,7 @@ export component ImageBar inherits Rectangle {
         spacing: 2px;
         alignment: start;
 
-        size-menu := ContextMenuArea {
+        Rectangle {
             width: size-button.width;
             height: 32px;
 
@@ -1108,14 +1131,18 @@ export component ImageBar inherits Rectangle {
                 has-menu: true;
                 text-color: root.body-color;
                 hover-background: root.control-hover-color;
-                clicked => { size-menu.show({ x: 0px, y: self.height + 6px }); }
+                clicked => { size-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
             }
 
-            Menu {
-                MenuItem { title: @tr("image size" => "Small"); checkable: true; checked: root.active-size == "small"; enabled: root.image-width > 160; activated => { root.apply-format("image-size:small"); } }
-                MenuItem { title: @tr("image size" => "Medium"); checkable: true; checked: root.active-size == "medium"; enabled: root.image-width > 320; activated => { root.apply-format("image-size:medium"); } }
-                MenuItem { title: @tr("image size" => "Large"); checkable: true; checked: root.active-size == "large"; enabled: root.image-width > 640; activated => { root.apply-format("image-size:large"); } }
-                MenuItem { title: @tr("image size" => "Original size"); checkable: true; checked: root.active-size == "original"; activated => { root.apply-format("image-size:original"); } }
+            size-menu := PopupMenu {
+                label: @tr("image" => "Size");
+                entries: [
+                    { id: "image-size:small", title: @tr("image size" => "Small"), checkable: true, checked: root.active-size == "small", disabled: root.image-width <= 160 },
+                    { id: "image-size:medium", title: @tr("image size" => "Medium"), checkable: true, checked: root.active-size == "medium", disabled: root.image-width <= 320 },
+                    { id: "image-size:large", title: @tr("image size" => "Large"), checkable: true, checked: root.active-size == "large", disabled: root.image-width <= 640 },
+                    { id: "image-size:original", title: @tr("image size" => "Original size"), checkable: true, checked: root.active-size == "original" },
+                ];
+                activated(id, index) => { root.apply-format(id); }
             }
         }
 

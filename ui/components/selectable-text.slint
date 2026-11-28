@@ -1,9 +1,10 @@
 import { AppTheme } from "../design-system.slint";
+import { PopupMenu } from "popup-menu.slint";
 
 // Text people can select and copy, as in a browser: drag or Shift with the
 // arrow keys selects, Ctrl+C copies, and right-click offers Copy and Select
 // all. Copy takes the selection, or all the text when nothing is selected.
-export component SelectableText inherits ContextMenuArea {
+export component SelectableText {
     in property <string> text;
     in property <brush> color;
     in property <length> font-size;
@@ -35,9 +36,28 @@ export component SelectableText inherits ContextMenuArea {
         }
     }
 
-    Menu {
-        MenuItem { title: @tr("Copy"); activated => { root.copy(); } }
-        MenuItem { title: @tr("Select all"); activated => { input.focus(); input.select-all(); } }
+    // The text takes left presses and lets right ones through to this.
+    TouchArea {
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                menu.open-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
+    }
+
+    menu := PopupMenu {
+        entries: [
+            { id: "copy", title: @tr("Copy") },
+            { id: "select-all", title: @tr("Select all") },
+        ];
+        activated(id, index) => {
+            if id == "copy" {
+                root.copy();
+            } else {
+                input.focus();
+                input.select-all();
+            }
+        }
     }
 
     Rectangle {

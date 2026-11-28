@@ -1,5 +1,5 @@
 import { AccountMailPreferences } from "../components/account-mail-preferences.slint";
-import { ActionMenu, ActionMenuEntry } from "../components/action-menu.slint";
+import { PopupMenu, PopupMenuEntry } from "../components/popup-menu.slint";
 import { ZoomControls } from "../components/zoom-controls.slint";
 import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
 import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, MailboxRole, MessageDetails, OpenMessages, ThreadMessageRow } from "../models.slint";
@@ -344,26 +344,30 @@ component ThreadMessageHeader inherits Rectangle {
         background: root.border.transparentize(0.35);
     }
     header-hit := TouchArea {
-        enabled: root.thread-interactive || root.selected;
-        mouse-cursor: pointer;
-        clicked => { root.activate(); }
+        // Also on for the right-click menu of a header that can't be opened.
+        enabled: root.thread-interactive || root.selected || root.address != "";
+        mouse-cursor: root.thread-interactive || root.selected ? pointer : default;
+        clicked => {
+            if root.thread-interactive || root.selected {
+                root.activate();
+            }
+        }
+        // The sender's address, as mail apps offer it on a right-click.
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down && root.address != "" {
+                address-menu.open-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
     }
 
-    // The sender's address, as mail apps offer it on a right-click.
-    ContextMenuArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.address != "";
-
-        Menu {
-            MenuItem {
-                title: @tr("Copy email address");
-                activated => { root.copy-text(root.address); }
-            }
-            MenuItem {
-                title: @tr("Copy name and email address");
-                activated => { root.copy-text(EmailReader.mailbox-text(root.sender, root.address)); }
-            }
+    address-menu := PopupMenu {
+        label: root.address;
+        entries: [
+            { id: "address", title: @tr("Copy email address") },
+            { id: "mailbox", title: @tr("Copy name and email address") },
+        ];
+        activated(id, index) => {
+            root.copy-text(id == "address" ? root.address : EmailReader.mailbox-text(root.sender, root.address));
         }
     }
 
@@ -507,119 +511,41 @@ export component MailReadingPane inherits FocusScope {
     in property <string> selected_sender_verification: "";
     in property <bool> remote-images-blocked: false;
     in property <bool> print_supported: true;
-    private property <[ActionMenuEntry]> draft-action-menu: [
-        { id: "edit_draft", title: @tr("Continue editing"), icon: @image-url("../icons/lucide/outline/compose.svg") },
-        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
-        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
-        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg") },
-        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), disabled: !EmailReader.html-part },
-        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
-        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
-    ];
-    private property <[ActionMenuEntry]> message-action-menu: [
-        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
-        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
-        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
-        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg") },
-        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
-        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
-        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
-        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
-        { id: "print", title: @tr("Print message"), icon: @image-url("../icons/lucide/outline/printer.svg") },
-        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
-        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
-        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
-        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg") },
-        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), disabled: !EmailReader.html-part },
-        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
-        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
-        { id: "summarize", title: @tr("Summarize conversation"), icon: @image-url("../icons/lucide/outline/sparkles.svg") },
-        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
-        { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
-        { id: SnoozeUi.view ? "unsnooze" : "snooze", title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…"), icon: @image-url("../icons/lucide/outline/alarm-clock.svg") },
-        { id: "remind", title: ReminderUi.open-remind-time != "" ? @tr("Change reminder…") : @tr("Remind me if no reply…"), icon: @image-url("../icons/lucide/outline/bell.svg"), disabled: !ReminderUi.can-remind },
-        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
-        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
-        { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
-        { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
-        { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
-        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
-        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
-    ];
-    private property <[ActionMenuEntry]> message-action-menu-no-print: [
-        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
-        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
-        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
-        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg") },
-        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
-        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
-        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
-        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
-        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
-        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
-        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
-        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg") },
-        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), disabled: !EmailReader.html-part },
-        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
-        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
-        { id: "summarize", title: @tr("Summarize conversation"), icon: @image-url("../icons/lucide/outline/sparkles.svg") },
-        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
-        { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
-        { id: SnoozeUi.view ? "unsnooze" : "snooze", title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…"), icon: @image-url("../icons/lucide/outline/alarm-clock.svg") },
-        { id: "remind", title: ReminderUi.open-remind-time != "" ? @tr("Change reminder…") : @tr("Remind me if no reply…"), icon: @image-url("../icons/lucide/outline/bell.svg"), disabled: !ReminderUi.can-remind },
-        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
-        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
-        { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), disabled: !Unsubscribe.available },
-        { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
-        { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), disabled: !BlockSender.available },
-        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg") },
-        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
-    ];
-    // Local mail has no archive or spam.
-    private property <[ActionMenuEntry]> local-action-menu: [
-        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
-        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
-        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
-        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg"), disabled: !LocalMailUi.can-send },
-        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
-        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
-        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
-        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
-        { id: "print", title: @tr("Print message"), icon: @image-url("../icons/lucide/outline/printer.svg") },
-        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
-        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
-        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
-        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg") },
-        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), disabled: !EmailReader.html-part },
-        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
-        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
-        { id: "summarize", title: @tr("Summarize conversation"), icon: @image-url("../icons/lucide/outline/sparkles.svg") },
-        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
-        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
-        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
-        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
-    ];
-    private property <[ActionMenuEntry]> local-action-menu-no-print: [
-        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
-        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
-        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
-        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg"), disabled: !LocalMailUi.can-send },
-        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
-        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
-        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
-        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
-        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
-        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
-        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
-        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg") },
-        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), disabled: !EmailReader.html-part },
-        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
-        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg") },
-        { id: "summarize", title: @tr("Summarize conversation"), icon: @image-url("../icons/lucide/outline/sparkles.svg") },
-        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
-        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
-        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
-        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+    // The More menu. Drafts get their own few actions, and local mail has
+    // no archive, snooze, reminders or spam.
+    private property <bool> menu-draft: root.selected_is_draft;
+    private property <bool> menu-local: LocalMailUi.selected && !root.selected_is_draft;
+    private property <bool> menu-send-off: root.menu-local && !LocalMailUi.can-send;
+    private property <[PopupMenuEntry]> message-menu-entries: [
+        { id: "edit_draft", title: @tr("Continue editing"), icon: @image-url("../icons/lucide/outline/compose.svg"), hidden: !root.menu-draft },
+        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), hidden: root.menu-draft, disabled: root.menu-send-off },
+        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), hidden: root.menu-draft, disabled: root.menu-send-off },
+        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), hidden: root.menu-draft, disabled: root.menu-send-off },
+        { id: "forward_attachment", title: @tr("Forward as attachment"), icon: @image-url("../icons/lucide/outline/paperclip.svg"), hidden: root.menu-draft, disabled: root.menu-send-off },
+        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), hidden: root.menu-draft, disabled: root.menu-send-off },
+        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg"), group: 1, hidden: root.menu-draft },
+        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg"), group: 1, hidden: root.menu-draft },
+        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg"), group: 1, hidden: root.menu-draft },
+        { id: "print", title: @tr("Print message"), icon: @image-url("../icons/lucide/outline/printer.svg"), group: 2, hidden: root.menu-draft || !root.print_supported },
+        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg"), group: 2, hidden: root.menu-draft },
+        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg"), group: 2 },
+        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show HTML source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg"), group: 2 },
+        { id: "message_source", title: @tr("Show message source"), icon: @image-url("../icons/lucide/outline/mail-open.svg"), group: 2 },
+        { id: "plain_text", title: EmailReader.plain-text && EmailReader.html-part ? @tr("Show formatted message") : @tr("View plain text"), icon: EmailReader.plain-text && EmailReader.html-part ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg"), group: 2, disabled: !EmailReader.html-part },
+        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg"), group: 2 },
+        { id: "translate", title: Translation.state == "shown" ? @tr("Show original") : @tr("Translate message"), icon: @image-url("../icons/lucide/outline/languages.svg"), group: 3, hidden: root.menu-draft },
+        { id: "summarize", title: @tr("Summarize conversation"), icon: @image-url("../icons/lucide/outline/sparkles.svg"), group: 3, hidden: root.menu-draft },
+        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg"), group: 4, hidden: root.menu-draft },
+        { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg"), group: 4, hidden: root.menu-draft || root.menu-local },
+        { id: SnoozeUi.view ? "unsnooze" : "snooze", title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…"), icon: @image-url("../icons/lucide/outline/alarm-clock.svg"), group: 4, hidden: root.menu-draft || root.menu-local },
+        { id: "remind", title: ReminderUi.open-remind-time != "" ? @tr("Change reminder…") : @tr("Remind me if no reply…"), icon: @image-url("../icons/lucide/outline/bell.svg"), group: 4, hidden: root.menu-draft || root.menu-local, disabled: !ReminderUi.can-remind },
+        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg"), group: 4, hidden: root.menu-draft },
+        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg"), group: 4, hidden: root.menu-draft },
+        { id: "unsubscribe", title: @tr("Unsubscribe…"), icon: @image-url("../icons/lucide/outline/mail-x.svg"), group: 5, hidden: root.menu-draft || root.menu-local, disabled: !Unsubscribe.available },
+        { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg"), group: 5, hidden: root.menu-draft || root.menu-local },
+        { id: "block", title: BlockSender.blocked ? @tr("Unblock sender") : @tr("Block sender…"), icon: @image-url("../icons/lucide/outline/ban.svg"), group: 5, hidden: root.menu-draft || root.menu-local, disabled: !BlockSender.available },
+        { id: "rule", title: @tr("Create rule…"), icon: @image-url("../icons/lucide/outline/list-filter-plus.svg"), group: 5, hidden: root.menu-draft || root.menu-local },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), group: 6, destructive: true },
     ];
     // The reader toolbar drops actions that the More menu also offers when
     // integrated window controls or a narrow pane leave too little room.
@@ -968,6 +894,76 @@ export component MailReadingPane inherits FocusScope {
                     spacing: 0px;
 
                     reader-toolbar := Rectangle {
+                        message-menu := PopupMenu {
+                            align-end: true;
+                            compact: root.compact;
+                            label: @tr("More message actions");
+                            max-menu-height: max(160px, root.height - (root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height) - 12px);
+                            entries: root.message-menu-entries;
+                            activated(action, index) => {
+                                if action == "snooze" {
+                                    SnoozeUi.request("open", -1);
+                                    return;
+                                }
+                                if action == "unsnooze" {
+                                    SnoozeUi.unsnooze("open", -1);
+                                    return;
+                                }
+                                if action == "remind" {
+                                    ReminderUi.remind-open();
+                                    return;
+                                }
+                                if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "forward_attachment" || action == "edit_as_new" {
+                                    root.compose_message_action(action);
+                                } else if action == "star" {
+                                    root.message_action(root.selected_starred ? "unstar" : "star");
+                                } else if action == "labels" {
+                                    root.label-search-query = "";
+                                    root.search-mail-labels("");
+                                    label-popup.show();
+                                } else if action == "openpgp" {
+                                    AccountMailPreferences.read-message();
+                                } else if action == "summarize" {
+                                    AiSummary.summarize();
+                                } else if action == "translate" {
+                                    if Translation.state == "shown" {
+                                        Translation.show-original();
+                                    } else {
+                                        Translation.translate();
+                                    }
+                                } else if action == "unsubscribe" {
+                                    Unsubscribe.start();
+                                } else if action == "block" {
+                                    BlockSender.start();
+                                } else if action == "rule" {
+                                    MailRules.create-from-message();
+                                } else if action == "print" {
+                                    root.print_message();
+                                } else if action == "browser" {
+                                    root.open_message_in_browser();
+                                } else if action == "rendering_info" {
+                                    root.rendering_info_open = true;
+                                } else if action == "source" {
+                                    root.source_mode = !root.source_mode;
+                                    if root.source_mode { root.text_mode = false; EmailReader.reader-mode = false; MessageSource.shown = false; }
+                                } else if action == "message_source" {
+                                    MessageSource.show();
+                                } else if action == "plain_text" {
+                                    root.text_mode = false; root.source_mode = false; EmailReader.reader-mode = false; MessageSource.shown = false;
+                                    EmailReader.command("plain-text");
+                                } else if action == "original_colors" {
+                                    MessageColors.original = !MessageColors.original;
+                                } else if action == "read" {
+                                    root.message_action(root.selected_unread ? "mark_read" : "mark_unread");
+                                } else if action == "move" || action == "copy" {
+                                    MovePickerUi.return-to = "reader";
+                                    MovePickerUi.request(action, "open", -1);
+                                } else {
+                                    root.message_action(action);
+                                }
+                            }
+                        }
+
                         // Desktop actions share the product rail/sidebar/list
                         // centerline at y=32. Compact actions use the same
                         // centered 44px touch geometry as the other pages.
@@ -1309,82 +1305,22 @@ export component MailReadingPane inherits FocusScope {
                                     }
                                 }
                             }
-                            ActionMenu {
+                            ToolbarIconButton {
                                 compact: root.compact;
+                                width: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
+                                height: self.width;
                                 interactive: root.has_selected;
                                 icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg");
                                 icon-color: root.secondary-text;
+                                idle-background: AppTheme.control-bg;
+                                hover-background: AppTheme.muted-control-bg;
+                                active-background: AppTheme.muted-control-bg;
+                                active: message-menu.is-open;
                                 tooltip-text: @tr("More message actions");
-                                trigger-accessible-id: "message-more-actions-button";
-                                max-menu-height: max(160px, root.height - (root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height) - 12px);
-                                entries: root.selected_is_draft
-                                    ? root.draft-action-menu
-                                    : LocalMailUi.selected
-                                        ? (root.print_supported ? root.local-action-menu : root.local-action-menu-no-print)
-                                    : root.print_supported
-                                        ? root.message-action-menu
-                                        : root.message-action-menu-no-print;
-                                activated(action) => {
-                                    if action == "snooze" {
-                                        SnoozeUi.request("open", -1);
-                                        return;
-                                    }
-                                    if action == "unsnooze" {
-                                        SnoozeUi.unsnooze("open", -1);
-                                        return;
-                                    }
-                                    if action == "remind" {
-                                        ReminderUi.remind-open();
-                                        return;
-                                    }
-                                    if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "forward_attachment" || action == "edit_as_new" {
-                                        root.compose_message_action(action);
-                                    } else if action == "star" {
-                                        root.message_action(root.selected_starred ? "unstar" : "star");
-                                    } else if action == "labels" {
-                                        root.label-search-query = "";
-                                        root.search-mail-labels("");
-                                        label-popup.show();
-                                    } else if action == "openpgp" {
-                                        AccountMailPreferences.read-message();
-                                    } else if action == "summarize" {
-                                        AiSummary.summarize();
-                                    } else if action == "translate" {
-                                        if Translation.state == "shown" {
-                                            Translation.show-original();
-                                        } else {
-                                            Translation.translate();
-                                        }
-                                    } else if action == "unsubscribe" {
-                                        Unsubscribe.start();
-                                    } else if action == "block" {
-                                        BlockSender.start();
-                                    } else if action == "rule" {
-                                        MailRules.create-from-message();
-                                    } else if action == "print" {
-                                        root.print_message();
-                                    } else if action == "browser" {
-                                        root.open_message_in_browser();
-                                    } else if action == "rendering_info" {
-                                        root.rendering_info_open = true;
-                                    } else if action == "source" {
-                                        root.source_mode = !root.source_mode;
-                                        if root.source_mode { root.text_mode = false; EmailReader.reader-mode = false; MessageSource.shown = false; }
-                                    } else if action == "message_source" {
-                                        MessageSource.show();
-                                    } else if action == "plain_text" {
-                                        root.text_mode = false; root.source_mode = false; EmailReader.reader-mode = false; MessageSource.shown = false;
-                                        EmailReader.command("plain-text");
-                                    } else if action == "original_colors" {
-                                        MessageColors.original = !MessageColors.original;
-                                    } else if action == "read" {
-                                        root.message_action(root.selected_unread ? "mark_read" : "mark_unread");
-                                    } else if action == "move" || action == "copy" {
-                                        MovePickerUi.return-to = "reader";
-                                        MovePickerUi.request(action, "open", -1);
-                                    } else {
-                                        root.message_action(action);
-                                    }
+                                accessible-id: "message-more-actions-button";
+                                accessible-expanded: message-menu.is-open;
+                                clicked => {
+                                    message-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible);
                                 }
                             }
                         }
@@ -1652,18 +1588,21 @@ export component MailReadingPane inherits FocusScope {
                                         height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height; padding: 0px; spacing: 4px; cross-axis-alignment: center;
                                         ZoomControls { compact: root.compact; available: EmailReader.available; zoom: EmailReader.zoom; revision: EmailReader.zoom-revision; fitting: EmailReader.auto-fit; command(action) => { EmailReader.command(action); } }
                                         Rectangle { horizontal-stretch: 1; }
-                                        if root.attachment-menu-mode && MailAttachments.rows.length > 0 : ContextMenuArea {
+                                        if root.attachment-menu-mode && MailAttachments.rows.length > 0 : Rectangle {
                                             width: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
                                             height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
                                             ToolbarIconButton {
                                                 compact: root.compact; icon: @image-url("../icons/lucide/outline/paperclip.svg");
                                                 icon-color: root.secondary-text; tooltip-text: @tr("Attachments");
-                                                clicked => { parent.show({ x: 0px, y: parent.height }); }
+                                                clicked => { attachments-menu.open-below(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                                             }
-                                            Menu {
-                                                for attachment in MailAttachments.rows : MenuItem {
-                                                    title: attachment.name;
-                                                    activated => { MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id); }
+                                            attachments-menu := PopupMenu {
+                                                compact: root.compact;
+                                                label: @tr("Attachments");
+                                                model-titles: MailAttachments.names;
+                                                activated(id, index) => {
+                                                    let attachment = MailAttachments.rows[index];
+                                                    MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id);
                                                 }
                                             }
                                         }
@@ -1766,16 +1705,11 @@ export component MailReadingPane inherits FocusScope {
                                 // This area supplies the normal right-click
                                 // menu for the rendered mail. Link hit areas
                                 // below add the link-specific native actions.
-                                email-context := ContextMenuArea {
+                                Rectangle {
                                     x: root.message-card-inset + root.message-card-border-width;
                                     y: root.message-body-y;
                                     width: root.email-viewport-width * (root.alternate-body-active ? 1 : EmailReader.width-ratio);
                                     height: root.message-body-content-height;
-                                    // Keep the parent enabled in plain-text
-                                    // mode as well; otherwise Slint propagates
-                                    // the disabled state into the read-only
-                                    // TextEdit and its text cannot be selected.
-                                    enabled: root.has_selected;
 
                                     if root.text_mode : Rectangle {
                                         width: parent.width; height: parent.height;
@@ -1886,7 +1820,9 @@ export component MailReadingPane inherits FocusScope {
                                                     EmailReader.context-link = EmailReader.link-at(email-input.mouse-x / 1px, email-input.mouse-y / 1px);
                                                 }
                                                 if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                                                    email-context.show({ x: email-input.mouse-x, y: email-input.mouse-y + (root.remote-images-blocked ? 60px : 0px) });
+                                                    if root.has_selected {
+                                                        email-context.open-at(email-input.absolute-position.x + email-input.mouse-x, email-input.absolute-position.y + email-input.mouse-y, false);
+                                                    }
                                                 } else if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
                                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                                         email-focus.focus();
@@ -2088,46 +2024,49 @@ export component MailReadingPane inherits FocusScope {
                                         }
                                     }
 
-                                    Menu {
-                                        MenuItem { title: @tr("Open link"); enabled: EmailReader.context-link != ""; activated => { root.open_email_link(EmailReader.context-link); } }
-                                        MenuItem { title: @tr("Copy link"); enabled: EmailReader.context-link != ""; activated => {
-                                            clipboard-source.text = EmailReader.context-link; clipboard-source.select-all(); clipboard-source.copy();
-                                        } }
-                                        MenuItem { title: @tr("Retry images"); activated => { EmailReader.retry-images(); } }
-                                        MenuItem { title: @tr("Copy formatted selection"); enabled: root.has_selection; activated => { EmailReader.command("copy-rich"); } }
-                                        // The user's prompts on the selected text (#241).
-                                        Menu {
-                                            title: @tr("Ask AI");
-                                            enabled: root.has_selection;
-                                            MenuItem { title: @tr("Explain"); activated => { AiSummary.ask(-1, root.selected-text); } }
-                                            for prompt[index] in AiSummary.prompts : MenuItem { title: prompt; activated => { AiSummary.ask(index, root.selected-text); } }
-                                        }
-                                        MenuItem { title: @tr("Caret browsing"); checkable: true; checked: EmailReader.caret-mode; activated => { EmailReader.caret-mode = !EmailReader.caret-mode; } }
-                                        MenuItem { title: @tr("Show original colors"); checkable: true; checked: MessageColors.original; activated => { MessageColors.original = !MessageColors.original; } }
-                                        MenuItem {
-                                            title: @tr("Copy selected text");
-                                            enabled: root.has_selection;
-                                            activated => {
-                                                clipboard-source.text = root.selected_text;
-                                                clipboard-source.select-all();
-                                                clipboard-source.copy();
+                                    email-context := PopupMenu {
+                                        entries: [
+                                            { id: "open-link", title: @tr("Open link"), hidden: EmailReader.context-link == "" },
+                                            { id: "copy-link", title: @tr("Copy link"), hidden: EmailReader.context-link == "" },
+                                            { id: "copy-selection", title: @tr("Copy selected text"), group: 1, disabled: !root.has_selection },
+                                            { id: "copy-rich", title: @tr("Copy formatted selection"), group: 1, disabled: !root.has_selection },
+                                            { id: "copy-all", title: @tr("Copy all email text"), group: 1, disabled: root.selected_plain_text == "" },
+                                            { id: "select-all", title: @tr("Select all email text"), group: 1, disabled: root.selected_plain_text == "" },
+                                            // The user's prompts on the selected text (#241).
+                                            { title: @tr("Ask AI"), group: 2, disabled: !root.has_selection, submenu: "ask-ai" },
+                                            { id: "explain", title: @tr("Explain"), parent: "ask-ai" },
+                                            { id: "caret", title: @tr("Caret browsing"), group: 3, checkable: true, checked: EmailReader.caret-mode },
+                                            { id: "original-colors", title: @tr("Show original colors"), group: 3, checkable: true, checked: MessageColors.original },
+                                            { id: "retry-images", title: @tr("Retry images"), group: 3 },
+                                        ];
+                                        model-titles: AiSummary.prompts;
+                                        model-titles-page: "ask-ai";
+                                        activated(id, index) => {
+                                            if index >= 0 {
+                                                AiSummary.ask(index, root.selected-text);
+                                            } else if id == "open-link" {
+                                                root.open_email_link(EmailReader.context-link);
+                                            } else if id == "copy-link" {
+                                                root.copy-to-clipboard(EmailReader.context-link);
+                                            } else if id == "copy-selection" {
+                                                root.copy-to-clipboard(root.selected_text);
                                                 root.copy_email_status("Copied selected text");
-                                            }
-                                        }
-                                        MenuItem {
-                                            title: @tr("Copy all email text");
-                                            enabled: root.selected_plain_text != "";
-                                            activated => {
-                                                clipboard-source.text = root.selected_plain_text;
-                                                clipboard-source.select-all();
-                                                clipboard-source.copy();
+                                            } else if id == "copy-rich" {
+                                                EmailReader.command("copy-rich");
+                                            } else if id == "copy-all" {
+                                                root.copy-to-clipboard(root.selected_plain_text);
                                                 root.copy_email_status("Copied email text");
+                                            } else if id == "select-all" {
+                                                root.select-email-text();
+                                            } else if id == "explain" {
+                                                AiSummary.ask(-1, root.selected-text);
+                                            } else if id == "caret" {
+                                                EmailReader.caret-mode = !EmailReader.caret-mode;
+                                            } else if id == "original-colors" {
+                                                MessageColors.original = !MessageColors.original;
+                                            } else if id == "retry-images" {
+                                                EmailReader.retry-images();
                                             }
-                                        }
-                                        MenuItem {
-                                            title: @tr("Select all email text");
-                                            enabled: root.selected_plain_text != "";
-                                            activated => { root.select-email-text(); }
                                         }
                                     }
                                 }

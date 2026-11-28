@@ -1,35 +1,37 @@
+import { PopupMenu } from "popup-menu.slint";
+
 export component EmailLinkContextArea {
     in property <string> url;
     in property <bool> enabled: true;
     callback open-link;
     callback copy-link;
 
-    // Keep the left-click target below ContextMenuArea. The context item
-    // forwards left clicks but consumes right clicks, which gives us both
-    // normal link activation and a link-specific context menu.
     TouchArea {
         width: parent.width;
         height: parent.height;
         enabled: root.enabled;
-        clicked => { root.open-link(); }
         mouse-cursor: pointer;
+        clicked => { root.open-link(); }
+        // A right click offers to open or copy the link.
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                menu.open-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
     }
 
-    ContextMenuArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.enabled;
-
-        Menu {
-            MenuItem {
-                title: @tr("Open link");
-                activated => { root.open-link(); }
-            }
-            MenuItem {
-                title: @tr("Copy link");
-                activated => { root.copy-link(); }
+    menu := PopupMenu {
+        label: root.url;
+        entries: [
+            { id: "open", title: @tr("Open link") },
+            { id: "copy", title: @tr("Copy link") },
+        ];
+        activated(id, index) => {
+            if id == "open" {
+                root.open-link();
+            } else {
+                root.copy-link();
             }
         }
     }
 }
-

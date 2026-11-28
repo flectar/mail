@@ -11,7 +11,8 @@ import { AccountRow } from "../models.slint";
 import { DialogArea } from "../components/window-backdrop.slint";
 import { DrawerSettingsItem, SidebarGroupLabel, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { SidebarStyle } from "../components/sidebar-row.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
+import { PopupMenu, PopupMenuEntry } from "../components/popup-menu.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { CheckBox, FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
@@ -405,12 +406,12 @@ export component FilesView inherits Rectangle {
                         refresh-tooltip: @tr("Refresh"); refresh-accessible-id: "files-refresh-button";
                         filter-tooltip: @tr("Filter and sort files"); filter-accessible-id: "files-filter-button";
                         filter-active: FilesUi.attachments ? FilesUi.server-attachments : FilesUi.file-kind != 0 || FilesUi.file-sort != 0 || FilesUi.descending || FilesUi.min-size != "" || FilesUi.max-size != "";
-                        private property <[WorkspaceSearchFilter]> attachment-filters: [
-                            {title: @tr("Synchronized mail"), value: "local"},
-                            {title: @tr("All mail on server (JMAP)"), value: "server"},
-                            {title: @tr("Index cached text"), value: "index"}
+                        private property <[PopupMenuEntry]> attachment-filters: [
+                            { id: "local", title: @tr("Synchronized mail") },
+                            { id: "server", title: @tr("All mail on server (JMAP)") },
+                            { id: "index", title: @tr("Index cached text") },
                         ];
-                        private property <[WorkspaceSearchFilter]> storage-filters: [{title: @tr("Filter and sort files"), value: "filter"}];
+                        private property <[PopupMenuEntry]> storage-filters: [{ id: "filter", title: @tr("Filter and sort files") }];
                         filters: FilesUi.attachments ? self.attachment-filters : self.storage-filters;
                         leading-clicked => { if root.compact { root.navigation-open = true; } else { root.sidebar-collapsed = !root.sidebar-collapsed; } }
                         edited(value) => { root.search-pending = true; search-delay.restart(); }
@@ -531,7 +532,7 @@ export component FilesView inherits Rectangle {
                 }
                 // On phones, Upload and New folder leave the toolbar for one
                 // floating "+", like the mail and contacts create actions.
-                if root.compact && !FilesUi.attachments : new-menu := ContextMenuArea {
+                if root.compact && !FilesUi.attachments : Rectangle {
                     x: parent.width - self.width - 16px;
                     y: parent.height - self.height - 16px;
                     width: new-button.width;
@@ -543,17 +544,23 @@ export component FilesView inherits Rectangle {
                         tooltip-text: @tr("Upload or create a folder");
                         accessible-id: "files-new-button";
                         interactive: FilesUi.can-create && !FilesUi.busy;
-                        clicked => { new-menu.show({ x: 0px, y: 0px }); }
+                        clicked => { new-menu.open-above(self.absolute-position.x, self.absolute-position.y, self.width, self.height, self.focus-visible); }
                     }
 
-                    Menu {
-                        MenuItem {
-                            title: @tr("Upload");
-                            activated => { root.navigate("upload", "", ""); }
-                        }
-                        MenuItem {
-                            title: @tr("New folder");
-                            activated => { root.new-folder(); }
+                    new-menu := PopupMenu {
+                        align-end: true;
+                        compact: true;
+                        label: @tr("Upload or create a folder");
+                        entries: [
+                            { id: "upload", title: @tr("Upload") },
+                            { id: "new-folder", title: @tr("New folder") },
+                        ];
+                        activated(id, index) => {
+                            if id == "upload" {
+                                root.navigate("upload", "", "");
+                            } else {
+                                root.new-folder();
+                            }
                         }
                     }
                 }
