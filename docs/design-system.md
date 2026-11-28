@@ -30,7 +30,9 @@ see the dark theme.
 | Edge of a button | 1 px of the text color at 13%, white at 12% in dark mode | `AppTheme.control-edge` |
 | Edge of a field or select | 1 px `input-border` | `AppTheme.input-border` |
 | Face of a button | lit from above, a step darker under the pointer | `AppTheme.control-face-top`, `control-face-bottom`, `control-hover-top`, `control-hover-bottom` |
-| Toggle that is on | a neutral pushed-in fill | `AppTheme.control-on` |
+| Neutral fills, faint to strong | the text color over the surface at 4.5%, 7.5% and 10.5% (5%, 8% and 11% in dark mode) | `AppTheme.fill-subtle`, `fill-hover`, `fill-pressed` |
+| Under the pointer: a row, a ghost button, and a tab track | `fill-hover` | `AppTheme.muted-control-bg` |
+| Toggle that is on, a selected list row | `fill-pressed` | `AppTheme.control-on`, `selected-row` |
 | Shadow under an outlined control | 1 px down, 2 px blur, 6% black, light theme only | `AppTheme.control-shadow` |
 | Shadow under a raised control, such as the chosen tab | 1 px down, 3 px blur, 12% black, light theme only | `AppTheme.raised-shadow` |
 | Shadow under a primary or destructive button | its own color at 28%, light theme only | `AppTheme.primary-shadow`, `destructive-shadow` |
@@ -40,6 +42,11 @@ see the dark theme.
 
 In the dark theme shadows don't read, so a control's border marks its edge on
 its own. A disabled control keeps its look at half opacity.
+
+The neutral fills come from one scale, so a hovered row, a hovered toolbar
+button and a tab track are the same gray everywhere. Being the text color over
+the surface, they follow every palette and both themes. Use them, or the names
+built on them, rather than a gray of a control's own.
 
 Every corner follows the corner base, so one value makes the whole app squarer
 or rounder, as shadcn derives its corners from one `--radius`. Things round by

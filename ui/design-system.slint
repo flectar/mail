@@ -214,10 +214,16 @@ export global AppTheme {
     // active tab opens into one color wherever it sits; dividers alone
     // separate the panes there.
     out property <color> sidebar-bg: root.top-bar ? root.surface : root.sidebar-tint;
-    out property <color> control-bg: preset == "default" ? (dark ? #232425 : #f1f1ef)
-        : themed-surface.mix(themed-text, dark ? 0.90 : 0.94);
-    out property <color> muted-control-bg: preset == "default" ? (dark ? #242526 : #e8e8e5)
-        : themed-surface.mix(themed-text, dark ? 0.86 : 0.90);
+    // The neutral fills, faint to strong, which every control and row shares:
+    // a filled field at rest, then anything under the pointer, then something
+    // pressed in or chosen. Each is the text color over the surface, so it
+    // suits every palette and both themes (docs/design-system.md).
+    out property <color> fill-subtle: root.surface.mix(root.title, dark ? 0.95 : 0.955);
+    out property <color> fill-hover: root.surface.mix(root.title, dark ? 0.92 : 0.925);
+    out property <color> fill-pressed: root.surface.mix(root.title, dark ? 0.89 : 0.895);
+    out property <color> control-bg: root.fill-subtle;
+    // The hover of rows and ghost buttons, and the track of tabs.
+    out property <color> muted-control-bg: root.fill-hover;
     // Product actions deliberately keep the established Flectar blue in both
     // themes. The lighter dark-theme accent remains available for selection,
     // focus, and small icons where extra contrast is useful.
@@ -231,10 +237,8 @@ export global AppTheme {
         : themed-accent.mix(themed-surface, dark ? 0.20 : 0.14);
     out property <color> accent-pale: preset == "default" ? (dark ? #1c2a3a : #edf6ff)
         : themed-accent.mix(themed-surface, dark ? 0.11 : 0.07);
-    out property <color> selected-row: preset == "default" ? (dark ? #252627 : #e9e9e6)
-        : themed-surface.mix(themed-text, dark ? 0.90 : 0.93);
-    out property <color> avatar-bg: preset == "default" ? (dark ? #303132 : #e6e6e2)
-        : themed-surface.mix(themed-text, dark ? 0.84 : 0.89);
+    out property <color> selected-row: root.fill-pressed;
+    out property <color> avatar-bg: root.fill-pressed;
     out property <color> avatar-selected-bg: preset == "default" ? (dark ? #354860 : #d5e8ff)
         : themed-accent.mix(themed-surface, dark ? 0.28 : 0.18);
     out property <color> border: preset == "default" ? (dark ? #292a2b : #d9d9d6) : themed-border;
@@ -271,7 +275,7 @@ export global AppTheme {
     out property <color> control-hover-bottom: dark ? root.surface.mix(white, 0.91) : root.page-bg;
     // A toggle that is on looks pressed in: a neutral fill, as the chosen
     // option among a few.
-    out property <color> control-on: dark ? root.surface.mix(white, 0.84) : root.muted-control-bg;
+    out property <color> control-on: dark ? root.surface.mix(white, 0.84) : root.fill-pressed;
     // Outlined controls rest on a faint shadow in light mode. In dark mode
     // shadows don't read, and their edge marks it alone.
     out property <color> control-shadow: dark ? transparent : #0000000f;
