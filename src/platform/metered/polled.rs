@@ -1,7 +1,9 @@
-//! A metered connection on Android (#253): ConnectivityManager's answer for
-//! the network in use, mobile data or one the user marked as metered, which
-//! the host reads through JNI. Android tells of changes only to callbacks
-//! registered from Java, so the answer is read again every quarter minute.
+//! A metered connection on Android and HarmonyOS (#253), as the host reads it:
+//! on Android ConnectivityManager's answer for the network in use, through
+//! JNI, and on HarmonyOS Network Kit's for the default network. Either way it
+//! is mobile data or a network the user marked as metered. The app frameworks
+//! tell of changes only to callbacks registered from Java or ArkTS, so the
+//! answer is read again every quarter minute.
 
 use std::time::Duration;
 

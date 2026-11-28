@@ -27,6 +27,21 @@ pub fn configure_system_proxy(reader: impl SystemProxies + 'static) {
     CONFIGURED.call_once(|| flectar_mail_core::net::proxy::set_system_source(reader));
 }
 
+type MeteredRead = Box<dyn Fn() -> bool + Send + Sync>;
+
+static METERED: OnceLock<MeteredRead> = OnceLock::new();
+
+/// Supply the reader of whether the default network is metered (#253),
+/// Network Kit's `OH_NetConn_IsDefaultNetMetered`, once.
+pub fn configure_metered(read: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = METERED.set(Box::new(read));
+}
+
+/// Whether the default network is metered, once the host told how to ask.
+pub(crate) fn connection_metered() -> Option<bool> {
+    METERED.get().map(|read| read())
+}
+
 /// The native window is the app while the page is showing; account changes
 /// that request notification permission come from that foreground session.
 pub(crate) fn app_is_active() -> bool {

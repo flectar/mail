@@ -205,6 +205,12 @@ handled (and asserted) in the script, do not "simplify" them away:
   mode the call returns the local proxy that runs the script. Mail stays
   direct unless it has its own SOCKS proxy, and a system proxy that asks for
   a password needs the manual proxy fields.
+- **Metered connections**: Pause downloads in Settings → Network asks
+  Network Kit whether the default network is metered
+  (`OH_NetConn_IsDefaultNetMetered`), mobile data or a network the user marked
+  as metered, every quarter minute. The call needs
+  `ohos.permission.GET_NETWORK_INFO`, a normal permission the system grants at
+  install; a failed read counts as not metered.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
