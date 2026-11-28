@@ -20,7 +20,8 @@ def fixture(workspace, count):
         return [dict(
             id=i, account_id=i // 5, group_start=i % 5 == 0,
             name=f"Calendar {i}", account_name=f"Account {i // 5}",
-            email=f"account{i // 5}@example.com", provider="local", color="",
+            email=f"account{i // 5}@example.com", initials="AC", has_avatar=False,
+            provider="local", color="",
             color_index=i % 4, read_only=False, enabled=True,
             is_default=i % 5 == 0, last_synced="",
         ) for i in range(count)]
@@ -31,7 +32,7 @@ def fixture(workspace, count):
     def row(kind, key, account=None):
         return dict(kind=kind, key=key, account=account or empty, open=True)
 
-    rows = [row("unified-heading", "heading"), row("unified-section", "unified"),
+    rows = [row("unified-heading", "heading"),
             row("all", "all"), row("favorites", "favorites"),
             row("accounts-heading", "accounts")]
     for i in range(count):

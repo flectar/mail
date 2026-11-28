@@ -347,8 +347,8 @@
     { "weekday": "SUN", "day": "13", "iso_date": "2026-09-13", "is_today": false, "more_from": [0, 0], "events": [] }
   ],
   "calendar_sources": [
-    { "id": 1, "account_id": 1, "group_start": true, "name": "Work", "account_name": "Flectar", "email": "alex@flectar.com", "provider": "Google", "color": "#3478f6", "color_index": 0, "read_only": false, "enabled": true, "is_default": true, "last_synced": "Just now" },
-    { "id": 2, "account_id": 2, "group_start": true, "name": "Support", "account_name": "Flectar Support", "email": "support@flectar.com", "provider": "Microsoft", "color": "#8b5cf6", "color_index": 1, "read_only": false, "enabled": true, "is_default": false, "last_synced": "Just now" }
+    { "id": 1, "account_id": 1, "group_start": true, "name": "Work", "account_name": "Flectar", "email": "alex@flectar.com", "initials": "FL", "has_avatar": false, "provider": "Google", "color": "#3478f6", "color_index": 0, "read_only": false, "enabled": true, "is_default": true, "last_synced": "Just now" },
+    { "id": 2, "account_id": 2, "group_start": true, "name": "Support", "account_name": "Flectar Support", "email": "support@flectar.com", "initials": "FS", "has_avatar": false, "provider": "Microsoft", "color": "#8b5cf6", "color_index": 1, "read_only": false, "enabled": true, "is_default": false, "last_synced": "Just now" }
   ],
   "calendar_month_bars": [
     { "event": {"id": 5, "editable": true, "title": "Design sprint", "detail": "All day · Sep 9 – 11", "iso_date": "2026-09-09", "color_index": 1, "all_day": true, "provider": "Google", "account": "Flectar", "calendar": "Work", "location": "", "organizer": "", "description": "", "attendees": "", "join_url": "", "rsvp_status": "accepted", "recurrence": "", "status": "confirmed", "source": "local"}, "row": 1, "column": 2, "span": 3, "lane": 0, "continues_before": false, "continues_after": false, "time_label": "" },
@@ -395,20 +395,6 @@
     {
       "kind": "unified-heading",
       "key": "unified-heading",
-      "account": {
-        "id": 0,
-        "name": "",
-        "email": "",
-        "initials": "",
-        "has_avatar": false,
-        "count": "",
-        "selected": false
-      },
-      "open": true
-    },
-    {
-      "kind": "unified-section",
-      "key": "unified",
       "account": {
         "id": 0,
         "name": "",

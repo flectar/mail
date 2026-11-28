@@ -62,6 +62,7 @@ export { TabsUi, TabRow } from "components/workspace-navigation.slint";
 import { TabsUi } from "components/workspace-navigation.slint";
 import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
+import { SidebarStyle } from "components/sidebar-row.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
 import { NoticeToast } from "components/notice-toast.slint";
@@ -1552,7 +1553,8 @@ export component AppWindow inherits Window {
     // "automatic" follows the regional clock; "12h" and "24h" fix it.
     in-out property <string> time_format: "automatic";
     in property <string> time_format_sample: "13:30";
-    in-out property <bool> monochrome_sidebar_icons: false;
+    // Every sidebar follows Settings' "Monochrome sidebar icons".
+    in-out property <bool> monochrome_sidebar_icons <=> SidebarStyle.monochrome-icons;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
     in-out property <bool> unread_badge_enabled: true;
@@ -2310,6 +2312,11 @@ export component AppWindow inherits Window {
             contacts: root.contacts;
             sidebar-rows: root.contact_sidebar_rows;
             toggle-section(key, open) => { root.toggle-contact-section(key, open); }
+            // The + on Accounts, as in Mail.
+            add-account => {
+                root.settings_tab = "Accounts";
+                root.open-settings();
+            }
             query <=> root.contact_search_query;
             filter: root.contact_scope == "Favorites" ? "favorites"
                 : root.contact_scope == "Suggestions" ? "suggestions" : "all";
@@ -2406,6 +2413,10 @@ export component AppWindow inherits Window {
                 account-model: root.connected_accounts;
                 list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
                 show-settings => { root.open-settings(); }
+                add-account => {
+                    root.settings_tab = "Accounts";
+                    root.open-settings();
+                }
             }
         }
 
@@ -2460,9 +2471,8 @@ export component AppWindow inherits Window {
             muted-text: root.muted-text;
             page-bg: root.page-bg;
             secondary-text: root.secondary-text;
-            // Under the tab strip, the sidebar shares the pages' raised
-            // surface, so the Settings tab opens into one color.
-            sidebar-bg: root.top-bar ? root.surface-raised : root.sidebar-bg;
+            // The same sidebar as every workspace's.
+            sidebar-bg: root.sidebar-bg;
             surface: root.surface;
             surface-raised: root.surface-raised;
             title-color: root.title-color;

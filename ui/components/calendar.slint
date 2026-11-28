@@ -1,4 +1,5 @@
 import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
+import { SidebarAccountHeading, SidebarColorToggle, SidebarGroupLabel } from "sidebar-controls.slint";
 import { CalendarBar, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarTimedBlock, CalendarWeekDay } from "../models.slint";
 import { Button } from "button.slint";
 import { Tabs } from "tabs.slint";
@@ -8,7 +9,7 @@ import { ConfirmationDialog } from "confirmation-dialog.slint";
 import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
-import { CollapsibleWorkspaceSidebar, CompactPageHeader, WorkspaceMiniHeading } from "workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, CompactPageHeader } from "workspace-layout.slint";
 import { CalendarAgenda, CalendarAgendaFilter } from "calendar-agenda.slint";
 import { CalendarAgendaRow, CalendarAgendaFilterRow } from "../models.slint";
 import { ScrollFade } from "scroll-fade.slint";
@@ -178,8 +179,8 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             height: 30px;
             text: root.month-title;
             color: root.title-color;
-            font-size: TypeScale.body-large;
-            font-weight: 700;
+            font-size: SidebarStyle.label-size;
+            font-weight: SidebarStyle.selected-weight;
             overflow: elide;
             vertical-alignment: center;
         }
@@ -281,46 +282,54 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             background: root.subtle-border-color;
         }
 
-        WorkspaceMiniHeading {
+        SidebarGroupLabel {
             x: LayoutMetrics.sidebar-inset;
-            y: 308px;
+            y: 300px;
             width: parent.width - 2 * LayoutMetrics.sidebar-inset;
+            first: true;
             label: @tr("MY CALENDARS");
             label-color: root.muted-color;
         }
+
+        // An account's name and address, as tall as in the other sidebars.
+        account-name-probe := Text { visible: false; text: "Ag"; font-size: SidebarStyle.label-size; font-weight: SidebarStyle.selected-weight; }
+        account-detail-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; }
 
         source-scroll := ListView {
             // Keep a direct ListView repeater; Slint does not
             // virtualize through a wrapper or inherited ListView.
             content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
-            x: 0px;
-            y: 330px;
-            width: parent.width - LayoutMetrics.divider-width;
+            x: LayoutMetrics.sidebar-inset;
+            y: 300px + SidebarStyle.group-label-height + SidebarStyle.row-gap;
+            width: parent.width - LayoutMetrics.sidebar-inset - LayoutMetrics.divider-width;
             height: max(0px, parent.height - self.y);
             content-y <=> root.source-scroll-y;
             for calendar in root.sources: Rectangle {
                 width: max(0px, source-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                private property <length> row-y: calendar.group-start ? 26px : 0px;
-                height: row-y + 34px;
-                if calendar.group-start: Text {
-                    x: 12px;
-                    y: 3px;
-                    width: parent.width - 24px;
-                    height: 18px;
-                    text: calendar.email != "" ? calendar.email : calendar.account-name;
-                    color: root.muted-color;
-                    font-size: TypeScale.micro;
-                    font-weight: 600;
-                    overflow: elide;
-                    vertical-alignment: center;
+                // An account's first calendar carries the account's heading.
+                private property <length> heading-height: calendar.email == "" || calendar.account-name == "" ? SidebarStyle.row-height
+                    : 7px + max(20px, account-name-probe.preferred-height) + max(15px, account-detail-probe.preferred-height);
+                private property <length> row-y: calendar.group-start ? self.heading-height + SidebarStyle.row-gap : 0px;
+                height: self.row-y + SidebarStyle.row-height + SidebarStyle.row-gap;
+
+                if calendar.group-start: SidebarAccountHeading {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    label: calendar.account-name != "" ? calendar.account-name : calendar.email;
+                    detail: calendar.account-name != "" ? calendar.email : "";
+                    avatar: calendar.initials;
+                    avatar-image: calendar.avatar;
+                    has-avatar-image: calendar.has-avatar;
+                    body-color: root.title-color;
+                    muted-color: root.muted-color;
                 }
+
                 row-background := SidebarRowSurface {
-                    x: 4px;
+                    x: 0px;
                     y: parent.row-y;
-                    width: parent.width - 8px;
-                    height: 32px;
-                    hover-background: root.control-hover-color;
+                    width: parent.width;
                     hovered: calendar-hit.has-hover;
                     calendar-hit := TouchArea {
                         accessible-role: button;
@@ -330,9 +339,16 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                         mouse-cursor: pointer;
                     }
 
+                    SidebarColorToggle {
+                        x: SidebarStyle.icon-left;
+                        y: (parent.height - self.height) / 2;
+                        calendar-color: root.calendar-color(calendar.color-index);
+                        checked: calendar.enabled;
+                    }
+
                     Text {
-                        x: 34px;
-                        width: parent.width - 62px;
+                        x: SidebarStyle.icon-left + SidebarStyle.label-offset;
+                        width: max(0px, parent.width - self.x - 30px);
                         height: parent.height;
                         text: calendar.name != "" ? calendar.name : @tr("Calendar");
                         color: root.body-color;
@@ -343,32 +359,21 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                         vertical-alignment: center;
                     }
 
-                    Text {
-                        visible: calendar-hit.has-hover;
-                        x: parent.width - 25px;
-                        width: 17px;
-                        height: parent.height;
-                        text: "⋯";
-                        color: root.muted-color;
-                        font-size: TypeScale.secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle {
-                        x: 10px;
-                        y: 9px;
-                        width: 14px;
-                        height: 14px;
-                        border-radius: 4px;
-                        border-width: calendar.enabled ? 0px : 2px;
-                        border-color: root.calendar-color(calendar.color-index);
-                        background: calendar.enabled ? root.calendar-color(calendar.color-index) : transparent;
+                    // The row opens the calendar's details.
+                    if calendar-hit.has-hover: Image {
+                        x: parent.width - 26px;
+                        y: (parent.height - self.height) / 2;
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../icons/lucide/outline/kebab-horizontal.svg");
+                        colorize: root.muted-color;
+                        image-fit: contain;
+                        accessible-role: none;
                     }
 
                     toggle-hit := TouchArea {
-                        x: 2px;
-                        width: 30px;
+                        x: SidebarStyle.icon-left - 6px;
+                        width: SidebarStyle.icon-size + 12px;
                         height: parent.height;
                         accessible-role: checkbox;
                         accessible-label: calendar.enabled

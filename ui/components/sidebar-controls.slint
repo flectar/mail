@@ -4,7 +4,8 @@ import { AccountProblem, AccountStatus, MailDragApi } from "../models.slint";
 import { AccountStatusPanel, AccountStatusText } from "account-status.slint";
 import { ActivitySpinner } from "activity-spinner.slint";
 import { Avatar } from "avatar.slint";
-import { IconButton } from "controls.slint";
+import { IconButton, LineEdit } from "controls.slint";
+import { WorkspaceMiniHeading } from "workspace-layout.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
@@ -40,7 +41,7 @@ component SidebarCountBadge inherits Rectangle {
     visible: root.count != "";
     width: min(52px, max(24px, count-label.preferred-width + 12px));
     height: 20px;
-    border-radius: 7px;
+    border-radius: LayoutMetrics.small-radius;
     background: root.selected
         ? root.accent-color.transparentize(0.78)
         : root.muted-color.transparentize(0.86);
@@ -118,7 +119,7 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> selected: false;
     in property <bool> label-has-emoji: false;
     in property <string> label-path: root.label;
-    in property <length> row-height: 28px;
+    in property <length> row-height: SidebarStyle.row-height;
     in property <length> left-padding: SidebarStyle.icon-left;
     in property <int> account-id: -1;
     in property <int> folder-id: -1;
@@ -172,11 +173,11 @@ export component SidebarItem inherits SidebarRowSurface {
 
     height: root.visible ? root.row-height : 0px;
     idle-background: root.sidebar-background;
-    hover-background: root.selection-background;
+    active-background: root.selection-background;
     hovered: row-hit.has-hover;
     active: root.selected || mail-drop-target.has-drag;
-    border-width: mail-drop-target.has-drag ? 2px : 0px;
-    border-color: root.accent-color;
+    face-border-width: mail-drop-target.has-drag ? 2px : 0px;
+    face-border-color: root.accent-color;
 
     SidebarIcon {
         x: root.left-padding;
@@ -371,6 +372,8 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     in property <int> label-font-weight: SidebarStyle.selected-weight;
     in property <length> left-padding: 4px;
     in property <bool> folder-row-style: false;
+    // A phone's drawer passes rows a finger can hit.
+    in property <length> row-height: SidebarStyle.row-height;
     // An account's heading offers that account's actions on right-click.
     in property <bool> account-menu: false;
     in property <bool> can-check-mail: true;
@@ -399,7 +402,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     callback account-settings();
     callback sign-in();
 
-    height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 7px + max(20px, header-label.preferred-height) + header-detail.height;
+    height: root.folder-row-style || root.detail == "" ? root.row-height : 7px + max(20px, header-label.preferred-height) + header-detail.height;
     idle-background: root.sidebar-background;
     hovered: header-hit.has-hover;
 
@@ -592,6 +595,174 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
                     root.account-settings();
                 }
             }
+        }
+    }
+}
+
+// A group's label over its rows, in small capitals. A group after
+// another one keeps `SidebarStyle.group-gap` above its label. An action, such
+// as adding an account, sits at its end.
+export component SidebarGroupLabel inherits Rectangle {
+    in property <string> label;
+    in property <color> label-color: AppTheme.secondary;
+    in property <bool> first: false;
+    in property <bool> has-action: false;
+    in property <image> action-icon: @image-url("../icons/lucide/outline/plus.svg");
+    in property <string> action-tooltip;
+    callback action();
+
+    height: (root.first ? 0px : SidebarStyle.group-gap) + SidebarStyle.group-label-height;
+
+    Text {
+        x: 0px;
+        y: parent.height - SidebarStyle.group-label-height;
+        width: parent.width - (root.has-action ? 28px : 0px);
+        height: SidebarStyle.group-label-height - SidebarStyle.group-label-below;
+        text: root.label;
+        color: root.label-color;
+        font-size: TypeScale.overline;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+
+    if root.has-action : IconButton {
+        x: parent.width - self.width;
+        y: parent.height - SidebarStyle.group-label-height + (SidebarStyle.group-label-height - SidebarStyle.group-label-below - self.height) / 2;
+        width: 24px;
+        height: 24px;
+        icon: root.action-icon;
+        icon-size: 16px;
+        icon-color: AppTheme.secondary;
+        tooltip-text: root.action-tooltip;
+        clicked => { root.action(); }
+    }
+}
+
+// The search under a sidebar's main button, or at its head: Mail's folder
+// finder and Settings' search are this one field.
+export component SidebarSearch inherits Rectangle {
+    in-out property <string> query;
+    in property <string> placeholder;
+    in property <string> clear-tooltip;
+    in property <color> muted-color: AppTheme.muted;
+    in property <color> hover-background: AppTheme.muted-control-bg;
+    callback edited(string);
+
+    height: LayoutMetrics.small-control-height;
+
+    LineEdit {
+        width: parent.width;
+        height: parent.height;
+        text <=> root.query;
+        placeholder-text: root.placeholder;
+        input-label: root.placeholder;
+        show-leading-icon: true;
+        leading-icon: @image-url("../icons/lucide/outline/search.svg");
+        leading-icon-color: root.muted-color;
+        trailing-content-width: root.query == "" ? 0px : 32px;
+        edited(value) => { root.edited(value); }
+    }
+
+    if root.query != "" : IconButton {
+        x: parent.width - 32px;
+        width: 32px;
+        height: parent.height;
+        icon: @image-url("../icons/lucide/outline/x.svg");
+        icon-size: 14px;
+        icon-color: root.muted-color;
+        hover-background: root.hover-background;
+        tooltip-text: root.clear-tooltip;
+        clicked => {
+            root.query = "";
+            root.edited("");
+        }
+    }
+}
+
+// An account's name over its rows where they don't fold: Calendar's
+// accounts. It lines up with SidebarSectionHeader's avatar, name and address.
+export component SidebarAccountHeading inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    in property <string> avatar;
+    in property <image> avatar-image;
+    in property <bool> has-avatar-image: false;
+    in property <color> body-color: AppTheme.body;
+    in property <color> muted-color: AppTheme.muted;
+    in property <color> avatar-background: AppTheme.muted-control-bg;
+    private property <length> icon-left: SidebarStyle.icon-left;
+    private property <length> label-left: root.icon-left + SidebarStyle.label-offset;
+
+    height: root.detail == "" ? SidebarStyle.row-height : 7px + max(20px, heading-label.preferred-height) + heading-detail.height;
+
+    Avatar {
+        x: root.icon-left + (SidebarStyle.icon-size - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: 22px;
+        source: root.avatar-image;
+        has-source: root.has-avatar-image;
+        fallback: root.avatar;
+        background-color: root.has-avatar-image ? #ffffff : root.avatar-background;
+        foreground-color: root.body-color;
+    }
+
+    heading-label := Text {
+        x: root.label-left;
+        y: root.detail == "" ? 0px : 4px;
+        width: parent.width - self.x - 8px;
+        height: root.detail == "" ? parent.height : max(20px, self.preferred-height);
+        text: root.label;
+        color: root.body-color;
+        font-size: SidebarStyle.label-size;
+        font-weight: SidebarStyle.selected-weight;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    heading-detail := Text {
+        visible: root.detail != "";
+        x: root.label-left;
+        y: heading-label.y + heading-label.height - 2px;
+        width: parent.width - self.x - 8px;
+        height: max(15px, self.preferred-height);
+        text: root.detail;
+        color: root.muted-color;
+        font-size: TypeScale.caption;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// A calendar's show and hide in the sidebar: a check box in the calendar's
+// own color, sized and rounded like the app's CheckBox. Its row owns the
+// pointer area and the accessible check box.
+export component SidebarColorToggle inherits Rectangle {
+    in property <color> calendar-color;
+    in property <bool> checked: true;
+
+    width: SidebarStyle.icon-size;
+    height: SidebarStyle.icon-size;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: max(2px, LayoutMetrics.corner-base * 0.4);
+        background: root.checked ? root.calendar-color : transparent;
+        border-width: root.checked ? 0px : 1.5px;
+        border-color: root.calendar-color;
+
+        if root.checked : Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            source: @image-url("../icons/lucide/outline/check.svg");
+            colorize: white;
+            image-fit: contain;
+            accessible-role: none;
         }
     }
 }

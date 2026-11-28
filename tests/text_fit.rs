@@ -657,7 +657,6 @@ fn apply_fixture(app: &AppWindow) {
     app.set_contact_sidebar_rows(model(
         [
             ContactSidebarRowKind::UnifiedHeading,
-            ContactSidebarRowKind::UnifiedSection,
             ContactSidebarRowKind::All,
             ContactSidebarRowKind::Favorites,
             ContactSidebarRowKind::Suggestions,

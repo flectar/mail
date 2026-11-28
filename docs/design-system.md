@@ -96,6 +96,42 @@ control's edge.
 **Settings rows** (`settings-components.slint`) put a select or a switch on
 their title's line, with a description under it.
 
+## Sidebars
+
+Mail, Calendar, Files, Contacts and Settings build their sidebars from the
+same parts, in `sidebar-row.slint` and `sidebar-controls.slint`, with the
+measures in `SidebarStyle`. Every sidebar has the same background.
+
+- The top holds the workspace's primary button, such as New email, and
+  `SidebarSearch` when the sidebar can be searched. Settings has no primary
+  button, so its search is at the top.
+- `SidebarGroupLabel` names a group in 11 px small capitals in the secondary
+  text color: ALL ACCOUNTS for the rows that span every account, ACCOUNTS above
+  the accounts, MY CALENDARS and SETTINGS. It keeps 12 px above it after
+  another group and 12 px between its text and the first row, so it reads as
+  part of the rows below. An action that adds to the group, such as the + that
+  adds an account, sits at the end of its label.
+- A row (`SidebarItem`, or `SidebarRowSurface` for rows without a folder's menu)
+  is 32 px tall, with 2 px between rows, and 44 px in a phone's drawer. Its
+  18 px icon sits after a 22 px gutter, which holds a folder's disclosure arrow,
+  and its label starts 30 px after that. A count sits in a badge at the end.
+  Hover is a neutral fill, and the one selected row takes the soft accent and a
+  semibold label. Rows inside another row, such as subfolders or a storage's
+  spaces, indent by 16 px.
+- An account heads its rows with its picture or initials, its name and its
+  address (`SidebarSectionHeader`, or `SidebarAccountHeading` where the rows
+  don't fold).
+- Icons take their own color, such as yellow for Starred, unless Settings'
+  "Monochrome sidebar icons" is on. Then they are muted, and the selected row's
+  icon takes the accent. `SidebarStyle.icon-color` applies that rule. A
+  calendar's color shows in its checkbox in both modes, since it's the key to
+  the calendar's events.
+- Rows end where the primary button ends. A list reaches into the sidebar's
+  12 px margin, so its scroll bar, which Slint draws over a list's edge, sits
+  there instead of over the rows' counts.
+- Actions that aren't places, such as Files' Sharing activity and Transfers,
+  sit in a foot under a divider.
+
 ## On phones
 
 - Controls are 44 px tall, and a row of buttons stacks into full-width buttons

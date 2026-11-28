@@ -592,17 +592,13 @@ fn make_contact_sidebar_rows(
         open: !collapsed.contains(key),
         ..Default::default()
     };
+    // As in Mail, the unified rows sit under their group's label.
     let mut rows = vec![
         row(Kind::UnifiedHeading, "unified-heading"),
-        row(Kind::UnifiedSection, "unified"),
+        row(Kind::All, "all"),
+        row(Kind::Favorites, "favorites"),
+        row(Kind::Suggestions, "suggestions"),
     ];
-    if !collapsed.contains("unified") {
-        rows.extend([
-            row(Kind::All, "all"),
-            row(Kind::Favorites, "favorites"),
-            row(Kind::Suggestions, "suggestions"),
-        ]);
-    }
     if !accounts.is_empty() {
         rows.push(row(Kind::AccountsHeading, "accounts-heading"));
     }
@@ -716,11 +712,10 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let collapsed = HashSet::from(["account:1".to_owned(), "unified".to_owned()]);
+        let collapsed = HashSet::from(["account:1".to_owned()]);
         let rows = make_contact_sidebar_rows(accounts.clone(), &collapsed);
         assert!(
-            !rows
-                .iter()
+            rows.iter()
                 .any(|row| matches!(row.kind, Kind::All | Kind::Favorites))
         );
         assert!(

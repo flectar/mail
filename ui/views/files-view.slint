@@ -3,13 +3,14 @@ import { InfiniteScrollController } from "../components/infinite-scroll-controll
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { HorizontalBox, VerticalBox, ListView, ScrollView } from "std-widgets.slint";
 import { Select } from "../components/select.slint";
-import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings, ServiceIconPalette, SettingsIconPalette } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { AccountRow } from "../models.slint";
 import { DialogArea } from "../components/window-backdrop.slint";
-import { DrawerSettingsItem, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { DrawerSettingsItem, SidebarGroupLabel, SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { SidebarStyle } from "../components/sidebar-row.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { CheckBox, FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -76,21 +77,26 @@ export global FilesUi {
     callback command(string, string, string);
 }
 
-// Keep feature navigation on the same shared row surface as Mail and Contacts.
+// Files' rows are the shared sidebar row. `own-color` is the icon's color
+// unless the sidebars are monochrome.
 component FilesSidebarItem inherits SidebarItem {
+    in property <color> own-color: AppTheme.secondary;
     sidebar-background: AppTheme.sidebar-bg;
     selection-background: AppTheme.accent-soft;
     accent-color: AppTheme.accent;
     body-color: AppTheme.body;
     muted-color: AppTheme.muted;
-    icon-color: root.selected ? AppTheme.accent : AppTheme.secondary;
-    row-height: 32px;
+    icon-color: SidebarStyle.icon-color(root.own-color, root.selected);
 }
 
 component FilesNavigation inherits Rectangle {
     in property <[AccountRow]> account-model;
+    // In a phone's drawer, rows a finger can hit.
+    in property <bool> touch: false;
+    private property <length> touch-row: root.touch ? LayoutMetrics.touch-target : SidebarStyle.row-height;
     callback navigate(string, string, string);
     callback setup;
+    callback add-account;
             VerticalBox {
                 padding-top: LayoutMetrics.sidebar-action-top;
                 padding-left: LayoutMetrics.sidebar-inset;
@@ -104,58 +110,101 @@ component FilesNavigation inherits Rectangle {
                     icon: @image-url("../icons/lucide/outline/plus.svg");
                     enabled: !FilesUi.busy; clicked => { root.setup(); }
                 }
-                ScrollView {
-                    vertical-stretch: 1; content-width: self.visible-width;
-                    horizontal-scrollbar-policy: always-off;
-                    VerticalBox {
-                        padding: 0px; spacing: 6px;
-                        WorkspaceMiniHeading { label: @tr("UNIFIED"); }
-                        FilesSidebarItem {
-                            label: @tr("Email attachments"); left-padding: 12px;
-                            icon: @image-url("../icons/lucide/filled/paperclip.svg");
-                            selected: FilesUi.attachments && FilesUi.account == 0;
-                            clicked(scope) => { root.navigate("account", "0", "attachments"); }
-                        }
-                        WorkspaceMiniHeading { label: @tr("ACCOUNTS"); }
-                        for account in root.account-model : VerticalBox {
-                            padding: 0px; spacing: 3px;
-                            private property <bool> expanded: true;
-                            SidebarSectionHeader {
-                                label: account.name; detail: account.email;
-                                avatar: account.initials; avatar-image: account.avatar-small;
-                                has-avatar: true; has-avatar-image: account.has-avatar;
-                                open: parent.expanded;
-                                sidebar-background: AppTheme.sidebar-bg;
-                                body-color: AppTheme.body; muted-color: AppTheme.muted;
-                                icon-color: AppTheme.secondary; hover-background: AppTheme.muted-control-bg;
-                                toggled(open) => { parent.expanded = open; }
-                            }
-                            if self.expanded : FilesSidebarItem {
+                Rectangle {
+                    vertical-stretch: 1;
+                    // It reaches into the sidebar's margin, where the scroll bar goes.
+                    ScrollView {
+                        x: 0px; width: parent.width + LayoutMetrics.sidebar-inset; height: parent.height;
+                        content-width: self.visible-width;
+                        horizontal-scrollbar-policy: always-off;
+                        VerticalBox {
+                            padding: 0px; padding-right: LayoutMetrics.sidebar-scrollbar-gutter;
+                            spacing: SidebarStyle.row-gap;
+                            SidebarGroupLabel { first: true; label: @tr("ALL ACCOUNTS"); }
+                            FilesSidebarItem {
+                                row-height: root.touch-row;
                                 label: @tr("Email attachments");
                                 icon: @image-url("../icons/lucide/filled/paperclip.svg");
-                                selected: FilesUi.attachments && FilesUi.selected-account-id == account.id;
-                                clicked(scope) => { root.navigate("account-id", "" + account.id, "attachments"); }
+                                own-color: MailIconPalette.inbox;
+                                selected: FilesUi.attachments && FilesUi.account == 0;
+                                clicked(scope) => { root.navigate("account", "0", "attachments"); }
                             }
-                            if self.expanded : FilesSidebarItem {
-                                label: @tr("Server storage");
-                                icon: @image-url("../icons/lucide/filled/files.svg");
-                                selected: !FilesUi.attachments && FilesUi.selected-account-id == account.id;
-                                clicked(scope) => { root.navigate("account-id", "" + account.id, "storage"); }
+                            SidebarGroupLabel { label: @tr("ACCOUNTS"); has-action: true; action-tooltip: @tr("Add account"); action => { root.add-account(); } }
+                            for account in root.account-model : VerticalBox {
+                                padding: 0px; spacing: SidebarStyle.row-gap;
+                                private property <bool> expanded: true;
+                                // The account whose storage shows lists its spaces
+                                // under Server storage, and only the space is selected.
+                                private property <bool> storage-shown: !FilesUi.attachments && FilesUi.selected-account-id == account.id;
+                                SidebarSectionHeader {
+                                    row-height: root.touch-row;
+                                    label: account.name; detail: account.email;
+                                    avatar: account.initials; avatar-image: account.avatar-small;
+                                    has-avatar: true; has-avatar-image: account.has-avatar;
+                                    open: parent.expanded;
+                                    sidebar-background: AppTheme.sidebar-bg;
+                                    body-color: AppTheme.body; muted-color: AppTheme.muted;
+                                    icon-color: AppTheme.secondary; hover-background: AppTheme.muted-control-bg;
+                                    toggled(open) => { parent.expanded = open; }
+                                }
+                                if self.expanded : FilesSidebarItem {
+                                    row-height: root.touch-row;
+                                    label: @tr("Email attachments");
+                                    icon: @image-url("../icons/lucide/filled/paperclip.svg");
+                                    own-color: MailIconPalette.inbox;
+                                    selected: FilesUi.attachments && FilesUi.selected-account-id == account.id;
+                                    clicked(scope) => { root.navigate("account-id", "" + account.id, "attachments"); }
+                                }
+                                if self.expanded : FilesSidebarItem {
+                                    row-height: root.touch-row;
+                                    label: @tr("Server storage");
+                                    icon: @image-url("../icons/lucide/filled/files.svg");
+                                    own-color: SettingsIconPalette.storage;
+                                    selected: parent.storage-shown && FilesUi.storage-accounts.length == 0;
+                                    clicked(scope) => { root.navigate("account-id", "" + account.id, "storage"); }
+                                }
+                                for space[index] in self.expanded && self.storage-shown ? FilesUi.storage-accounts : [] : FilesSidebarItem {
+                                    row-height: root.touch-row;
+                                    label: space;
+                                    left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
+                                    icon: @image-url("../icons/lucide/filled/file-directory.svg");
+                                    own-color: MailIconPalette.folders;
+                                    selected: index == FilesUi.storage-account;
+                                    clicked(scope) => { root.navigate("space", "" + index, ""); }
+                                }
                             }
+                            Rectangle { vertical-stretch: 1; }
                         }
-                        if !FilesUi.attachments && FilesUi.storage-accounts.length > 0 : WorkspaceMiniHeading { label: @tr("STORAGE SPACE"); }
-                        for space[index] in FilesUi.storage-accounts : FilesSidebarItem {
-                            visible: !FilesUi.attachments;
-                            label: space; icon: @image-url("../icons/lucide/filled/file-directory.svg");
-                            selected: index == FilesUi.storage-account;
-                            clicked(scope) => { root.navigate("space", "" + index, ""); }
-                        }
-                        Rectangle { vertical-stretch: 1; }
                     }
                 }
-                if !FilesUi.attachments : Text { text: FilesUi.quota; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
-                if !FilesUi.attachments && FilesUi.connected && !FilesUi.webdav : Button { text: @tr("Sharing activity"); enabled: !FilesUi.busy; clicked => { root.navigate("notifications", "", ""); } }
-                if !FilesUi.attachments : Button { text: @tr("Transfers"); enabled: !FilesUi.busy; clicked => { root.navigate("transfers", "", ""); } }
+                // The storage's note and activity, at the foot.
+                if !FilesUi.attachments : VerticalBox {
+                    // Its wrapping note would otherwise let it take half the sidebar.
+                    vertical-stretch: 0;
+                    padding: 0px;
+                    spacing: SidebarStyle.row-gap;
+                    Rectangle { height: 1px; background: AppTheme.border; }
+                    Rectangle { height: 6px; }
+                    if FilesUi.connected && !FilesUi.webdav : FilesSidebarItem {
+                        row-height: root.touch-row;
+                        label: @tr("Sharing activity");
+                        icon: @image-url("../icons/lucide/filled/bell.svg");
+                        own-color: SettingsIconPalette.notifications;
+                        interactive: !FilesUi.busy;
+                        clicked(scope) => { root.navigate("notifications", "", ""); }
+                    }
+                    FilesSidebarItem {
+                        row-height: root.touch-row;
+                        label: @tr("Transfers");
+                        icon: @image-url("../icons/lucide/filled/cloud-sync.svg");
+                        own-color: ServiceIconPalette.sync;
+                        interactive: !FilesUi.busy;
+                        clicked(scope) => { root.navigate("transfers", "", ""); }
+                    }
+                    if FilesUi.quota != "" : Text {
+                        text: FilesUi.quota; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption;
+                    }
+                }
 
             }
 }
@@ -168,6 +217,7 @@ export component FilesView inherits Rectangle {
     in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
     callback list-pane-width-committed(length);
     callback show-settings;
+    callback add-account;
     in property <[AccountRow]> account-model;
     in-out property <bool> sidebar-collapsed: false;
     in-out property <bool> navigation-open <=> FilesUi.navigation-open;
@@ -291,6 +341,7 @@ export component FilesView inherits Rectangle {
             if !root.compact && !root.sidebar-collapsed : FilesNavigation {
                 width: parent.width; height: parent.height;
                 account-model: root.account-model;
+                add-account => { root.add-account(); }
                 navigate(action, value, scope) => { root.navigate(action, value, scope); }
                 setup => { root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
             }
@@ -565,7 +616,7 @@ export component FilesView inherits Rectangle {
             VerticalBox {
                 padding: 0px; spacing: 0px;
                 WorkspaceTitleRow { title: @tr("File sources"); horizontal-inset: 12px; Button { text: @tr("Close"); clicked => { root.navigation-open = false; } } }
-                FilesNavigation { vertical-stretch: 1; account-model: root.account-model;
+                FilesNavigation { vertical-stretch: 1; account-model: root.account-model; touch: true; add-account => { root.navigation-open = false; root.add-account(); }
                     navigate(action, value, scope) => { root.navigate(action, value, scope); }
                     setup => { root.navigation-open = false; root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
                 }

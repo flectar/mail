@@ -585,6 +585,10 @@ export struct CalendarSourceRow {
     name: string,
     account_name: string,
     email: string,
+    // The account's initials and picture, as the other sidebars show them.
+    initials: string,
+    avatar: image,
+    has_avatar: bool,
     provider: string,
     color: string,
     color_index: int,
@@ -657,7 +661,7 @@ export struct ContactAccountRow {
     selected: bool,
 }
 
-export enum ContactSidebarRowKind { unified-heading, unified-section, all, favorites, suggestions, accounts-heading, account, contacts, hint }
+export enum ContactSidebarRowKind { unified-heading, all, favorites, suggestions, accounts-heading, account, contacts, hint }
 export struct ContactSidebarRow {
     key: string,
     kind: ContactSidebarRowKind,
